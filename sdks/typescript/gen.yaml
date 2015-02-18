@@ -1,0 +1,7 @@
+configVersion: 2.0.0
+generation:
+  sdkClassName: AgentControlSDK
+  maintainOpenAPIOrder: true
+  usageSnippets:
+    optionalPropertyRendering: withExample
+    sdkInitStyle: constructor
