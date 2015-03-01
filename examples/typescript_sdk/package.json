@@ -1,0 +1,13 @@
+{
+  "name": "agent-control-typescript-sdk-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/quickstart.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "agent-control": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
