@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""Build packages for PyPI distribution.
+
+This script builds all publishable packages. For SDK and server, it copies internal
+packages (models, engine, telemetry) into the source directories before building,
+then cleans up afterward. This allows the published wheels to be self-contained.
+
+Usage:
+    python scripts/build.py [models|evaluators|sdk|server|contrib|all|<contrib-name>]
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from contrib_packages import ContribPackage, discover_contrib_packages
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def get_global_version() -> str:
+    """Read version from root pyproject.toml."""
+    content = (ROOT / "pyproject.toml").read_text()
+    match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    if not match:
+        raise ValueError("Could not find version in root pyproject.toml")
+    return match.group(1)
+
+
+def set_package_version(pyproject_path: Path, version: str) -> None:
+    """Update version in a pyproject.toml file."""
+    content = pyproject_path.read_text()
+    updated = re.sub(
+        r'^version\s*=\s*"[^"]+"',
+        f'version = "{version}"',
+        content,
+        flags=re.MULTILINE,
+    )
+    pyproject_path.write_text(updated)
+
+
+def sync_dependency_floors(pyproject_path: Path, dependency_names: list[str], version: str) -> None:
+    """Update internal dependency lower bounds to the release version."""
+    content = pyproject_path.read_text()
+    updated = content
+    for dependency_name in dependency_names:
+        updated = re.sub(
+            rf'("{re.escape(dependency_name)}\s*>=\s*)([^",;\]\s]+)',
+            rf"\g<1>{version}",
+            updated,
+        )
+
+    if updated != content:
+        pyproject_path.write_text(updated)
+
+
+def inject_bundle_metadata(init_file: Path, package_name: str, version: str) -> None:
+    """Add bundling metadata to __init__.py for conflict detection."""
+    content = init_file.read_text()
+
+    if "__bundled_by__" in content:
+        return
+
+    metadata = f'''__bundled_by__ = "{package_name}"
+__bundled_version__ = "{version}"
+
+'''
+    init_file.write_text(metadata + content)
+
+
+def clean_dist_dir(package_dir: Path) -> Path:
+    """Remove any previous build output and return the dist directory path."""
+    dist_dir = package_dir / "dist"
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
+    return dist_dir
+
+
+def build_python_package(
+    distribution_name: str,
+    package_dir: Path,
+    version: str,
+    dependency_names: list[str] | None = None,
+) -> None:
+    """Build a standalone Python package into its local dist directory."""
+    print(f"Building {distribution_name} v{version}")
+    dist_dir = clean_dist_dir(package_dir)
+    pyproject_path = package_dir / "pyproject.toml"
+    set_package_version(pyproject_path, version)
+    if dependency_names:
+        sync_dependency_floors(pyproject_path, dependency_names, version)
+    subprocess.run(["uv", "build", "-o", str(dist_dir)], cwd=package_dir, check=True)
+    print(f"  Built {distribution_name} v{version}")
+
+
+def discover_contrib_by_name() -> dict[str, ContribPackage]:
+    """Return discovered contrib packages keyed by contrib name."""
+    return {package.name: package for package in discover_contrib_packages()}
+
+
+def discover_contrib_distribution_names() -> list[str]:
+    """Return the distribution names for all discovered contrib packages."""
+    return [package.package for package in discover_contrib_packages()]
+
+
+def build_models() -> None:
+    """Build agent-control-models (standalone, no vendoring needed)."""
+    build_python_package("agent-control-models", ROOT / "models", get_global_version())
+
+
+def build_sdk() -> None:
+    """Build agent-control-sdk with vendored packages."""
+    version = get_global_version()
+    sdk_dir = ROOT / "sdks" / "python"
+    sdk_src = sdk_dir / "src"
+
+    print(f"Building agent-control-sdk v{version}")
+
+    for pkg in ["agent_control_models", "agent_control_engine", "agent_control_telemetry"]:
+        target = sdk_src / pkg
+        if target.exists():
+            shutil.rmtree(target)
+
+    dist_dir = clean_dist_dir(sdk_dir)
+
+    shutil.copytree(
+        ROOT / "models" / "src" / "agent_control_models",
+        sdk_src / "agent_control_models",
+    )
+    shutil.copytree(
+        ROOT / "engine" / "src" / "agent_control_engine",
+        sdk_src / "agent_control_engine",
+    )
+    shutil.copytree(
+        ROOT / "telemetry" / "src" / "agent_control_telemetry",
+        sdk_src / "agent_control_telemetry",
+    )
+
+    inject_bundle_metadata(
+        sdk_src / "agent_control_models" / "__init__.py",
+        "agent-control-sdk",
+        version,
+    )
+    inject_bundle_metadata(
+        sdk_src / "agent_control_engine" / "__init__.py",
+        "agent-control-sdk",
+        version,
+    )
+    inject_bundle_metadata(
+        sdk_src / "agent_control_telemetry" / "__init__.py",
+        "agent-control-sdk",
+        version,
+    )
+
+    sdk_pyproject = sdk_dir / "pyproject.toml"
+    set_package_version(sdk_pyproject, version)
+    sync_dependency_floors(
+        sdk_pyproject,
+        ["agent-control-evaluators", *discover_contrib_distribution_names()],
+        version,
+    )
