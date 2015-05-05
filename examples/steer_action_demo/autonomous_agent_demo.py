@@ -171,3 +171,177 @@ def _process_wire_transfer(
     verified_2fa: bool = False,
     manager_approved: bool = False,
     justification: str | None = None,
+    fraud_score: float | None = None
+) -> dict:
+    """Simulate wire transfer processing."""
+    # This function is a placeholder and will be wrapped by AgentControl for enforcement.
+    return {
+        "status": "completed",
+        "transaction_id": f"TXN-{hash(recipient_name) % 100000:05d}",
+        "amount": amount,
+        "destination": destination_country,
+        "recipient": recipient_name
+    } 
+
+async def process_wire_transfer(
+    amount: float,
+    destination_country: str,
+    recipient_name: str,
+    verified_2fa: bool = False,
+    manager_approved: bool = False,
+    justification: str | None = None,
+    fraud_score: float | None = None
+) -> dict:
+    """Execute wire transfer - gated by AgentControl."""
+    agent_think("Executing wire transfer...")
+    return _process_wire_transfer.invoke({
+        "amount": amount,
+        "destination_country": destination_country,
+        "recipient_name": recipient_name,
+        "verified_2fa": verified_2fa,
+        "manager_approved": manager_approved,
+        "justification": justification,
+        "fraud_score": fraud_score
+    })
+
+# Mark wrapper as tool BEFORE applying @control so tool detection works
+process_wire_transfer.name = "process_wire_transfer"  # type: ignore[attr-defined]
+process_wire_transfer.tool_name = "process_wire_transfer"  # type: ignore[attr-defined]
+process_wire_transfer = control(step_name="process_wire_transfer")(process_wire_transfer)
+
+# =============================================================================
+# AGENT LOGIC
+# =============================================================================
+
+async def parse_transfer_request(user_request: str) -> dict:
+    """Parse natural language transfer request."""
+    agent_think("Understanding your request...")
+
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    parse_prompt = f"""Parse this wire transfer request into structured data.
+
+User request: "{user_request}"
+
+Examples:
+- "Send $500 to Jane Smith" -> {{"amount": 500, "destination_country": "United States", "recipient_name": "Jane Smith"}}
+- "Wire $15000 to contractor in UK" -> {{"amount": 15000, "destination_country": "United Kingdom", "recipient_name": "contractor"}}
+- "Transfer $5k to North Korea" -> {{"amount": 5000, "destination_country": "North Korea", "recipient_name": "Unknown"}}
+
+Extract these fields:
+- amount: numeric dollar amount (e.g., 500, 15000, 5000)
+- destination_country: full country name (if not mentioned, use "United States")
+- recipient_name: person or company name (if not mentioned, use "Unknown")
+
+IMPORTANT: Return ONLY valid JSON, no markdown, no explanation:
+{{"amount": 500, "destination_country": "United States", "recipient_name": "Jane Smith"}}"""
+
+    response = await llm.ainvoke([HumanMessage(content=parse_prompt)])
+
+    import json
+    import re
+
+    try:
+        # Clean up response - remove markdown code blocks if present
+        content = response.content.strip()
+        content = re.sub(r'^```json?\s*', '', content)
+        content = re.sub(r'\s*```$', '', content)
+
+        parsed = json.loads(content)
+
+        # Validate fields
+        if not isinstance(parsed.get("amount"), (int, float)) or parsed["amount"] <= 0:
+            raise ValueError("Invalid amount")
+
+        return parsed
+
+    except Exception as e:
+        # Try regex fallback
+        import re
+
+        amount_match = re.search(r'\$?([\d,]+)k?', user_request, re.IGNORECASE)
+        amount = 1000  # default
+
+        if amount_match:
+            amount_str = amount_match.group(1).replace(',', '')
+            amount = float(amount_str)
+            if 'k' in user_request.lower() and amount < 100:
+                amount *= 1000
+
+        # Extract recipient name (words after "to")
+        recipient_match = re.search(r'to\s+([A-Za-z\s]+?)(?:\s+in|\s*$)', user_request, re.IGNORECASE)
+        recipient = recipient_match.group(1).strip() if recipient_match else "Unknown"
+
+        # Extract country
+        country_match = re.search(r'in\s+([A-Za-z\s]+?)(?:\s+for|\s*$)', user_request, re.IGNORECASE)
+        country = country_match.group(1).strip() if country_match else "United States"
+
+        return {
+            "amount": amount,
+            "destination_country": country,
+            "recipient_name": recipient
+        }
+
+
+async def process_transfer_node(state: AgentState) -> AgentState:
+    """Main processing node."""
+    request = state["transfer_request"]
+
+    # Show what we're processing
+    agent_say(f"Processing wire transfer:")
+    print(f"   💵 Amount: ${request['amount']:,.2f}")
+    print(f"   🌍 Destination: {request['destination_country']}")
+    print(f"   👤 Recipient: {request['recipient_name']}")
+
+    # Show if this is a retry with corrected flags
+    if state.get("verified_2fa") or state.get("manager_approved"):
+        print(f"\n   ♻️  \033[1mRETRY WITH CORRECTIONS:\033[0m")
+        if state.get("verified_2fa"):
+            print(f"      ✓ 2FA verified")
+        if state.get("manager_approved"):
+            print(f"      ✓ Manager approved")
+        log_trace("retry", "Re-evaluating transfer with corrected authorization flags")
+
+    # Check fraud if first time
+    if state.get("fraud_score") is None:
+        fraud_score = check_fraud_score(request["amount"], request["destination_country"])
+        risk_level = "HIGH" if fraud_score > 0.7 else "MEDIUM" if fraud_score > 0.4 else "LOW"
+        print(f"   🔍 Fraud Risk: {fraud_score:.2f} ({risk_level})")
+        time.sleep(0.5)
+    else:
+        fraud_score = state["fraud_score"]
+
+    agent_think("Checking compliance controls...")
+    log_trace("agent-control", "Initiating pre-execution control evaluation")
+    agent_reason("All transfers must pass control checks before execution")
+
+    # DEBUG: Show what we're about to evaluate
+    print(f"   🔍 DEBUG: Calling process_wire_transfer with:")
+    print(f"      - step_name: 'process_wire_transfer'")
+    print(f"      - amount: ${request['amount']:,.2f}")
+    print(f"      - verified_2fa: {state.get('verified_2fa', False)}")
+    print(f"      - manager_approved: {state.get('manager_approved', False)}")
+
+    log_trace("agent-control", "Sending request to AgentControl server for evaluation")
+    log_trace("agent-control", f"Evaluating against {4} active controls")
+
+    try:
+        # Attempt transfer - AgentControl gates this
+        log_trace("execution", "Attempting wire transfer execution...")
+        result = await process_wire_transfer(
+            amount=request["amount"],
+            destination_country=request["destination_country"],
+            recipient_name=request["recipient_name"],
+            verified_2fa=state.get("verified_2fa", False),
+            manager_approved=state.get("manager_approved", False),
+            justification=state.get("justification"),
+            fraud_score=fraud_score
+        )
+
+        # Success!
+        log_trace("agent-control", "All control checks passed ✓")
+        log_trace("execution", "Wire transfer executed successfully")
+        agent_reason("Transfer complies with all controls - proceeding with execution")
+
+        # Show if this was a successful retry after steer correction
+        if state.get("verified_2fa") or state.get("manager_approved"):
