@@ -70,3 +70,39 @@ CONTROL_SPECS: list[tuple[str, dict[str, Any]]] = [
             "enabled": True,
             "execution": "server",
             "scope": {
+                "step_types": ["tool"],
+                "step_names": ["get_current_time", "get_weather"],
+                "stages": ["post"],
+            },
+            "condition": {
+                "selector": {"path": "output.note"},
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        "pattern": r"support@internal\.example|123-45-6789",
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        },
+    ),
+]
+
+
+async def _ensure_control(
+    client: AgentControlClient,
+    name: str,
+    data: dict[str, Any],
+) -> int:
+    """Create the control or update the existing definition."""
+    try:
+        result = await controls.create_control(client, name=name, data=data)
+        return int(result["control_id"])
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 409:
+            raise
+
+    control_list = await controls.list_controls(client, name=name, limit=1)
+    existing = control_list.get("controls", [])
+    if not existing:
+        raise RuntimeError(f"Control '{name}' already exists but could not be listed.")
