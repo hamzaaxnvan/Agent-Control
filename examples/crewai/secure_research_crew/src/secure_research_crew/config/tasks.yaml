@@ -1,0 +1,6 @@
+research_task:
+  description: >
+    Query the employees and projects tables to gather data about
+    engineering department staffing and active projects.
+    Use the query_database tool with proper SQL SELECT statements
+    that include LIMIT clauses.
