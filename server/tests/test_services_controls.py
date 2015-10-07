@@ -361,3 +361,184 @@ async def test_list_controls_for_agent_excludes_deleted_controls(async_db) -> No
 
     await async_db.execute(
         insert(agent_controls).values(
+            [
+                {"agent_name": agent.name, "control_id": active_control.id},
+                {"agent_name": agent.name, "control_id": deleted_control.id},
+            ]
+        )
+    )
+    await async_db.commit()
+
+    # When: listing controls for the agent
+    controls = await ControlService(async_db).list_controls_for_agent(
+        agent.name,
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+        rendered_state="all",
+        enabled_state="all",
+    )
+
+    # Then: soft-deleted controls are excluded
+    assert [control.id for control in controls] == [active_control.id]
+
+
+@pytest.mark.asyncio
+async def test_list_controls_for_agent_filters_by_rendered_and_enabled_state(async_db) -> None:
+    # Given: an agent with active, disabled, and unrendered associated controls
+    policy = Policy(name=f"policy-{uuid.uuid4()}")
+    active_control = Control(name=f"active-control-{uuid.uuid4()}", data=VALID_CONTROL_PAYLOAD)
+    disabled_payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    disabled_payload["enabled"] = False
+    disabled_control = Control(
+        name=f"disabled-control-{uuid.uuid4()}",
+        data=disabled_payload,
+    )
+    unrendered_control = Control(
+        name=f"unrendered-control-{uuid.uuid4()}",
+        data=_unrendered_template_payload(),
+    )
+    agent = Agent(name=f"agent-{uuid.uuid4()}", data={})
+    async_db.add_all([policy, active_control, disabled_control, unrendered_control, agent])
+    await async_db.flush()
+
+    await async_db.execute(
+        insert(agent_policies).values({"agent_name": agent.name, "policy_id": policy.id})
+    )
+    await async_db.execute(
+        insert(policy_controls).values({"policy_id": policy.id, "control_id": active_control.id})
+    )
+    await async_db.execute(
+        insert(agent_controls).values(
+            [
+                {"agent_name": agent.name, "control_id": disabled_control.id},
+                {"agent_name": agent.name, "control_id": unrendered_control.id},
+            ]
+        )
+    )
+    await async_db.commit()
+
+    # When: listing controls with the default active-only behavior
+    default_controls = await ControlService(async_db).list_controls_for_agent(
+        agent.name, namespace_key=DEFAULT_NAMESPACE_KEY
+    )
+
+    # Then: only rendered and enabled controls are returned
+    assert {control.name for control in default_controls} == {active_control.name}
+
+    # When: requesting disabled rendered controls
+    disabled_controls = await ControlService(async_db).list_controls_for_agent(
+        agent.name,
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+        enabled_state="disabled",
+    )
+
+    # Then: disabled rendered controls are included without unrendered drafts
+    assert {control.name for control in disabled_controls} == {disabled_control.name}
+
+    # When: requesting unrendered controls
+    unrendered_controls = await ControlService(async_db).list_controls_for_agent(
+        agent.name,
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+        rendered_state="unrendered",
+        enabled_state="all",
+    )
+
+    # Then: only unrendered drafts are returned
+    assert {control.name for control in unrendered_controls} == {unrendered_control.name}
+
+    # When: requesting the full associated set
+    all_controls = await ControlService(async_db).list_controls_for_agent(
+        agent.name,
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+        rendered_state="all",
+        enabled_state="all",
+    )
+
+    # Then: all associated controls are returned
+    assert {control.name for control in all_controls} == {
+        active_control.name,
+        disabled_control.name,
+        unrendered_control.name,
+    }
+
+    # When: requesting the impossible intersection of unrendered and enabled
+    impossible_controls = await ControlService(async_db).list_controls_for_agent(
+        agent.name,
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+        rendered_state="unrendered",
+        enabled_state="enabled",
+    )
+
+    # Then: the service returns an empty list
+    assert impossible_controls == []
+
+
+@pytest.mark.asyncio
+async def test_list_active_control_counts_by_agent_deduplicates_and_filters_inactive(
+    async_db,
+) -> None:
+    # Given: an agent with overlapping policy/direct controls plus inactive controls
+    policy = Policy(name=f"policy-{uuid.uuid4()}")
+    agent = Agent(name=f"agent-{uuid.uuid4()}", data={})
+    shared_control = Control(name=f"shared-{uuid.uuid4()}", data=VALID_CONTROL_PAYLOAD)
+    policy_only_control = Control(name=f"policy-only-{uuid.uuid4()}", data=VALID_CONTROL_PAYLOAD)
+    disabled_payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    disabled_payload["enabled"] = False
+    disabled_control = Control(name=f"disabled-{uuid.uuid4()}", data=disabled_payload)
+    deleted_control = Control(
+        name=f"deleted-{uuid.uuid4()}",
+        data=VALID_CONTROL_PAYLOAD,
+        deleted_at=dt.datetime.now(dt.UTC),
+    )
+    async_db.add_all(
+        [
+            policy,
+            agent,
+            shared_control,
+            policy_only_control,
+            disabled_control,
+            deleted_control,
+        ]
+    )
+    await async_db.flush()
+
+    await async_db.execute(
+        insert(agent_policies).values({"agent_name": agent.name, "policy_id": policy.id})
+    )
+    await async_db.execute(
+        insert(policy_controls).values(
+            [
+                {"policy_id": policy.id, "control_id": shared_control.id},
+                {"policy_id": policy.id, "control_id": policy_only_control.id},
+                {"policy_id": policy.id, "control_id": deleted_control.id},
+            ]
+        )
+    )
+    await async_db.execute(
+        insert(agent_controls).values(
+            [
+                {"agent_name": agent.name, "control_id": shared_control.id},
+                {"agent_name": agent.name, "control_id": disabled_control.id},
+            ]
+        )
+    )
+    await async_db.commit()
+
+    # When: counting active controls for the agent
+    counts = await ControlService(async_db).list_active_control_counts_by_agent(
+        [agent.name],
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+    )
+
+    # Then: active controls are deduplicated and inactive controls are excluded
+    assert counts == {agent.name: 2}
+
+
+@pytest.mark.asyncio
+async def test_remove_control_from_agent_reports_policy_inheritance(async_db) -> None:
+    # Given: a control linked both directly and through an assigned policy
+    policy = Policy(name=f"policy-{uuid.uuid4()}")
+    agent = Agent(name=f"agent-{uuid.uuid4()}", data={})
+    control = Control(name=f"control-{uuid.uuid4()}", data=VALID_CONTROL_PAYLOAD)
+    async_db.add_all([policy, agent, control])
+    await async_db.flush()
+
