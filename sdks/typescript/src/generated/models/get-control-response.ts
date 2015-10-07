@@ -47,3 +47,27 @@ export type GetControlResponse = {
   name: string;
 };
 
+/** @internal */
+export const GetControlResponseData$inboundSchema: z.ZodMiniType<
+  GetControlResponseData,
+  unknown
+> = smartUnion([
+  ControlDefinitionOutput$inboundSchema,
+  UnrenderedTemplateControl$inboundSchema,
+]);
+
+export function getControlResponseDataFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlResponseData, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlResponseData$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlResponseData' from JSON`,
+  );
+}
+
+/** @internal */
+export const GetControlResponse$inboundSchema: z.ZodMiniType<
+  GetControlResponse,
+  unknown
+> = z.pipe(
