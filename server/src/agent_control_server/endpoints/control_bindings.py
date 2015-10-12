@@ -99,3 +99,105 @@ def _require_binding_operation(
             ).get_binding_target_for_authorization_or_404(
                 namespace_key=identity.namespace_key, binding_id=binding_id
             )
+
+        context = {"target_type": target_type, "target_id": target_id}
+        try:
+            principal = await authorizer.authorize(request, operation, context)
+        except (ForbiddenError, NotFoundError) as exc:
+            # A caller cannot distinguish a binding it cannot access from a
+            # missing binding in its namespace.
+            raise ControlBindingsService.binding_not_found(binding_id) from exc
+        if principal.namespace_key != identity.namespace_key:
+            # The target grant must apply to the namespace used for the lookup.
+            raise ControlBindingsService.binding_not_found(binding_id)
+        return principal
+
+    return dependency
+
+
+def _to_response(binding: ControlBinding) -> GetControlBindingResponse:
+    return GetControlBindingResponse(
+        id=binding.id,
+        namespace_key=binding.namespace_key,
+        target_type=binding.target_type,
+        target_id=binding.target_id,
+        control_id=binding.control_id,
+        enabled=binding.enabled,
+        created_at=binding.created_at,
+        updated_at=binding.updated_at,
+    )
+
+
+@router.put(
+    "",
+    response_model=CreateControlBindingResponse,
+    summary="Create a control binding",
+    response_description="Created binding ID",
+)
+async def create_control_binding(
+    request: CreateControlBindingRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(
+        require_operation(
+            Operation.CONTROL_BINDINGS_WRITE,
+            context_builder=_binding_body_context,
+        )
+    ),
+) -> CreateControlBindingResponse:
+    """Attach a control to an opaque external target.
+
+    Each binding row is scoped to the namespace associated with the
+    authenticated request.
+    """
+    service = ControlBindingsService(db)
+    binding = await service.create_binding(
+        namespace_key=principal.namespace_key,
+        target_type=request.target_type,
+        target_id=request.target_id,
+        control_id=request.control_id,
+        enabled=request.enabled,
+    )
+    await db.commit()
+    await db.refresh(binding)
+    return CreateControlBindingResponse(binding_id=binding.id)
+
+
+@router.get(
+    "",
+    response_model=ListControlBindingsResponse,
+    summary="List control bindings",
+    response_description="Bindings matching the supplied filters",
+)
+async def list_control_bindings(
+    cursor: str | None = Query(
+        None,
+        description=(
+            "Opaque cursor returned as ``next_cursor`` on the previous page. "
+            "Pass it back unchanged to fetch the next page."
+        ),
+    ),
+    limit: int = Query(
+        _DEFAULT_LIST_LIMIT,
+        ge=1,
+        le=_MAX_LIST_LIMIT,
+        description="Maximum bindings to return (default 20, max 100).",
+    ),
+    target_type: str | None = None,
+    target_id: str | None = None,
+    control_id: int | None = None,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(
+        require_operation(
+            Operation.CONTROL_BINDINGS_READ,
+            context_builder=_binding_list_context,
+        )
+    ),
+) -> ListControlBindingsResponse:
+    """Return bindings in the request namespace with optional filters and
+    cursor-based pagination. Bindings are ordered by ID descending
+    (newest first). The cursor is opaque to clients: pass back the
+    ``next_cursor`` value verbatim to fetch the following page. The
+    storage namespace is resolved from the authenticated request.
+    """
+    parsed_cursor: int | None
+    if cursor is None:
