@@ -19,13 +19,3 @@ export type RuntimeTokenExchangeRequest = {
   targetType: string;
 };
 
-/** @internal */
-export type RuntimeTokenExchangeRequest$Outbound = {
-  target_id: string;
-  target_type: string;
-};
-
-/** @internal */
-export const RuntimeTokenExchangeRequest$outboundSchema: z.ZodMiniType<
-  RuntimeTokenExchangeRequest$Outbound,
-  RuntimeTokenExchangeRequest
