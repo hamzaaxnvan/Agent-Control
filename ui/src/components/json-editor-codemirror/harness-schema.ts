@@ -49,29 +49,3 @@ export const HARNESS_CONTROL_SCHEMA: JsonSchema = {
           anyOf: [
             { type: 'array', items: { $ref: '#/$defs/ConditionNode' } },
             { type: 'null' },
-          ],
-        },
-        not: {
-          anyOf: [{ $ref: '#/$defs/ConditionNode' }, { type: 'null' }],
-        },
-      },
-    },
-    ControlScope: {
-      type: 'object',
-      properties: {
-        step_types: {
-          anyOf: [
-            { type: 'array', items: { type: 'string' } },
-            { type: 'null' },
-          ],
-        },
-        step_names: {
-          anyOf: [
-            { type: 'array', items: { type: 'string' } },
-            { type: 'null' },
-          ],
-        },
-        step_name_regex: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        stages: {
-          anyOf: [
-            {
