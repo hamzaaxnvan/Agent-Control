@@ -20,3 +20,26 @@ import {
  */
 export type ConditionNodeOutput = {
   /**
+   * Logical AND over child conditions.
+   */
+  and?: Array<ConditionNodeOutput> | null | undefined;
+  /**
+   * Leaf evaluator. Must be provided together with selector.
+   */
+  evaluator?: EvaluatorSpec | null | undefined;
+  /**
+   * Logical NOT over a single child condition.
+   */
+  not?: ConditionNodeOutput | null | undefined;
+  /**
+   * Logical OR over child conditions.
+   */
+  or?: Array<ConditionNodeOutput> | null | undefined;
+  /**
+   * Leaf selector. Must be provided together with evaluator.
+   */
+  selector?: ControlSelector | null | undefined;
+};
+
+/** @internal */
+export const ConditionNodeOutput$inboundSchema: z.ZodMiniType<
