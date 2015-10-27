@@ -92,3 +92,191 @@ export function ControlStoreModal({
   const { sentinelRef, scrollContainerRef } = useInfiniteScroll({
     hasNextPage: hasNextPage ?? false,
     isFetchingNextPage,
+    fetchNextPage,
+  });
+
+  // Flatten paginated data
+  const controls = useMemo(() => {
+    return data?.pages.flatMap((page) => page.controls) ?? [];
+  }, [data]);
+
+  // Ref callback to attach to Table's scroll container when maxHeight is set
+  const tableWrapperRef = useRef<HTMLDivElement>(null);
+
+  // Attach scroll container ref to the Table's scroll container
+  // TODO: Revisit scroll container handling for control-store
+  useEffect(() => {
+    if (tableWrapperRef.current && controls.length > 0) {
+      // Find the scrollable container (the div with overflow: auto from Table's maxHeight)
+      // The Table component wraps content in a div with the "root" class when maxHeight is set
+      const scrollContainer = tableWrapperRef.current.querySelector(
+        '[class*="root"]'
+      ) as HTMLElement;
+      if (scrollContainer) {
+        // Check if it's scrollable (has overflow: auto)
+        const computedStyle = window.getComputedStyle(scrollContainer);
+        if (
+          computedStyle.overflow === 'auto' ||
+          computedStyle.overflowY === 'auto'
+        ) {
+          (
+            scrollContainerRef as React.MutableRefObject<HTMLElement | null>
+          ).current = scrollContainer;
+
+          // Append sentinel inside the scroll container (after the table)
+          if (
+            sentinelRef.current &&
+            sentinelRef.current.parentElement !== scrollContainer
+          ) {
+            scrollContainer.appendChild(sentinelRef.current);
+          }
+        }
+      }
+    }
+  }, [controls.length, scrollContainerRef, sentinelRef]);
+
+  // Load control when controlId is in URL
+  useEffect(() => {
+    if (editModalOpened && controlId && !selectedControl) {
+      const loadControl = async () => {
+        const id = parseInt(controlId, 10);
+        if (isNaN(id)) return;
+
+        setLoadingControlId(id);
+        try {
+          const { data: controlData, error: fetchError } =
+            await api.controls.getData(id);
+          if (fetchError || !controlData?.data) {
+            notifications.show({
+              title: 'Error',
+              message: 'Failed to load control configuration',
+              color: 'red',
+            });
+            return;
+          }
+          // Find the control summary from the list
+          const controlSummary = controls.find((c) => c.id === id);
+          if (controlSummary) {
+            setSelectedControl({
+              summary: controlSummary,
+              definition: controlData.data,
+            });
+          }
+        } finally {
+          setLoadingControlId(null);
+        }
+      };
+      loadControl();
+    }
+  }, [editModalOpened, controlId, selectedControl, controls]);
+
+  // Clear selectedControl when edit modal closes
+  useEffect(() => {
+    if (!editModalOpened && selectedControl) {
+      setSelectedControl(null);
+    }
+  }, [editModalOpened, selectedControl]);
+
+  const handleCopyControl = async (control: ControlSummary) => {
+    openModal(MODAL_NAMES.CONTROL_STORE, {
+      submodal: SUBMODAL_NAMES.EDIT,
+      controlId: control.id.toString(),
+    });
+  };
+
+  const handleEditModalClose = () => {
+    closeSubmodal();
+  };
+
+  const handleEditModalSuccess = () => {
+    // Close all modals on successful create/edit
+    // Use closeModal to remove all modal query parameters from URL
+    closeModal();
+  };
+
+  // Build a draft control for the edit modal with full evaluator config (clone: append -copy to name)
+  const draftControl = useMemo(() => {
+    if (!selectedControl) return null;
+    const { summary, definition } = selectedControl;
+    const sanitizedName = sanitizeControlNamePart(summary.name);
+    return {
+      id: 0,
+      name: `${sanitizedName}-copy`,
+      control: {
+        ...definition,
+        // Ensure we have the proper types
+        execution: (definition.execution ?? 'server') as 'server' | 'sdk',
+        scope: {
+          ...definition.scope,
+          stages: (definition.scope?.stages ?? ['post']) as ('post' | 'pre')[],
+        },
+      },
+    };
+  }, [selectedControl]);
+
+  const columns: ColumnDef<ControlSummary>[] = [
+    {
+      id: 'enabled',
+      header: '',
+      accessorKey: 'enabled',
+      size: 40,
+      cell: ({ row }) => (
+        <Group justify="center">
+          <Tooltip label={row.original.enabled ? 'Enabled' : 'Disabled'}>
+            <Box
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                backgroundColor: row.original.enabled
+                  ? 'var(--mantine-color-green-6)'
+                  : 'var(--mantine-color-gray-5)',
+              }}
+            />
+          </Tooltip>
+        </Group>
+      ),
+    },
+    {
+      id: 'name',
+      header: 'Name',
+      accessorKey: 'name',
+      size: 260,
+      cell: ({ row }) => (
+        <Text size="sm" fw={500}>
+          {row.original.name}
+        </Text>
+      ),
+    },
+    {
+      id: 'description',
+      header: 'Description',
+      accessorKey: 'description',
+      size: 200,
+      cell: ({ row }) => (
+        <Tooltip
+          label={row.original.description}
+          withArrow
+          disabled={!row.original.description}
+        >
+          <Text size="sm" c="dimmed" lineClamp={1}>
+            {row.original.description || '—'}
+          </Text>
+        </Tooltip>
+      ),
+    },
+    {
+      id: 'agent',
+      header: 'Used by',
+      size: 150,
+      cell: ({ row }) => {
+        const usedByAgent = row.original.used_by_agent;
+        if (!usedByAgent) {
+          return (
+            <Text size="sm" c="dimmed">
+              —
+            </Text>
+          );
+        }
+
+        const controlName = row.original.name;
