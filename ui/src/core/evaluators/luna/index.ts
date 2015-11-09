@@ -67,38 +67,3 @@ export const lunaEvaluator: EvaluatorDefinition<LunaFormValues> = {
   validate: {
     scorer_label: (_value, values) => {
       const v = values as LunaFormValues;
-      if (
-        v.scorer_label.trim() === '' &&
-        v.scorer_id.trim() === '' &&
-        v.scorer_version_id.trim() === ''
-      ) {
-        return 'Provide a scorer label, scorer ID, or scorer version ID';
-      }
-      return null;
-    },
-    threshold: (value, values) => {
-      const v = values as LunaFormValues;
-      const raw = ((value as string) ?? '').trim();
-      if (v.operator === 'any') return null;
-      if (raw === '') return 'Threshold is required unless operator is "Any"';
-      if (NUMERIC_OPERATORS.has(v.operator) && Number.isNaN(Number(raw))) {
-        return 'A numeric threshold is required for numeric operators';
-      }
-      return null;
-    },
-    scorer_config: (value) => {
-      if (value && (value as string).trim() !== '') {
-        try {
-          JSON.parse(value as string);
-          return null;
-        } catch {
-          return 'Invalid JSON for scorer config';
-        }
-      }
-      return null;
-    },
-    timeout_ms: (value) => {
-      if (value === '' || value == null) return 'Timeout is required';
-      if (typeof value !== 'number' || Number.isNaN(value)) {
-        return 'Timeout must be a number';
-      }
