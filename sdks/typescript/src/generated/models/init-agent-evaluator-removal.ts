@@ -10,3 +10,28 @@ import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
 /**
+ * Details for an evaluator removed during overwrite mode.
+ */
+export type InitAgentEvaluatorRemoval = {
+  /**
+   * IDs of active controls referencing this evaluator
+   */
+  controlIds?: Array<number> | undefined;
+  /**
+   * Names of active controls referencing this evaluator
+   */
+  controlNames?: Array<string> | undefined;
+  /**
+   * Evaluator name removed by overwrite
+   */
+  name: string;
+  /**
+   * Whether this evaluator is still referenced by active controls
+   */
+  referencedByActiveControls: boolean;
+};
+
+/** @internal */
+export const InitAgentEvaluatorRemoval$inboundSchema: z.ZodMiniType<
+  InitAgentEvaluatorRemoval,
+  unknown
