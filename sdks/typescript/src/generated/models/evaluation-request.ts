@@ -32,3 +32,37 @@ export type Stage = ClosedEnum<typeof Stage>;
  *     step: Step payload for evaluation
  *     stage: 'pre' (before execution) or 'post' (after execution)
  *     target_type: Optional opaque target kind. When set together with
+ *         ``target_id``, the server merges controls bound to that target
+ *         into the effective set, in addition to the agent's direct and
+ *         policy-derived controls.
+ *     target_id: Optional opaque target identifier. Required when
+ *         ``target_type`` is set.
+ */
+export type EvaluationRequest = {
+  /**
+   * Identifier of the agent making the evaluation request
+   */
+  agentName: string;
+  /**
+   * Evaluation stage: 'pre' or 'post'
+   */
+  stage: Stage;
+  /**
+   * Runtime payload for an agent step invocation.
+   */
+  step: Step;
+  /**
+   * Optional opaque target identifier. Required when target_type is set.
+   */
+  targetId?: string | null | undefined;
+  /**
+   * Optional opaque target kind. When set together with target_id, the server merges controls bound to that target into the effective set, in addition to the agent's direct and policy-derived controls.
+   */
+  targetType?: string | null | undefined;
+};
+
+/** @internal */
+export const Stage$outboundSchema: z.ZodMiniEnum<typeof Stage> = z.enum(Stage);
+
+/** @internal */
+export type EvaluationRequest$Outbound = {
