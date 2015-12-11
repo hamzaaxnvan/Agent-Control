@@ -84,3 +84,46 @@ function ParameterInput({
       return (
         <Select
           label={label}
+          labelProps={param.description ? labelPropsInline : undefined}
+          data={param.allowed_values}
+          required={isRequired}
+          value={(value as string) ?? null}
+          onChange={(val) => {
+            if (val !== null) onChangeValue(name, val);
+          }}
+          error={error}
+          size="sm"
+        />
+      );
+
+    case 'boolean':
+      return (
+        <Switch
+          label={label}
+          checked={typeof value === 'boolean' ? value : false}
+          onChange={(e) => onChangeValue(name, e.currentTarget.checked)}
+          color="green.5"
+          size="md"
+          error={error}
+        />
+      );
+
+    case 'regex_re2':
+      return (
+        <TextInput
+          label={label}
+          labelProps={param.description ? labelPropsInline : undefined}
+          placeholder={param.placeholder ?? 'RE2 regex pattern'}
+          required={isRequired}
+          value={(value as string) ?? ''}
+          onChange={(e) => onChangeValue(name, e.currentTarget.value)}
+          error={error}
+          size="sm"
+          styles={{ input: { fontFamily: 'monospace' } }}
+        />
+      );
+
+    default:
+      return null;
+  }
+}
