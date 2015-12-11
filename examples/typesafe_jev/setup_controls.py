@@ -302,3 +302,104 @@ def control_definition(
     action: dict[str, Any] = {"decision": decision}
     if steering_message is not None:
         action["steering_context"] = {"message": steering_message}
+    return {
+        "description": description,
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": [step_type], "step_names": [step_name], "stages": [stage]},
+        "condition": condition,
+        "action": action,
+        "tags": tags or ["typesafe", "jev"],
+    }
+
+
+# --- the controls -----------------------------------------------------------
+#
+# Every control below is exactly one Jev request. Questions inside a control
+# combine with decide.combine: "any" fires when one question trips, "all"
+# needs every one. That covers simple and/or logic in a single pass, which is
+# the whole point of a System One model.
+#
+# The engine's condition trees also do and/or, but each leaf of a tree is its
+# own request. Reach for a tree only when combine cannot express the rule:
+# different evaluators, different selectors, a different payload_field, or
+# nested logic.
+
+DEMO_CONTROLS: list[dict[str, Any]] = [
+    # 1. Several questions, one request, any of them fires the control.
+    {
+        "name": "jev-safety-guard",
+        "definition": control_definition(
+            "Block a message that is a jailbreak attempt or asks for help with harm. "
+            "Severity is recorded alongside them without affecting the decision.",
+            condition={
+                "selector": {"path": "input"},
+                "evaluator": jev(
+                    {"jailbreak": JAILBREAK, "harmful_request": HARMFUL, "severity": score(
+                        instructions=(
+                            "How much harm could result if the assistant complied "
+                            "with this message?"
+                        ),
+                        levels=SEVERITY_LEVELS,
+                    )}
+                ),
+            },
+            decision="deny",
+            tags=["typesafe", "jev", "any", "safety"],
+        ),
+    },
+    # 2. Two questions that have to interact, still one request. "all" means
+    #    both must trip, so neither blocks on its own.
+    #
+    #    This one screens a tool call, not a message. The model has already
+    #    decided to read the customer database and chosen the arguments; the
+    #    control sees that call and stops it before it runs. Screening the
+    #    action rather than the request also catches the case where the model
+    #    was talked into it by something other than the user.
+    {
+        "name": "jev-bulk-personal-export",
+        "definition": control_definition(
+            "Block a customer lookup that is both broad and identifying. Regional "
+            "reporting and single-customer lookups both pass.",
+            condition={
+                "selector": {"path": "input"},
+                "evaluator": jev(
+                    {"record_scope": RECORD_SCOPE, "personal_data": PERSONAL_DATA},
+                    combine="all",
+                ),
+            },
+            decision="deny",
+            step_type="tool",
+            step_name=TOOL_NAME,
+            tags=["typesafe", "jev", "all", "exfiltration", "tool"],
+        ),
+    },
+    # 3. One question, because this needs its own response.
+    {
+        "name": "jev-advice-referral",
+        "definition": control_definition(
+            "Route a request for personal financial advice to an advisor rather than "
+            "blocking it.",
+            condition={
+                "selector": {"path": "input"},
+                "evaluator": jev({"financial_advice": FINANCIAL_ADVICE}),
+            },
+            decision="steer",
+            steering_message=(
+                "This asks for a personal financial recommendation. Do not give one. "
+                "Say plainly that you cannot advise on individual financial decisions, "
+                "and offer to put them in touch with a licensed advisor."
+            ),
+            tags=["typesafe", "jev", "single", "advice"],
+        ),
+    },
+    # 4. A choice question. Exactly one answer applies, so choice fits.
+    {
+        "name": "jev-intent-offtopic",
+        "definition": control_definition(
+            "Record messages that fall outside the product's supported topics.",
+            condition={
+                "selector": {"path": "input"},
+                "evaluator": jev(
+                    {
+                        "intent": choice(
