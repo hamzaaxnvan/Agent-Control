@@ -11,3 +11,16 @@ import { remap as remap$ } from "../lib/primitives.js";
 export type PatchControlBindingByKeyRequest = {
   /**
    * ID of the bound control.
+   */
+  controlId: number;
+  /**
+   * New enabled value for the binding.
+   */
+  enabled: boolean;
+  /**
+   * Opaque external identifier within the target_type.
+   */
+  targetId: string;
+  /**
+   * Opaque attachment kind.
+   */
