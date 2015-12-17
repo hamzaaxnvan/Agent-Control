@@ -1,0 +1,49 @@
+"""Tests for telemetry sink contracts."""
+
+import asyncio
+from collections.abc import Sequence
+from datetime import UTC, datetime
+
+from agent_control_models import ControlExecutionEvent
+
+from agent_control_telemetry import (
+    BaseAsyncControlEventSink,
+    BaseControlEventSink,
+    SinkResult,
+)
+
+
+def _make_event(*, control_id: int) -> ControlExecutionEvent:
+    return ControlExecutionEvent(
+        trace_id="trace-123",
+        span_id="span-456",
+        agent_name="demo-agent",
+        control_id=control_id,
+        control_name=f"control-{control_id}",
+        check_stage="pre",
+        applies_to="tool_call",
+        action="observe",
+        matched=False,
+        confidence=0.0,
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+
+def test_sink_result_success_reflects_accepted_events() -> None:
+    # Given: two sink results with and without accepted events
+    successful = SinkResult(accepted=1, dropped=0)
+    unsuccessful = SinkResult(accepted=0, dropped=2)
+
+    # When/Then: success tracks whether any events were accepted
+    assert successful.success is True
+    assert unsuccessful.success is False
+
+
+def test_base_control_event_sink_batches_single_event_writers() -> None:
+    # Given: a sink that only implements single-event writes
+    class RecordingSink(BaseControlEventSink):
+        def __init__(self) -> None:
+            self.seen_control_ids: list[int] = []
+
+        def write_event(self, event: ControlExecutionEvent) -> SinkResult:
+            self.seen_control_ids.append(event.control_id)
