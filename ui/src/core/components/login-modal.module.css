@@ -1,0 +1,24 @@
+.logoWrapper {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 48px;
+}
+
+.darkLogo,
+.lightLogo {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.lightLogo {
+  display: none;
+}
+
+[data-mantine-color-scheme='dark'] .darkLogo {
+  display: none;
+}
+
+[data-mantine-color-scheme='dark'] .lightLogo {
+  display: block;
