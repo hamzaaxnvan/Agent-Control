@@ -23,29 +23,3 @@ export type BooleanTemplateParameter = {
   description?: string | null | undefined;
   /**
    * Human-readable parameter label
-   */
-  label: string;
-  /**
-   * Whether the caller must provide a value when no default exists
-   */
-  required?: boolean | undefined;
-  type: "boolean";
-  /**
-   * Optional UI hint for rendering the parameter input
-   */
-  uiHint?: string | null | undefined;
-};
-
-/** @internal */
-export const BooleanTemplateParameter$inboundSchema: z.ZodMiniType<
-  BooleanTemplateParameter,
-  unknown
-> = z.pipe(
-  z.object({
-    default: z.optional(z.nullable(types.boolean())),
-    description: z.optional(z.nullable(types.string())),
-    label: types.string(),
-    required: z._default(types.boolean(), true),
-    type: types.literal("boolean"),
-    ui_hint: z.optional(z.nullable(types.string())),
-  }),
