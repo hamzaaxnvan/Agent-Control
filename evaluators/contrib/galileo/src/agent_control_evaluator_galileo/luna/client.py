@@ -127,3 +127,390 @@ def _validate_connection_config(
     if keepalive_expiry_seconds < 0:
         raise ValueError(
             f"{LUNA_KEEPALIVE_EXPIRY_ENV}={keepalive_expiry_seconds} "
+            "must be greater than or equal to 0."
+        )
+    if max_connections <= 0:
+        raise ValueError(f"{LUNA_MAX_CONNECTIONS_ENV}={max_connections} must be greater than 0.")
+    if max_keepalive_connections < 0:
+        raise ValueError(
+            f"{LUNA_MAX_KEEPALIVE_CONNECTIONS_ENV}={max_keepalive_connections} "
+            "must be greater than or equal to 0."
+        )
+    if max_keepalive_connections > max_connections:
+        raise ValueError(
+            f"{LUNA_MAX_KEEPALIVE_CONNECTIONS_ENV}={max_keepalive_connections} "
+            f"must be less than or equal to {LUNA_MAX_CONNECTIONS_ENV}={max_connections}."
+        )
+    if client_pool_size <= 0:
+        raise ValueError(f"{LUNA_CLIENT_POOL_SIZE_ENV}={client_pool_size} must be greater than 0.")
+
+
+def _as_float_or_none(value: JSONValue) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _has_value(value: JSONValue) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    if isinstance(value, (list, dict)):
+        return len(value) > 0
+    return True
+
+
+def _effective_scorer_timeout(
+    config: ScorerInvokeConfig,
+    *,
+    http_timeout_seconds: float,
+) -> ScorerInvokeConfig:
+    """Resolve an Orbit execution timeout that expires before the HTTP request.
+
+    The server execution budget defaults to 80% of the caller's HTTP deadline,
+    leaving time for Orbit to serialize and return the result. Explicit caller
+    overrides are preserved only when they maintain the same ordering.
+
+    Args:
+        config: Caller-provided scorer-invoke configuration.
+        http_timeout_seconds: Agent Control's HTTP request deadline in seconds.
+
+    Returns:
+        A scorer-invoke configuration with an effective execution timeout.
+
+    Raises:
+        ValueError: If either deadline is invalid or the explicit server timeout
+            is not shorter than the HTTP deadline.
+    """
+    if http_timeout_seconds <= 0:
+        raise ValueError("HTTP timeout must be greater than 0 seconds.")
+
+    server_timeout = config.request_timeout_seconds
+    if server_timeout is None:
+        server_timeout = http_timeout_seconds * SERVER_TIMEOUT_RATIO
+    elif server_timeout >= http_timeout_seconds:
+        raise ValueError(
+            "config.request_timeout_seconds must be shorter than the HTTP "
+            f"timeout ({http_timeout_seconds:g} seconds)."
+        )
+
+    return config.model_copy(update={"request_timeout_seconds": server_timeout})
+
+
+class ScorerInvokeInputs(BaseModel):
+    """Input values sent to the Luna scorer invoke endpoint."""
+
+    query: JSONValue = ""
+    response: JSONValue = ""
+    ground_truth: JSONValue = None
+    tools: list[JSONObject] | None = None
+
+
+class ScorerInvokeRecord(BaseModel):
+    """Caller-controlled subset of Orbit's partial runtime-record contract.
+
+    Identity, ownership, persistence, and execution IDs are intentionally not
+    represented here. Orbit hydrates those fields from trusted server context.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: ScorerInvokeRecordType
+    name: str | None = None
+    input: JSONValue = None
+    output: JSONValue = None
+    context: JSONObject | None = None
+    tools: list[JSONObject] | None = None
+    dataset_output: JSONValue = None
+
+
+class GalileoExecutionContext(BaseModel):
+    """Authenticated organization and optional identity fields for Galileo scorer invocation."""
+
+    organization_id: str = Field(min_length=1)
+    user_id: str | None = Field(default=None, min_length=1)
+    project_id: str | None = Field(default=None, min_length=1)
+    run_id: str | None = Field(default=None, min_length=1)
+
+
+class ScorerInvokeRequest(BaseModel):
+    """Request payload for Luna scorer invocation.
+
+    Attributes:
+        scorer_id: Required scorer identifier.
+        scorer_version_id: Deprecated optional compatibility identifier. Orbit
+            currently invokes the scorer's current default version.
+        scorer_label: Optional display/metadata label.
+        inputs: Selected scorer input values.
+        record: Optional Orbit-compatible structured runtime record.
+        config: Scorer-specific configuration, always emitted.
+    """
+
+    scorer_id: str = Field(min_length=1)
+    scorer_version_id: str | None = Field(default=None, min_length=1)
+    scorer_label: str | None = Field(default=None, min_length=1)
+    inputs: ScorerInvokeInputs
+    record: ScorerInvokeRecord | None = None
+    execution_context: GalileoExecutionContext | None = None
+    config: ScorerInvokeConfig = Field(default_factory=ScorerInvokeConfig)
+
+    @model_validator(mode="after")
+    def ensure_required_values(self) -> ScorerInvokeRequest:
+        if not (_has_value(self.inputs.query) or _has_value(self.inputs.response)):
+            raise ValueError("Either inputs.query or inputs.response must be set.")
+        return self
+
+    def to_dict(self) -> JSONObject:
+        """Convert to the Luna scorer invoke request shape."""
+        request = self.model_dump(mode="json", exclude_none=True)
+        if self.execution_context is not None:
+            request["execution_context"] = self.execution_context.model_dump(mode="json")
+        return request
+
+
+def _scorer_invoke_record_from_step(
+    step: Step | None,
+    *,
+    selected_input: JSONValue,
+    selected_output: JSONValue,
+    selected_data: Any = _MISSING_SELECTED_DATA,
+    payload_field: str = "input",
+) -> ScorerInvokeRecord | None:
+    """Translate a generic Agent Control step into Orbit's record contract.
+
+    Selector-selected values remain the primary scorer input. When a selector
+    supplies one side, that value is written to both the legacy and structured
+    representations so Orbit's conflict validation cannot observe two meanings.
+    The complete step supplies the unselected side and additional record context.
+
+    Unknown Agent Control step types intentionally fall back to the legacy
+    ``inputs`` contract. This keeps the open-source Step model extensible without
+    sending an invalid discriminator to Orbit.
+
+    Args:
+        step: Complete Agent Control step, when contextual evaluation is used.
+        selected_input: Selector-selected value sent as ``inputs.query``.
+        selected_output: Selector-selected value sent as ``inputs.response``.
+
+    Returns:
+        An Orbit-compatible record, or ``None`` for absent/unsupported steps.
+    """
+    if step is None:
+        return None
+    try:
+        if selected_data is _MISSING_SELECTED_DATA:
+            galileo_core_record = record_from_step(
+                step,
+                selected_input=selected_input,
+                selected_output=selected_output,
+            )
+        else:
+            galileo_core_record = record_from_step(
+                step,
+                selected_data=selected_data,
+                payload_field=payload_field,
+            )
+    except UnsupportedStepTypeError:
+        return None
+    # record_from_step() returns Galileo Core models (LlmSpan, Trace, etc.). Dumping
+    # and revalidating coerces the model into the Luna request shape while preserving
+    # extra canonical fields that Orbit accepts but ScorerInvokeRecord does not declare.
+    canonical_record = galileo_core_record.model_dump(mode="json", exclude_none=True)
+    if canonical_record.get("type") not in SUPPORTED_SCORER_INVOKE_RECORD_TYPES:
+        return None
+    return ScorerInvokeRecord.model_validate(canonical_record)
+
+
+class ScorerInvokeResponse(BaseModel):
+    """Response from Luna scorer invocation.
+
+    Attributes:
+        scorer_label: Echoed scorer label, when returned.
+        score: Raw scorer value.
+        status: Invocation status.
+        execution_time: Execution time in seconds, when returned.
+        error_message: Error detail for non-success statuses.
+    """
+
+    scorer_label: str | None = None
+    score: JSONValue
+    status: str = "unknown"
+    execution_time: float | None = None
+    error_message: str | None = None
+    _raw_response: JSONObject = PrivateAttr(default_factory=dict)
+
+    @property
+    def raw_response(self) -> JSONObject:
+        return self._raw_response
+
+    @classmethod
+    def from_dict(cls, data: JSONObject) -> ScorerInvokeResponse:
+        """Create a response model from the Luna scorer invoke JSON object."""
+        response = cls.model_validate(
+            data | {"execution_time": _as_float_or_none(data.get("execution_time"))}
+        )
+        response._raw_response = data
+        return response
+
+
+class GalileoLunaClient:
+    """Thin HTTP client for Galileo Luna scorer invocation.
+
+    Environment Variables:
+        GALILEO_API_SECRET_KEY or GALILEO_API_SECRET: JWT signing secret for internal auth.
+        GALILEO_LUNA_INVOKE_URL: Luna scorer invoke URL or service root (required).
+        GALILEO_FEATURE_FLAG_SCORER_INVOKE_RUNTIME: Set to ``enabled`` to send
+            structured runtime data.
+        GALILEO_LUNA_INVOKE_CA_FILE: CA bundle used to verify Luna invoke TLS.
+        AGENT_CONTROL_AUTH_UPSTREAM_CA_FILE: Shared internal CA fallback.
+        GALILEO_LUNA_KEEPALIVE_EXPIRY_SECONDS: HTTP pooled connection expiry.
+        GALILEO_LUNA_MAX_CONNECTIONS: Maximum outbound HTTP connections.
+        GALILEO_LUNA_MAX_KEEPALIVE_CONNECTIONS: Maximum idle pooled HTTP connections.
+        GALILEO_LUNA_CLIENT_POOL_SIZE: Number of outbound HTTP clients to rotate across.
+    """
+
+    def __init__(
+        self,
+        api_secret: str | None = None,
+        luna_invoke_url: str | None = None,
+        luna_invoke_ca_file: str | None = None,
+    ) -> None:
+        """Initialize the Galileo Luna client.
+
+        Args:
+            api_secret: Internal JWT signing secret. If not provided, reads from
+                GALILEO_API_SECRET_KEY or GALILEO_API_SECRET.
+            luna_invoke_url: Luna scorer invoke URL or service root. If not provided,
+                reads from GALILEO_LUNA_INVOKE_URL.
+            luna_invoke_ca_file: Optional CA bundle used to verify Luna invoke TLS. If not
+                provided, reads from GALILEO_LUNA_INVOKE_CA_FILE, then
+                AGENT_CONTROL_AUTH_UPSTREAM_CA_FILE.
+
+        Raises:
+            ValueError: If the API secret, Luna invoke URL, CA bundle, or connection
+                tuning configuration is invalid.
+        """
+        resolved_api_secret = (
+            api_secret or os.getenv("GALILEO_API_SECRET_KEY") or os.getenv("GALILEO_API_SECRET")
+        )
+        if not resolved_api_secret:
+            raise ValueError(
+                "GALILEO_API_SECRET_KEY or GALILEO_API_SECRET is required for Luna "
+                "scorer invocation. Set one as an environment variable or pass it "
+                "to the constructor."
+            )
+
+        resolved_luna_invoke_url = luna_invoke_url or os.getenv(LUNA_INVOKE_URL_ENV)
+        if resolved_luna_invoke_url is None or resolved_luna_invoke_url.strip() == "":
+            raise ValueError(
+                "GALILEO_LUNA_INVOKE_URL is required for Luna scorer invocation. "
+                "Set it as an environment variable or pass it to the constructor."
+            )
+
+        self.api_secret = resolved_api_secret
+        self.runtime_enabled = scorer_invoke_runtime_enabled()
+        self.luna_invoke_url = _normalize_luna_invoke_url(resolved_luna_invoke_url)
+        self.luna_invoke_ca_file = (
+            luna_invoke_ca_file
+            or os.getenv(LUNA_INVOKE_CA_FILE_ENV)
+            or os.getenv(AUTH_UPSTREAM_CA_FILE_ENV)
+            or ""
+        ).strip() or None
+        self._ssl_context = self._load_ssl_context(self.luna_invoke_ca_file)
+        self.keepalive_expiry_seconds = _load_float_env(
+            LUNA_KEEPALIVE_EXPIRY_ENV, DEFAULT_KEEPALIVE_EXPIRY_SECS
+        )
+        self.max_connections = _load_int_env(LUNA_MAX_CONNECTIONS_ENV, DEFAULT_MAX_CONNECTIONS)
+        self.max_keepalive_connections = _load_int_env(
+            LUNA_MAX_KEEPALIVE_CONNECTIONS_ENV, DEFAULT_MAX_KEEPALIVE_CONNECTIONS
+        )
+        self.client_pool_size = _load_int_env(LUNA_CLIENT_POOL_SIZE_ENV, DEFAULT_CLIENT_POOL_SIZE)
+        _validate_connection_config(
+            keepalive_expiry_seconds=self.keepalive_expiry_seconds,
+            max_connections=self.max_connections,
+            max_keepalive_connections=self.max_keepalive_connections,
+            client_pool_size=self.client_pool_size,
+        )
+        self._client: httpx.AsyncClient | None = None
+        self._clients: list[httpx.AsyncClient] = []
+        self._next_client_index = 0
+        self._client_lock = Lock()
+
+    @staticmethod
+    def _load_ssl_context(ca_file: str | None) -> ssl.SSLContext | None:
+        """Build a TLS verification context from a CA bundle path, if configured."""
+        if ca_file is None:
+            return None
+        try:
+            return ssl.create_default_context(cafile=ca_file)
+        except (OSError, ssl.SSLError) as exc:
+            raise ValueError(f"Failed to load CA bundle from {ca_file!r}: {exc}") from exc
+
+    def _create_client(self) -> httpx.AsyncClient:
+        """Create an HTTP client with the configured TLS and connection limits."""
+        verify: ssl.SSLContext | bool = self._ssl_context if self._ssl_context is not None else True
+        return httpx.AsyncClient(
+            headers={"Content-Type": "application/json"},
+            timeout=httpx.Timeout(DEFAULT_TIMEOUT_SECS),
+            limits=httpx.Limits(
+                max_connections=self.max_connections,
+                max_keepalive_connections=self.max_keepalive_connections,
+                keepalive_expiry=self.keepalive_expiry_seconds,
+            ),
+            verify=verify,
+        )
+
+    def _select_pooled_client(self) -> httpx.AsyncClient:
+        """Select the next pooled client while holding the client state lock."""
+        client = self._clients[self._next_client_index % len(self._clients)]
+        self._next_client_index = (self._next_client_index + 1) % len(self._clients)
+        return client
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the next HTTP client."""
+        async with self._client_lock:
+            self._clients = [client for client in self._clients if not client.is_closed]
+
+            if self.client_pool_size == 1:
+                if self._client is not None and not self._client.is_closed:
+                    return self._client
+                self._client = self._clients[0] if self._clients else self._create_client()
+                self._clients = [self._client]
+                return self._client
+
+            self._client = None
+            while len(self._clients) < self.client_pool_size:
+                self._clients.append(self._create_client())
+
+            return self._select_pooled_client()
+
+    def _endpoint_and_auth_header(self) -> tuple[str, str]:
+        token = _internal_auth_token(self.api_secret)
+        return self.luna_invoke_url, f"Bearer {token}"
+
+    async def invoke(
+        self,
+        *,
+        scorer_id: str,
+        scorer_version_id: str | None = None,
+        scorer_label: str | None = None,
+        input: JSONValue = None,
+        output: JSONValue = None,
+        step: Step | None = None,
+        selected_data: Any = _MISSING_SELECTED_DATA,
+        selected_data_payload_field: str = "input",
+        execution_context: GalileoExecutionContext | None = None,
+        config: ScorerInvokeConfig | JSONObject | None = None,
+        timeout: float = DEFAULT_TIMEOUT_SECS,
+        headers: dict[str, str] | None = None,
+    ) -> ScorerInvokeResponse:
+        """Invoke a Galileo Luna scorer.
+
