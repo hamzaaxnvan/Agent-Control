@@ -7,3 +7,12 @@ import { Unrecognized, unrecognized } from "./unrecognized.js";
 
 export type ClosedEnum<T extends Readonly<Record<string, string | number>>> =
   T[keyof T];
+export type OpenEnum<T extends Readonly<Record<string, string | number>>> =
+  | T[keyof T]
+  | Unrecognized<T[keyof T] extends number ? number : string>;
+
+export function inboundSchema<T extends Record<string, string>>(
+  enumObj: T,
+): z.ZodMiniType<OpenEnum<T>, unknown> {
+  const options = Object.values(enumObj);
+  return z.union([
