@@ -6,3 +6,28 @@ import * as z from "zod/v4-mini";
 import { remap as remap$ } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
+import * as types from "../types/primitives.js";
+import { SDKValidationError } from "./errors/sdk-validation-error.js";
+
+export type GetAgentPoliciesResponse = {
+  /**
+   * IDs of policies associated with the agent
+   */
+  policyIds?: Array<number> | undefined;
+};
+
+/** @internal */
+export const GetAgentPoliciesResponse$inboundSchema: z.ZodMiniType<
+  GetAgentPoliciesResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    policy_ids: types.optional(z.array(types.number())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "policy_ids": "policyIds",
+    });
+  }),
+);
+
