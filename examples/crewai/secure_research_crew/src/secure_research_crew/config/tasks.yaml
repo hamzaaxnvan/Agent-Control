@@ -4,3 +4,9 @@ research_task:
     engineering department staffing and active projects.
     Use the query_database tool with proper SQL SELECT statements
     that include LIMIT clauses.
+  expected_output: "Raw data from employee and project queries in JSON format"
+
+analysis_task:
+  description: >
+    Take the research data and validate it using the validate_data tool.
+    Submit a JSON string with these fields: dataset, findings,
