@@ -1,0 +1,10 @@
+[project]
+name = "agent-control-telemetry"
+version = "8.15.0"
+description = "Shared telemetry contracts for Agent Control"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-control-models>=3.0.0",
+]
+authors = [
+    {name = "Agent Control Team"}
