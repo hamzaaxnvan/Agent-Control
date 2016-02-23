@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jev Guardrail Playground</title>
+<style>
+  :root {
+    --bg: #fbfbfa;
+    --surface: #ffffff;
+    --surface-2: #f4f4f2;
+    --border: #e3e3df;
+    --text: #1b1b19;
+    --text-dim: #6d6d68;
+    --accent: #3b5bdb;
+    --ok: #2f9e44;
+    --warn: #e8a317;
+    --danger: #d9480f;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171a;
+      --surface: #1f1f23;
+      --surface-2: #26262b;
+      --border: #34343a;
+      --text: #ececee;
+      --text-dim: #9a9aa2;
+      --accent: #748ffc;
+      --ok: #51cf66;
+      --warn: #ffd43b;
+      --danger: #ff8787;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171a; --surface: #1f1f23; --surface-2: #26262b; --border: #34343a;
+    --text: #ececee; --text-dim: #9a9aa2; --accent: #748ffc;
+    --ok: #51cf66; --warn: #ffd43b; --danger: #ff8787;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; }
+
+  header { margin-bottom: 24px; }
+  h1 { font-size: 21px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--text-dim); font-size: 13px; }
+  .sub code { font-family: var(--mono); font-size: 12px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+  }
+
+  textarea {
+    width: 100%; min-height: 84px; resize: vertical; padding: 11px 12px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg); color: var(--text);
+    font: inherit; line-height: 1.5;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+
+  .fld { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+         color: var(--text-dim); font-weight: 600; margin: 12px 0 5px; }
+  .fld:first-of-type { margin-top: 0; }
+  .fld .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .stage-h { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+             color: var(--text-dim); margin: 22px 0 8px; font-weight: 600; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  button {
+    font: inherit; font-weight: 550; cursor: pointer;
+    padding: 8px 16px; border-radius: 8px; border: 1px solid transparent;
+    background: var(--accent); color: #fff;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  label.toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .chip {
+    font-size: 12px; padding: 5px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-dim); cursor: pointer; font-weight: 500;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+
+  .verdict {
+    margin-top: 20px; padding: 14px 16px; border-radius: var(--radius);
+    border: 1px solid var(--border); display: flex; align-items: baseline;
+    gap: 12px; flex-wrap: wrap;
+  }
+  .verdict.safe { background: color-mix(in srgb, var(--ok) 11%, var(--surface)); border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
+  .verdict.blocked { background: color-mix(in srgb, var(--danger) 11%, var(--surface)); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+  .verdict strong { font-size: 16px; }
+  .verdict .meta { color: var(--text-dim); font-size: 12.5px; font-family: var(--mono); margin-left: auto; }
+
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--text-dim); margin: 24px 0 8px; font-weight: 600; }
+
+  .ctl { border: 1px solid var(--border); border-radius: var(--radius);
+         background: var(--surface); padding: 13px 15px; margin-bottom: 8px; }
+  .ctl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ctl-name { font-weight: 600; font-size: 14px; }
+  .badge {
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: .03em;
+  }
+  .badge.deny { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); border-color: transparent; }
+  .badge.observe { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); border-color: transparent; }
+  .badge.fired { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); border-color: transparent; }
+  .badge.pass { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); border-color: transparent; }
+
+  .val { margin-left: auto; font-family: var(--mono); font-size: 15px; font-weight: 600; }
+
+  .bar { position: relative; height: 7px; border-radius: 4px;
+         background: var(--surface-2); margin: 10px 0 7px; overflow: visible; }
+  .bar .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--ok); }
+  .bar.over .fill { background: var(--danger); }
+  .bar .tick { position: absolute; top: -3px; bottom: -3px; width: 2px;
+               background: var(--text); opacity: .5; border-radius: 1px; }
+
+  .answers { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
+  .ans-head { display: flex; align-items: center; gap: 7px; }
+  .ans-name { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+  .ans-val { margin-left: auto; font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .ans .bar { margin: 4px 0 0; height: 5px; }
+  .facts { display: flex; gap: 14px; flex-wrap: wrap;
+           font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  .q { font-size: 12.5px; color: var(--text-dim); margin-top: 7px; font-style: italic; }
+  .err { color: var(--danger); font-size: 12.5px; font-family: var(--mono); margin-top: 6px; }
+  .empty { color: var(--text-dim); font-size: 13.5px; padding: 6px 2px; }
+  .note { color: var(--text-dim); font-size: 12px; margin-top: 14px; line-height: 1.55; }
