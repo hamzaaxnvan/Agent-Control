@@ -67,3 +67,26 @@ export function useModalRoute() {
   }, [router]);
 
   const closeSubmodal = useCallback(() => {
+    // Extract and discard submodal-related params, keep the rest
+    const {
+      submodal: currentSubmodal,
+      evaluator,
+      controlId,
+      ...rest
+    } = router.query;
+    // Silence unused vars - we're destructuring to remove them
+    void evaluator;
+    void controlId;
+
+    // If closing from "create", go back to "add-new" instead of closing everything
+    // This allows the user to select a different evaluator
+    if (currentSubmodal === SUBMODAL_NAMES.CREATE) {
+      router.push(
+        {
+          pathname: router.pathname,
+          query: {
+            ...rest,
+            modal: router.query.modal,
+            submodal: SUBMODAL_NAMES.ADD_NEW,
+          },
+        },

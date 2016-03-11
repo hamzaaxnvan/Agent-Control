@@ -45,3 +45,50 @@ DEFAULT_OPERATION_ACCESS: dict[Operation, AccessLevel] = {
     Operation.POLICIES_READ: AccessLevel.AUTHENTICATED,
     Operation.POLICIES_CREATE: AccessLevel.ADMIN,
     Operation.POLICIES_UPDATE: AccessLevel.ADMIN,
+    Operation.AGENTS_READ: AccessLevel.AUTHENTICATED,
+    Operation.AGENTS_CREATE: AccessLevel.AUTHENTICATED,
+    Operation.AGENTS_UPDATE: AccessLevel.ADMIN,
+    Operation.EVALUATORS_READ: AccessLevel.AUTHENTICATED,
+    Operation.OBSERVABILITY_READ: AccessLevel.AUTHENTICATED,
+    Operation.OBSERVABILITY_WRITE: AccessLevel.AUTHENTICATED,
+    Operation.RUNTIME_TOKEN_EXCHANGE: AccessLevel.AUTHENTICATED,
+    Operation.RUNTIME_USE: AccessLevel.AUTHENTICATED,
+}
+
+
+class HeaderAuthProvider(RequestAuthorizer):
+    """Default authorizer.
+
+    For each operation's configured access level, validates the
+    request's credentials via the local credential check; on success,
+    returns a :class:`Principal` scoped to the resolved namespace.
+    """
+
+    def __init__(
+        self,
+        *,
+        operation_access: dict[Operation, AccessLevel] | None = None,
+        default_namespace_key: str = DEFAULT_NAMESPACE_KEY,
+    ) -> None:
+        self._operation_access = (
+            DEFAULT_OPERATION_ACCESS if operation_access is None else operation_access
+        )
+        self._default_namespace_key = default_namespace_key
+
+    async def authorize(
+        self,
+        request: Request,
+        operation: Operation,
+        context: dict[str, Any] | None = None,
+    ) -> Principal:
+        del context  # The local-credential path does not use context.
+
+        access = self._operation_access.get(operation)
+        if access is None:
+            raise RuntimeError(f"No access level configured for operation {operation.value!r}")
+
+        namespace_key = self._resolve_namespace_key(request)
+
+        if access is AccessLevel.PUBLIC:
+            return Principal(namespace_key=namespace_key)
+
