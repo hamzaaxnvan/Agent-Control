@@ -16,22 +16,3 @@ export type RemoveAgentControlResponse = {
   /**
    * True if the control remains active via policy association(s)
    */
-  controlStillActive: boolean;
-  /**
-   * True if a direct agent-control link was removed
-   */
-  removedDirectAssociation: boolean;
-  /**
-   * Whether the request succeeded
-   */
-  success: boolean;
-};
-
-/** @internal */
-export const RemoveAgentControlResponse$inboundSchema: z.ZodMiniType<
-  RemoveAgentControlResponse,
-  unknown
-> = z.pipe(
-  z.object({
-    control_still_active: types.boolean(),
-    removed_direct_association: types.boolean(),
