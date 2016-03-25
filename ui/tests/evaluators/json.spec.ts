@@ -15,37 +15,3 @@ test.describe('JSON Evaluator', () => {
     ).toBeVisible();
     await expect(
       mockedPage.getByText('JSON Schema', { exact: true })
-    ).toBeVisible();
-    await expect(
-      mockedPage.getByPlaceholder('{"type": "object", "properties": {...}}')
-    ).toBeVisible();
-  });
-
-  test('displays field validation section', async ({ mockedPage }) => {
-    await openEvaluatorForm(mockedPage, 'JSON');
-
-    await expect(
-      mockedPage.getByText('Field Validation', { exact: true })
-    ).toBeVisible();
-    await expect(
-      mockedPage.getByText('Required fields', { exact: true })
-    ).toBeVisible();
-    await expect(
-      mockedPage.getByText('Field types', { exact: true })
-    ).toBeVisible();
-    await expect(
-      mockedPage.getByText('Field constraints', { exact: true })
-    ).toBeVisible();
-    await expect(
-      mockedPage.getByText('Field patterns', { exact: true })
-    ).toBeVisible();
-  });
-
-  test('displays validation behavior checkboxes', async ({ mockedPage }) => {
-    await openEvaluatorForm(mockedPage, 'JSON');
-
-    await expect(
-      mockedPage.getByText('Validation Behavior', { exact: true })
-    ).toBeVisible();
-    await expect(mockedPage.getByText('Allow extra fields')).toBeVisible();
-    await expect(
