@@ -109,3 +109,40 @@ export class ControlBindings extends ClientSDK {
   async deleteByKey(
     request: models.DeleteControlBindingByKeyRequest,
     options?: RequestOptions,
+  ): Promise<models.DeleteControlBindingByKeyResponse> {
+    return unwrapAsync(controlBindingsDeleteByKey(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Delete a control binding
+   *
+   * @remarks
+   * Delete a control binding by surrogate ID.
+   *
+   * Target-aware authorizers use the binding's stored target identifiers.
+   * Other authorizers retain namespace-wide authorization. The deletion
+   * remains scoped to the authorized namespace.
+   */
+  async delete(
+    request:
+      operations.DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest,
+    options?: RequestOptions,
+  ): Promise<models.DeleteControlBindingResponse> {
+    return unwrapAsync(controlBindingsDelete(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Get a control binding
+   *
+   * @remarks
+   * Read a single control binding by surrogate ID.
+   *
+   * Target-aware authorizers use the binding's stored target identifiers.
