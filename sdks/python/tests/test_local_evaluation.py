@@ -803,3 +803,272 @@ class TestCheckEvaluationWithLocal:
         ]
 
         # Mock client with server response
+        client = MagicMock(spec=AgentControlClient)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"is_safe": True, "confidence": 0.9}
+        mock_response.raise_for_status = MagicMock()
+        client.http_client = AsyncMock()
+        client.http_client.post = AsyncMock(return_value=mock_response)
+
+        result = await check_evaluation_with_local(
+            client=client,
+            agent_name=agent_name,
+            step=llm_payload,
+            stage="pre",
+            controls=controls,
+        )
+
+        # Server should be called
+        client.http_client.post.assert_called_once()
+
+        # Result should be safe
+        assert result.is_safe is True
+
+    @pytest.mark.asyncio
+    async def test_no_controls_returns_safe(self, agent_name, llm_payload):
+        """When no controls exist, result should be safe."""
+        controls: list[dict[str, Any]] = []
+
+        client = MagicMock(spec=AgentControlClient)
+        client.http_client = AsyncMock()
+        client.http_client.post = AsyncMock()
+
+        result = await check_evaluation_with_local(
+            client=client,
+            agent_name=agent_name,
+            step=llm_payload,
+            stage="pre",
+            controls=controls,
+        )
+
+        # No server call
+        client.http_client.post.assert_not_called()
+
+        # Safe with full confidence
+        assert result.is_safe is True
+        assert result.confidence == 1.0
+
+    @pytest.mark.asyncio
+    async def test_invalid_local_control_skipped(self, agent_name, llm_payload):
+        """Invalid local controls should be skipped."""
+        controls = [
+            # Invalid control (missing required fields)
+            {"id": 1, "name": "invalid", "control": {"execution": "sdk"}},
+            # Valid server control
+            make_control_dict(2, "server_ctrl", execution="server"),
+        ]
+
+        # Mock client with server response
+        client = MagicMock(spec=AgentControlClient)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"is_safe": True, "confidence": 1.0}
+        mock_response.raise_for_status = MagicMock()
+        client.http_client = AsyncMock()
+        client.http_client.post = AsyncMock(return_value=mock_response)
+
+        # Should not raise, just skip invalid control
+        result = await check_evaluation_with_local(
+            client=client,
+            agent_name=agent_name,
+            step=llm_payload,
+            stage="pre",
+            controls=controls,
+        )
+
+        # Server should be called for valid control
+        client.http_client.post.assert_called_once()
+        assert result.is_safe is True
+
+    @pytest.mark.asyncio
+    async def test_tool_step_local_evaluation(self, agent_name, tool_payload):
+        """Local evaluation should work with Step payloads."""
+        controls = [
+            make_control_dict(
+                1,
+                "local_tool_ctrl",
+                execution="sdk",
+                pattern=r"test",
+                step_type="tool",
+            ),
+        ]
+
+        client = MagicMock(spec=AgentControlClient)
+        client.http_client = AsyncMock()
+        client.http_client.post = AsyncMock()
+
+        result = await check_evaluation_with_local(
+            client=client,
+            agent_name=agent_name,
+            step=tool_payload,
+            stage="pre",
+            controls=controls,
+        )
+
+        # No server call
+        client.http_client.post.assert_not_called()
+
+        # Local control should have matched on Step input
+        assert result.is_safe is False
+
+    @pytest.mark.asyncio
+    async def test_mixed_controls_merged_results(self, agent_name, llm_payload):
+        """Results from local and server should be merged."""
+        controls = [
+            # Local control (action=observe, will match but not deny)
+            make_control_dict(1, "local_log", execution="sdk", pattern=r"test", action="observe"),
+            # Server control
+            make_control_dict(2, "server_ctrl", execution="server"),
+        ]
+
+        # Mock server response with a match
+        server_match = {
+            "control_id": 2,
+            "control_name": "server_ctrl",
+            "action": "observe",
+            "result": {"matched": True, "confidence": 1.0},
+        }
+        client = MagicMock(spec=AgentControlClient)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "is_safe": True,
+            "confidence": 0.9,
+            "matches": [server_match],
+        }
+        mock_response.raise_for_status = MagicMock()
+        client.http_client = AsyncMock()
+        client.http_client.post = AsyncMock(return_value=mock_response)
+
+        result = await check_evaluation_with_local(
+            client=client,
+            agent_name=agent_name,
+            step=llm_payload,
+            stage="pre",
+            controls=controls,
+        )
+
+        # Both local and server should have run
+        client.http_client.post.assert_called_once()
+
+        # Matches should be merged
+        assert result.matches is not None
+        # Local match + server match
+        assert len(result.matches) == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_step_mixed_local_and_server_controls(self, agent_name, tool_payload):
+        """Test mixed local/server controls for same tool step.
+
+        Given: A tool step with both local and server controls
+        When: Local control passes (no deny)
+        Then: Server is called, results merged
+        """
+        controls = [
+            # Local control that won't match (pattern doesn't match)
+            make_control_dict(
+                1,
+                "local_tool_ctrl",
+                execution="sdk",
+                pattern=r"never_match_xyz",
+                action="deny",
+                step_type="tool",
+            ),
+            # Server control
+            make_control_dict(
+                2,
+                "server_tool_ctrl",
+                execution="server",
+                pattern=r"test",
+                action="observe",
+                step_type="tool",
+            ),
+        ]
+
+        # Mock server response
+        server_match = {
+            "control_id": 2,
+            "control_name": "server_tool_ctrl",
+            "action": "observe",
+            "result": {"matched": True, "confidence": 1.0},
+        }
+        client = MagicMock(spec=AgentControlClient)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "is_safe": True,
+            "confidence": 1.0,
+            "matches": [server_match],
+        }
+        mock_response.raise_for_status = MagicMock()
+        client.http_client = AsyncMock()
+        client.http_client.post = AsyncMock(return_value=mock_response)
+
+        result = await check_evaluation_with_local(
+            client=client,
+            agent_name=agent_name,
+            step=tool_payload,
+            stage="pre",
+            controls=controls,
+        )
+
+        # Server should be called (local didn't deny)
+        client.http_client.post.assert_called_once()
+
+        # Result should be safe with server match
+        assert result.is_safe is True
+        assert result.matches is not None
+        assert len(result.matches) == 1
+        assert result.matches[0].control_name == "server_tool_ctrl"
+
+    @pytest.mark.asyncio
+    async def test_tool_step_local_deny_skips_server(self, agent_name, tool_payload):
+        """Test that local deny on tool step short-circuits server call.
+
+        Given: A tool step with local deny control that matches
+        When: Local control matches and denies
+        Then: Server is NOT called, result is unsafe
+        """
+        controls = [
+            # Local control that WILL match and deny
+            make_control_dict(
+                1,
+                "local_deny_ctrl",
+                execution="sdk",
+                pattern=r"test",  # matches tool_payload input
+                action="deny",
+                step_type="tool",
+            ),
+            # Server control (should not be called)
+            make_control_dict(
+                2,
+                "server_tool_ctrl",
+                execution="server",
+                pattern=r"test",
+                action="deny",
+                step_type="tool",
+            ),
+        ]
+
+        client = MagicMock(spec=AgentControlClient)
+        client.http_client = AsyncMock()
+        client.http_client.post = AsyncMock()
+
+        result = await check_evaluation_with_local(
+            client=client,
+            agent_name=agent_name,
+            step=tool_payload,
+            stage="pre",
+            controls=controls,
+        )
+
+        # Server should NOT be called (short-circuit on local deny)
+        client.http_client.post.assert_not_called()
+
+        # Result should be unsafe from local deny
+        assert result.is_safe is False
+        assert result.matches is not None
+        assert len(result.matches) == 1
+        assert result.matches[0].control_name == "local_deny_ctrl"
+
+    @pytest.mark.asyncio
+    async def test_local_control_with_missing_evaluator_raises(self, agent_name, llm_payload):
+        """Test that local control with unavailable evaluator raises RuntimeError.
+
