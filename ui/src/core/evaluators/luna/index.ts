@@ -32,38 +32,3 @@ const stringOrNull = (value: string): string | null =>
 
 /**
  * Coerce a threshold form value (always a string) into the API representation.
- * Numeric-looking values become numbers; empty becomes null; anything else
- * is passed through as a string (e.g. for `eq`/`contains` on text scores).
- */
-const coerceThreshold = (value: string): string | number | null => {
-  const trimmed = value.trim();
-  if (trimmed === '') return null;
-  const num = Number(trimmed);
-  return Number.isNaN(num) ? trimmed : num;
-};
-
-/**
- * Luna (Galileo) direct scorer evaluator definition.
- *
- * Invokes a Galileo Luna scorer and applies a local threshold comparison to
- * the returned score. One of scorer label, scorer ID, or scorer version ID
- * must be provided.
- */
-export const lunaEvaluator: EvaluatorDefinition<LunaFormValues> = {
-  id: 'galileo.luna',
-  displayName: 'Galileo Luna',
-
-  initialValues: {
-    scorer_label: '',
-    scorer_id: '',
-    scorer_version_id: '',
-    threshold: '0.5',
-    operator: 'gte',
-    payload_field: 'input',
-    timeout_ms: 10000,
-    scorer_config: '',
-  },
-
-  validate: {
-    scorer_label: (_value, values) => {
-      const v = values as LunaFormValues;
