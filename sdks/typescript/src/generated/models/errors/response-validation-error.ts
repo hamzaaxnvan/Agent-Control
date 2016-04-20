@@ -10,3 +10,16 @@ export class ResponseValidationError extends AgentControlSDKError {
   /**
    * The raw value that failed validation.
    */
+  public readonly rawValue: unknown;
+
+  /**
+   * The raw message that failed validation.
+   */
+  public readonly rawMessage: unknown;
+
+  constructor(
+    message: string,
+    extra: {
+      response: Response;
+      request: Request;
+      body: string;
