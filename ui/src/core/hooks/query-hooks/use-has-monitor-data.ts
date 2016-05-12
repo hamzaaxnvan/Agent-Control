@@ -38,3 +38,17 @@ export function useHasMonitorData(
   options?: {
     enabled?: boolean;
   }
+) {
+  return useQuery({
+    queryKey: ['has-monitor-data', agentName],
+    queryFn: async () => {
+      const timeRange = getStoredTimeRange();
+
+      const { data, error } = await api.observability.getStats({
+        agent_name: agentName,
+        time_range: timeRange,
+        include_timeseries: false, // Don't need timeseries, just totals
+      });
+
+      if (error) {
+        return false; // On error, default to no data
