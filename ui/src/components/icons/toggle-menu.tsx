@@ -23,3 +23,11 @@ const ToggleMenu = () => {
             fill="white"
             height="16"
             transform="matrix(-1 0 0 1 16 0)"
+            width="16"
+          />
+        </clipPath>
+        <clipPath id="clip1_2238_10756">
+          <rect
+            fill="white"
+            height="14.6667"
+            transform="matrix(-1 0 0 1 15.3333 0.666504)"

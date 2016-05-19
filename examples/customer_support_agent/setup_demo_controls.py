@@ -121,3 +121,64 @@ DEMO_CONTROLS = [
     },
     {
         "name": "observe-ticket-creation",
+        "description": "Observes all ticket creation for audit (scope.step_names: exact match)",
+        "definition": {
+            "description": "Observes all ticket creation for audit (scope.step_names: exact match)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["create_ticket"],
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "*",  # Observe entire payload
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {"pattern": r".*"},  # Always matches
+                },
+            },
+            "action": {"decision": "observe"},
+        },
+    },
+    # ==========================================================================
+    # TOOL CALL CONTROLS - using scope.step_name_regex (pattern match)
+    # ==========================================================================
+    {
+        "name": "block-profanity-in-search",
+        "description": "Blocks profanity in any search/lookup tool (scope.step_name_regex: pattern)",
+        "definition": {
+            "description": "Blocks profanity in any search/lookup tool (scope.step_name_regex: pattern)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_name_regex": r"(search|lookup)",
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "input.query",
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        # Simple profanity pattern for demo
+                        "pattern": r"(?i)\b(badword|offensive|inappropriate)\b"
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        },
+    },
+    {
+        "name": "observe-high-priority-ticket",
+        "description": "Observes high priority tickets (path: arguments.priority)",
+        "definition": {
+            "description": "Observes high priority tickets (path: input.priority)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
