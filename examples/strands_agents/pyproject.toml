@@ -1,0 +1,17 @@
+[project]
+name = "agent-control-strands-examples"
+version = "1.0.0"
+description = "AgentControl + AWS Strands integration examples"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-control-sdk[strands-agents]>=6.3.0",
+    "agent-control-engine>=6.3.0",
+    "agent-control-evaluators>=6.3.0",
+    "agent-control-models>=6.3.0",
+    "agent-control-telemetry>=6.3.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.24.0",
+    "streamlit>=1.30.0",
+]

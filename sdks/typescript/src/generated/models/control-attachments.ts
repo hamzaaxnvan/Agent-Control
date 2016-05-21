@@ -41,17 +41,3 @@ export type ControlAttachments = {
   targetsTruncated: boolean;
 };
 
-/** @internal */
-export const ControlAttachments$inboundSchema: z.ZodMiniType<
-  ControlAttachments,
-  unknown
-> = z.pipe(
-  z.object({
-    agents: types.optional(z.array(AgentRef$inboundSchema)),
-    policies: types.optional(z.array(PolicyRef$inboundSchema)),
-    targets: types.optional(z.array(TargetAttachmentRef$inboundSchema)),
-    targets_total: z._default(types.number(), 0),
-    targets_truncated: z._default(types.boolean(), false),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
