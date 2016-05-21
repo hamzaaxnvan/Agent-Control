@@ -16,21 +16,3 @@ class RegexEvaluator(Evaluator[RegexEvaluatorConfig]):
 
     Matches data against a regex pattern using Google RE2 for safety
     (protects against ReDoS attacks).
-
-    Supported flags:
-        - IGNORECASE / I: Case-insensitive matching
-
-    Example config:
-        {"pattern": "\\\\d{3}-\\\\d{2}-\\\\d{4}"}  # SSN pattern
-        {"pattern": "secret", "flags": ["IGNORECASE"]}  # Case-insensitive
-    """
-
-    metadata = EvaluatorMetadata(
-        name="regex",
-        version="1.0.0",
-        description="Regular expression pattern matching (RE2)",
-    )
-    config_model = RegexEvaluatorConfig
-
-    def __init__(self, config: RegexEvaluatorConfig) -> None:
-        super().__init__(config)
