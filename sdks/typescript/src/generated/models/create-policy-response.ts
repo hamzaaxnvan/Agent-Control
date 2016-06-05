@@ -14,3 +14,20 @@ export type CreatePolicyResponse = {
    * Identifier of the created policy
    */
   policyId: number;
+};
+
+/** @internal */
+export const CreatePolicyResponse$inboundSchema: z.ZodMiniType<
+  CreatePolicyResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    policy_id: types.number(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "policy_id": "policyId",
+    });
+  }),
+);
+

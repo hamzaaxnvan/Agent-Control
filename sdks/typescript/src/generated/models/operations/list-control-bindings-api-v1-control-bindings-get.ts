@@ -10,3 +10,15 @@ export type ListControlBindingsApiV1ControlBindingsGetRequest = {
    * Opaque cursor returned as ``next_cursor`` on the previous page. Pass it back unchanged to fetch the next page.
    */
   cursor?: string | null | undefined;
+  /**
+   * Maximum bindings to return (default 20, max 100).
+   */
+  limit?: number | undefined;
+  targetType?: string | null | undefined;
+  targetId?: string | null | undefined;
+  controlId?: number | null | undefined;
+};
+
+/** @internal */
+export type ListControlBindingsApiV1ControlBindingsGetRequest$Outbound = {
+  cursor?: string | null | undefined;
