@@ -20,3 +20,10 @@ export type DeleteControlBindingByKeyResponse = {
 
 /** @internal */
 export const DeleteControlBindingByKeyResponse$inboundSchema: z.ZodMiniType<
+  DeleteControlBindingByKeyResponse,
+  unknown
+> = z.object({
+  deleted: types.boolean(),
+});
+
+export function deleteControlBindingByKeyResponseFromJSON(

@@ -37,16 +37,3 @@ test.describe('API key login flow', () => {
       page.getByText('Enter your API key to continue.')
     ).toBeVisible();
 
-    await page.getByPlaceholder('Enter your API key').fill('valid-key');
-    await page.getByRole('button', { name: 'Sign in' }).click();
-
-    // After login, main app should be visible
-    await expect(
-      page.getByRole('heading', { name: 'Agents overview' })
-    ).toBeVisible({ timeout: 5000 });
-  });
-
-  test('shows error when API key is invalid', async ({ page }) => {
-    await mockApiRoutesWithAuthRequired(page);
-    await mockRoutes.login(page, { authenticated: false });
-    await page.goto('/');
