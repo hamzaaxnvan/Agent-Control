@@ -122,3 +122,252 @@ async def test_check_evaluation_accepts_step_with_tool_definitions():
 
     client = MagicMock()
     client.http_client = MagicMock()
+    client.http_client.post = AsyncMock(return_value=DummyResponse())
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            },
+        }
+    ]
+    step = Step(
+        type="llm",
+        name="openai_agent",
+        input=[{"role": "user", "content": "question"}],
+        output={"role": "assistant", "content": "answer"},
+        tools=tools,
+    )
+
+    await evaluation.check_evaluation(
+        client=client,
+        agent_name="Agent-Example_01",
+        step=step,
+        stage="post",
+    )
+
+    sent_step = client.http_client.post.await_args.kwargs["json"]["step"]
+    assert sent_step["tools"] == tools
+    assert sent_step["tools"][0]["function"]["parameters"]["properties"]["query"] == {
+        "type": "string"
+    }
+
+
+@pytest.mark.asyncio
+async def test_evaluate_controls_requires_server_url():
+    """evaluate_controls should require server_url to be configured."""
+    with patch("agent_control.state.server_url", None):
+        with pytest.raises(RuntimeError, match="Server URL not configured"):
+            await evaluation.evaluate_controls(
+                step_name="chat",
+                input="hello",
+                stage="pre",
+                agent_name="test-bot",
+            )
+
+
+@pytest.mark.asyncio
+async def test_evaluate_controls_with_explicit_agent_name(monkeypatch):
+    """evaluate_controls should call check_evaluation_with_local."""
+    mock_result = EvaluationResult(is_safe=True, confidence=1.0)
+    mock_check = AsyncMock(return_value=mock_result)
+    monkeypatch.setattr(evaluation, "check_evaluation_with_local", mock_check)
+
+    with patch("agent_control.state.server_url", "http://localhost:8000"):
+        with patch("agent_control.state.api_key", None):
+            result = await evaluation.evaluate_controls(
+                step_name="chat",
+                input="hello",
+                stage="pre",
+                agent_name="test-bot",
+            )
+
+    assert result.is_safe is True
+    assert result.confidence == 1.0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_controls_delegates_to_evaluate_step(monkeypatch):
+    """evaluate_controls builds the Step then routes through evaluate_step."""
+    mock_result = EvaluationResult(is_safe=True, confidence=1.0)
+    mock_evaluate_step = AsyncMock(return_value=mock_result)
+    monkeypatch.setattr(evaluation, "evaluate_step", mock_evaluate_step)
+
+    result = await evaluation.evaluate_controls(
+        step_name="chat",
+        input="hello",
+        stage="pre",
+        agent_name="test-bot",
+    )
+
+    assert result is mock_result
+    mock_evaluate_step.assert_awaited_once()
+    args, kwargs = mock_evaluate_step.call_args
+    step_arg = args[0]
+    assert isinstance(step_arg, Step)
+    assert step_arg.name == "chat"
+    assert step_arg.input == "hello"
+    assert kwargs["agent_name"] == "test-bot"
+    assert kwargs["stage"] == "pre"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_controls_coerces_dict_children_to_step(monkeypatch):
+    """children= accepts plain dicts; pydantic coerces them to Step instances."""
+    mock_check = AsyncMock(return_value=EvaluationResult(is_safe=True, confidence=1.0))
+    monkeypatch.setattr(evaluation, "check_evaluation_with_local", mock_check)
+
+    with patch("agent_control.state.server_url", "http://localhost:8000"):
+        await evaluation.evaluate_controls(
+            step_name="trace1",
+            step_type="trace",
+            input={"request": "r1"},
+            children=[{"type": "llm", "name": "x", "input": "hi", "output": "bye"}],
+            stage="post",
+            agent_name="test-bot",
+        )
+
+    step = mock_check.call_args.kwargs["step"]
+    assert step.children is not None
+    assert len(step.children) == 1
+    assert isinstance(step.children[0], Step)
+    assert step.children[0].type == "llm"
+    assert step.children[0].name == "x"
+    mock_check.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_evaluate_controls_with_context(monkeypatch):
+    """evaluate_controls should pass context through to evaluation."""
+    mock_result = EvaluationResult(is_safe=True, confidence=1.0)
+    mock_check = AsyncMock(return_value=mock_result)
+    monkeypatch.setattr(evaluation, "check_evaluation_with_local", mock_check)
+
+    with patch("agent_control.state.server_url", "http://localhost:8000"):
+        with patch("agent_control.state.api_key", None):
+            await evaluation.evaluate_controls(
+                step_name="chat",
+                input="hello",
+                context={"user_id": "123"},
+                stage="pre",
+                agent_name="test-bot",
+            )
+
+    assert mock_check.call_args is not None
+
+
+@pytest.mark.parametrize("step_type", ["trace", "session"])
+@pytest.mark.asyncio
+async def test_evaluate_controls_accepts_custom_step_type(monkeypatch, step_type):
+    """Direct evaluation preserves custom types in the runtime Step."""
+    mock_check = AsyncMock(return_value=EvaluationResult(is_safe=True, confidence=1.0))
+    monkeypatch.setattr(evaluation, "check_evaluation_with_local", mock_check)
+
+    with patch("agent_control.state.server_url", "http://localhost:8000"):
+        await evaluation.evaluate_controls(
+            step_name="trace_check",
+            step_type=step_type,
+            input="trace input",
+            output="trace output",
+            stage="post",
+            agent_name="test-bot",
+        )
+
+    step = mock_check.call_args.kwargs["step"]
+    assert step.type == step_type
+    assert step.name == "trace_check"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_controls_rejects_empty_step_type(monkeypatch):
+    """Direct evaluation rejects empty custom types before evaluation."""
+    mock_check = AsyncMock(return_value=EvaluationResult(is_safe=True, confidence=1.0))
+    monkeypatch.setattr(evaluation, "check_evaluation_with_local", mock_check)
+
+    with patch("agent_control.state.server_url", "http://localhost:8000"):
+        with pytest.raises(ValueError, match="non-empty string"):
+            await evaluation.evaluate_controls(
+                step_name="trace_check",
+                step_type="",
+                agent_name="test-bot",
+            )
+
+    mock_check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_evaluate_controls_preserves_explicit_tools_and_ground_truth(monkeypatch):
+    """Explicit structured scorer context is preserved on the SDK Step."""
+    # Given: a configured SDK and local evaluation boundary
+    mock_check = AsyncMock(return_value=EvaluationResult(is_safe=True, confidence=1.0))
+    monkeypatch.setattr(evaluation, "check_evaluation_with_local", mock_check)
+    tools = [
+        {"name": "search", "description": "Search", "input_schema": {"type": "object"}}
+    ]
+
+    # When: a direct SDK caller supplies tools and ground truth
+    with patch("agent_control.state.server_url", "http://localhost:8000"):
+        await evaluation.evaluate_controls(
+            step_name="chat",
+            input="question",
+            output="answer",
+            tools=tools,
+            ground_truth={"answer": "expected"},
+            stage="post",
+            agent_name="test-bot",
+        )
+
+    # Then: both fields are retained as structured JSON
+    step = mock_check.call_args.kwargs["step"]
+    assert step.tools == tools
+    assert step.ground_truth == {"answer": "expected"}
+
+
+def test_step_legacy_serialization_is_unchanged_without_children():
+    """A Step without children keeps the existing serialized payload."""
+    step = Step(type="llm", name="chat", input="hello")
+
+    assert step.model_dump(mode="json") == {
+        "type": "llm",
+        "name": "chat",
+        "input": "hello",
+        "output": None,
+        "context": None,
+        "tools": None,
+        "ground_truth": None,
+    }
+    assert Step(type="llm", name="chat", input="hello", children=None).children is None
+
+
+def test_step_accepts_and_preserves_recursive_children():
+    """Nested child steps retain all provider-neutral runtime fields."""
+    child_payload = {
+        "type": "llm",
+        "name": "child",
+        "input": {"prompt": "question"},
+        "output": "answer",
+        "context": {"conversation": ["earlier"]},
+        "tools": [{"name": "lookup", "input_schema": {"type": "object"}}],
+        "ground_truth": {"answer": "expected"},
+        "children": [
+            {"type": "retriever", "name": "search", "input": {"query": "q"}}
+        ],
+    }
+    parent = Step(type="llm", name="parent", input="hello", children=[child_payload])
+
+    assert parent.children is not None
+    child = parent.children[0]
+    assert child.type == child_payload["type"]
+    assert child.name == child_payload["name"]
+    assert child.input == child_payload["input"]
+    assert child.output == child_payload["output"]
+    assert child.context == child_payload["context"]
+    assert child.tools == child_payload["tools"]
+    assert child.ground_truth == child_payload["ground_truth"]
+    assert child.children is not None
+    assert child.children[0].input == {"query": "q"}
+
