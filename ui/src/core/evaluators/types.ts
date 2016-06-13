@@ -1,0 +1,52 @@
+import type { UseFormReturnType } from '@mantine/form';
+
+import type { ControlExecution } from '@/core/api/types';
+
+/**
+ * Base interface for evaluator definitions.
+ *
+ * To add a new evaluator:
+ * 1. Create a new folder under `evaluators/` (e.g., `evaluators/my-evaluator/`)
+ * 2. Implement `EvaluatorDefinition<YourFormValues>`
+ * 3. Export the evaluator from `evaluators/index.ts`
+ *
+ * The main edit-control component will automatically pick it up.
+ */
+export type EvaluatorDefinition<TFormValues = any> = {
+  /** Unique evaluator ID (must match backend evaluator name) */
+  id: string;
+
+  /** Human-readable display name */
+  displayName: string;
+
+  /** Initial form values when creating a new control */
+  initialValues: TFormValues;
+
+  /** Execution environment selected when creating a control for this evaluator. */
+  defaultExecution?: ControlExecution;
+
+  /** Execution environments supported by this evaluator. */
+  supportedExecutions?: readonly ControlExecution[];
+
+  /**
+   * Validation rules for the form.
+   * Uses Mantine form validation format.
+   * @see https://mantine.dev/form/validation/
+   */
+  validate?: Record<
+    string,
+    (value: unknown, values: TFormValues) => string | null
+  >;
+
+  /**
+   * Convert form values to API config format.
+   * Called when saving the control.
+   */
+  toConfig: (values: TFormValues) => Record<string, unknown>;
+
+  /**
+   * Convert API config to form values.
+   * Called when loading an existing control.
+   */
+  fromConfig: (config: Record<string, unknown>) => TFormValues;
+

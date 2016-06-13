@@ -1,0 +1,3 @@
+export {
+  applyTextEdit,
+  buildCodeMirrorInlineServerValidationErrorsExtension,
