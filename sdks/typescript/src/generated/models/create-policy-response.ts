@@ -23,11 +23,3 @@ export const CreatePolicyResponse$inboundSchema: z.ZodMiniType<
 > = z.pipe(
   z.object({
     policy_id: types.number(),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
-      "policy_id": "policyId",
-    });
-  }),
-);
-

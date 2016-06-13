@@ -11,17 +11,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
 export type Loc = string | number;
 
-export type ValidationError = {
-  loc: Array<string | number>;
-  msg: string;
-  type: string;
-};
-
-/** @internal */
-export const Loc$inboundSchema: z.ZodMiniType<Loc, unknown> = smartUnion([
-  types.string(),
-  types.number(),
-]);
-
-export function locFromJSON(
-  jsonString: string,
