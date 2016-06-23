@@ -10,3 +10,16 @@ export type ListControlVersionsApiV1ControlsControlIdVersionsGetRequest = {
   /**
    * Version number to start after (newest-first pagination)
    */
+  cursor?: number | null | undefined;
+  limit?: number | undefined;
+};
+
+/** @internal */
+export type ListControlVersionsApiV1ControlsControlIdVersionsGetRequest$Outbound =
+  {
+    control_id: number;
+    cursor?: number | null | undefined;
+    limit: number;
+  };
+
+/** @internal */
