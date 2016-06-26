@@ -15,20 +15,3 @@ export const TimeRange = {
   Sevend: "7d",
   Thirtyd: "30d",
   OneHundredAndEightyd: "180d",
-  ThreeHundredAndSixtyFived: "365d",
-} as const;
-export type TimeRange = ClosedEnum<typeof TimeRange>;
-
-export type GetStatsApiV1ObservabilityStatsGetRequest = {
-  agentName: string;
-  timeRange?: TimeRange | undefined;
-  includeTimeseries?: boolean | undefined;
-};
-
-/** @internal */
-export const TimeRange$outboundSchema: z.ZodMiniEnum<typeof TimeRange> = z.enum(
-  TimeRange,
-);
-
-/** @internal */
-export type GetStatsApiV1ObservabilityStatsGetRequest$Outbound = {
