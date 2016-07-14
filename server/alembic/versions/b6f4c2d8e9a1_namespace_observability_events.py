@@ -36,22 +36,3 @@ def _replace_primary_key(columns: list[str]) -> None:
         return
 
     constraint_name = pk.get("name")
-    if constraint_name:
-        op.drop_constraint(constraint_name, _EVENT_TABLE, type_="primary")
-    op.create_primary_key("control_execution_events_pkey", _EVENT_TABLE, columns)
-
-
-def upgrade() -> None:
-    if _NAMESPACE_COLUMN not in _column_names():
-        op.add_column(
-            _EVENT_TABLE,
-            sa.Column(
-                _NAMESPACE_COLUMN,
-                sa.String(length=255),
-                server_default=sa.text("'default'"),
-                nullable=False,
-            ),
-        )
-    _replace_primary_key(_TARGET_PK_COLUMNS)
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_events_agent_time")
