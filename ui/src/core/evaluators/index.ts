@@ -54,22 +54,3 @@ export const evaluators: AnyEvaluatorDefinition[] = [
   regexEvaluator,
   listEvaluator,
   jsonEvaluator,
-  sqlEvaluator,
-  lunaEvaluator,
-];
-
-/**
- * Map of evaluator ID to evaluator for quick lookup.
- */
-export const evaluatorRegistry = new Map<string, AnyEvaluatorDefinition>(
-  evaluators.map((evaluator) => [evaluator.id, evaluator])
-);
-
-/**
- * Get an evaluator by ID.
- * Returns undefined if the evaluator is not found.
- */
-export const getEvaluator = (id: string): AnyEvaluatorDefinition | undefined =>
-  evaluatorRegistry.get(id);
-
-/**
