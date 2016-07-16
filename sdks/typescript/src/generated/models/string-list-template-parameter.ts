@@ -26,31 +26,3 @@ export type StringListTemplateParameter = {
    */
   label: string;
   /**
-   * Optional placeholder/example list
-   */
-  placeholder?: Array<string> | null | undefined;
-  /**
-   * Whether the caller must provide a value when no default exists
-   */
-  required?: boolean | undefined;
-  type: "string_list";
-  /**
-   * Optional UI hint for rendering the parameter input
-   */
-  uiHint?: string | null | undefined;
-};
-
-/** @internal */
-export const StringListTemplateParameter$inboundSchema: z.ZodMiniType<
-  StringListTemplateParameter,
-  unknown
-> = z.pipe(
-  z.object({
-    default: z.optional(z.nullable(z.array(types.string()))),
-    description: z.optional(z.nullable(types.string())),
-    label: types.string(),
-    placeholder: z.optional(z.nullable(z.array(types.string()))),
-    required: z._default(types.boolean(), true),
-    type: types.literal("string_list"),
-    ui_hint: z.optional(z.nullable(types.string())),
-  }),
