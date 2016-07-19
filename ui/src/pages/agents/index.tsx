@@ -14,3 +14,19 @@ const AgentPage: NextPageWithLayout = () => {
     if (router.isReady && typeof id !== 'string') {
       void router.replace('/');
     }
+  }, [id, router]);
+
+  if (!router.isReady || typeof id !== 'string') {
+    return (
+      <Box p="xl" maw={1400} mx="auto" my={0}>
+        <Center h={400}>
+          <Stack align="center" gap="md">
+            <Loader size="lg" />
+            <Text c="dimmed">Loading...</Text>
+          </Stack>
+        </Center>
+      </Box>
+    );
+  }
+
+  const defaultTab = tab === 'controls' || tab === 'monitor' ? tab : undefined;

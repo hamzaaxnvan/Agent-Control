@@ -1,0 +1,8 @@
+[project]
+name = "secure-research-crew"
+version = "0.1.0"
+description = "CrewAI multi-agent research crew with per-agent policies via Agent Control"
+requires-python = ">=3.12"
+dependencies = [
+    "crewai[tools]>=1.10.1",
+    "openai>=1.0.0",

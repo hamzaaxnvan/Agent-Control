@@ -65,3 +65,36 @@ class TestEvaluatorMetadata:
             description="Full evaluator",
             requires_api_key=True,
             timeout_ms=15000,
+        )
+
+        assert metadata.name == "full-evaluator"
+        assert metadata.version == "2.0.0"
+        assert metadata.requires_api_key is True
+        assert metadata.timeout_ms == 15000
+
+
+class TestEvaluator:
+    """Tests for Evaluator base class."""
+
+    def test_evaluator_is_abstract(self):
+        """Test that Evaluator is an ABC."""
+        from abc import ABC
+        assert issubclass(Evaluator, ABC)
+
+    def test_mock_evaluator_metadata(self):
+        """Test that mock evaluator has correct metadata."""
+        assert MockEvaluator.metadata.name == "mock-evaluator"
+        assert MockEvaluator.metadata.version == "1.0.0"
+        assert MockEvaluator.metadata.timeout_ms == 5000
+
+    @pytest.mark.asyncio
+    async def test_mock_evaluator_evaluate(self):
+        """Test mock evaluator evaluation."""
+        evaluator = MockEvaluator.from_dict({"should_match": True})
+
+        result = await evaluator.evaluate("test data")
+
+        assert result.matched is True
+        assert result.confidence == 1.0
+        assert result.metadata["data"] == "test data"
+
