@@ -19,3 +19,24 @@ export type RuntimeTokenExchangeRequest = {
   targetType: string;
 };
 
+/** @internal */
+export type RuntimeTokenExchangeRequest$Outbound = {
+  target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const RuntimeTokenExchangeRequest$outboundSchema: z.ZodMiniType<
+  RuntimeTokenExchangeRequest$Outbound,
+  RuntimeTokenExchangeRequest
+> = z.pipe(
+  z.object({
+    targetId: z.string(),
+    targetType: z.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      targetId: "target_id",
+      targetType: "target_type",
+    });
+  }),
