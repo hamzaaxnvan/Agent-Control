@@ -23,3 +23,12 @@ export type PolicyRef = {
 export const PolicyRef$inboundSchema: z.ZodMiniType<PolicyRef, unknown> = z
   .pipe(
     z.object({
+      policy_id: types.number(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        "policy_id": "policyId",
+      });
+    }),
+  );
+
