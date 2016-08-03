@@ -20,3 +20,14 @@ def _get_migration_url() -> str:
     if configured_url:
         return configured_url
     return db_config.get_url()
+
+
+def run_migrations_offline() -> None:
+    url = _get_migration_url()
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True,
+        transaction_per_migration=True,
+    )
