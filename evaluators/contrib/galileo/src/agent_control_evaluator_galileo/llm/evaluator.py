@@ -85,3 +85,177 @@ def _truncated_http_response_body(body: str) -> tuple[str, bool]:
 def _http_status_error_metadata(error: httpx.HTTPStatusError) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
 
+    request = error.request
+    metadata["http_method"] = request.method
+    metadata["http_endpoint_path"] = request.url.path
+
+    response = error.response
+    metadata["http_status_code"] = response.status_code
+    metadata["http_response_content_type"] = response.headers.get("content-type")
+
+    body = response.text
+    if body:
+        metadata["http_response_body"], metadata["http_response_body_truncated"] = (
+            _truncated_http_response_body(body)
+        )
+
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
+@register_evaluator
+class LlmEvaluator(Evaluator[LlmEvaluatorConfig]):
+    """Galileo LLM-as-judge evaluator using the direct scorer invocation API.
+
+    This evaluator requires Agent Control's authenticated execution context to
+    invoke the Galileo scorer.  ``target_type`` and ``target_id`` are optional
+    fields in the general SDK API, but ``galileo.llm`` depends on them being
+    supplied via a *targeted* SDK initialisation (e.g. a log-stream or
+    agent-stream target) so that a ``run_id`` can be forwarded to Galileo.
+    Without a supported ``target_type`` (``"log_stream"`` or
+    ``"agent_stream"``) the ``run_id`` in the execution context will be
+    ``None``, which may limit Galileo's ability to associate the scorer result
+    with a specific run.
+
+    Typical targeted SDK usage::
+
+        agent_control.init(
+            agent_name="my-agent",
+            target_type="log_stream",
+            target_id="<log-stream-id>",
+        )
+    """
+
+    metadata = EvaluatorMetadata(
+        name="galileo.llm",
+        version=_PACKAGE_VERSION,
+        description="Galileo LLM-as-judge direct scorer evaluation",
+        requires_api_key=True,
+        timeout_ms=10000,
+    )
+    config_model = LlmEvaluatorConfig
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Return True only when the LLM invoke runtime feature flag is enabled.
+
+        The LLM evaluator requires Orbit-side support for ``execution_context`` to
+        fetch LLM credentials. It is unavailable until
+        ``GALILEO_FEATURE_FLAG_LLM_EVALUATOR=enabled`` is set.
+        """
+        return LLM_AVAILABLE and llm_evaluator_enabled()
+
+    def __init__(self, config: LlmEvaluatorConfig) -> None:
+        """Initialize the direct LLM-as-judge evaluator.
+
+        Args:
+            config: Validated LlmEvaluatorConfig instance.
+
+        Raises:
+            ValueError: If neither GALILEO_API_SECRET_KEY nor GALILEO_API_SECRET is set.
+        """
+        has_secret = os.getenv("GALILEO_API_SECRET_KEY") or os.getenv("GALILEO_API_SECRET")
+        if not has_secret:
+            raise ValueError(
+                "GALILEO_API_SECRET_KEY or GALILEO_API_SECRET is required for LLM "
+                "scorer invocation. Set one as an environment variable before using "
+                "galileo.llm."
+            )
+
+        super().__init__(config)
+        self._client = GalileoLLMClient()
+
+    def _get_client(self) -> GalileoLLMClient:
+        """Get the Galileo LLM client."""
+        return self._client
+
+    def _prepare_payload(self, data: Any) -> tuple[str | None, str | None]:
+        """Prepare scorer input/output fields from selected data."""
+        if isinstance(data, dict):
+            input_text = _extract_dict_text(data, "input")
+            output_text = _extract_dict_text(data, "output")
+            if _has_text(input_text) or _has_text(output_text):
+                return input_text, output_text
+
+        text = _coerce_payload_text(data)
+        if self.config.payload_field == "output":
+            return None, text
+        return text, None
+
+    def _score_matches(self, score: JSONValue) -> bool:
+        """Apply the configured local threshold comparison to a raw LLM scorer score."""
+        operator = self.config.operator
+        threshold = self.config.threshold
+
+        if operator == "any":
+            return bool(score)
+        if operator == "eq":
+            return score == threshold
+        if operator == "ne":
+            return score != threshold
+        if operator == "contains":
+            return _contains(score, threshold)
+
+        score_number = coerce_number(score)
+        threshold_number = coerce_number(threshold)
+        if score_number is None:
+            raise ValueError(f"LLM scorer score {score!r} is not numeric")
+        if threshold_number is None:
+            raise ValueError(f"LLM scorer threshold {threshold!r} is not numeric")
+
+        if operator == "gt":
+            return score_number > threshold_number
+        if operator == "gte":
+            return score_number >= threshold_number
+        if operator == "lt":
+            return score_number < threshold_number
+        if operator == "lte":
+            return score_number <= threshold_number
+
+        raise ValueError(f"Unsupported LLM scorer operator: {operator}")
+
+    async def evaluate(self, data: Any) -> EvaluatorResult:
+        """Evaluate selected data with Galileo LLM-as-judge direct scorer invocation.
+
+        Args:
+            data: The data selected from the runtime step.
+
+        Returns:
+            EvaluatorResult with local threshold decision and scorer metadata.
+        """
+        return await self._evaluate(data, step=None)
+
+    async def evaluate_with_context(self, data: Any, step: Step) -> EvaluatorResult:
+        """Evaluate selected data while dual-writing the complete runtime step.
+
+        Args:
+            data: Data selected by the configured control selector.
+            step: Complete runtime step for structured scorer context.
+
+        Returns:
+            EvaluatorResult with local threshold decision and scorer metadata.
+        """
+        return await self._evaluate(data, step=step)
+
+    async def evaluate_with_extensions(
+        self,
+        data: Any,
+        step: Step,
+        extensions: JSONObject | None,
+    ) -> EvaluatorResult:
+        """Evaluate using opaque authenticated metadata supplied by Agent Control.
+
+        ``extensions`` carries the authenticated principal's ``namespace_key``
+        (mapped to ``organization_id``), optional ``caller_id`` (``user_id``),
+        and optional ``metadata.project_id``.  When ``target_type`` is
+        ``"log_stream"`` or ``"agent_stream"``, ``target_id`` is forwarded as
+        ``run_id`` in the Galileo execution context.  If ``target_type`` /
+        ``target_id`` are absent or unsupported, ``run_id`` will be ``None``.
+
+        Note: ``target_type`` and ``target_id`` are optional in the general SDK
+        API.  Pass them via :func:`agent_control.init` (or the equivalent SDK
+        call) when using ``galileo.llm`` so that Galileo can associate scorer
+        results with the correct run.
+        """
+        return await self._evaluate(
+            data,
+            step=step,

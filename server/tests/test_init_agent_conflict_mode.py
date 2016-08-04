@@ -192,3 +192,100 @@ def test_init_agent_overwrite_existing_agent_requires_update_auth(
 
     assert overwrite_resp.status_code == 403
 
+
+def test_init_agent_force_replace_existing_agent_requires_update_auth(
+    client: TestClient,
+) -> None:
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    create_resp = client.post(
+        "/api/v1/agents/initAgent",
+        json=_init_payload(agent_name=agent_name),
+    )
+    assert create_resp.status_code == 200
+
+    set_authorizer(CreateOnlyAuthorizer())
+    force_resp = client.post(
+        "/api/v1/agents/initAgent",
+        json={**_init_payload(agent_name=agent_name), "force_replace": True},
+    )
+
+    assert force_resp.status_code == 403
+
+
+def test_init_agent_strict_existing_agent_mutation_requires_update_auth(
+    client: TestClient,
+) -> None:
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    create_resp = client.post(
+        "/api/v1/agents/initAgent",
+        json=_init_payload(agent_name=agent_name),
+    )
+    assert create_resp.status_code == 200
+
+    set_authorizer(CreateOnlyAuthorizer())
+    strict_resp = client.post(
+        "/api/v1/agents/initAgent",
+        json=_init_payload(
+            agent_name=agent_name,
+            steps=[
+                {
+                    "type": "tool",
+                    "name": "new-tool",
+                    "input_schema": {"type": "object"},
+                    "output_schema": {"type": "object"},
+                }
+            ],
+        ),
+    )
+
+    assert strict_resp.status_code == 403
+
+
+def test_init_agent_overwrite_warns_on_removed_referenced_evaluator(client: TestClient) -> None:
+    # Given: an agent whose assigned policy contains a control referencing an agent evaluator.
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    evaluator_name = "custom-eval"
+
+    init_resp = client.post(
+        "/api/v1/agents/initAgent",
+        json=_init_payload(
+            agent_name=agent_name,
+            evaluators=[{"name": evaluator_name, "config_schema": {"type": "object"}}],
+        ),
+    )
+    assert init_resp.status_code == 200
+
+    policy_id, control_id, control_name = _create_policy_with_agent_evaluator_control(
+        client, agent_name=agent_name, evaluator_name=evaluator_name
+    )
+    assign_resp = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+    assert assign_resp.status_code == 200
+
+    # When: overwrite mode removes the evaluator from the incoming registration payload.
+    overwrite_resp = client.post(
+        "/api/v1/agents/initAgent",
+        json=_init_payload(
+            agent_name=agent_name,
+            evaluators=[],
+            conflict_mode="overwrite",
+        ),
+    )
+    assert overwrite_resp.status_code == 200
+    body = overwrite_resp.json()
+
+    # Then: the response includes active-control reference warnings and evaluator removal.
+    assert body["overwrite_applied"] is True
+    assert body["overwrite_changes"]["evaluators_removed"] == [evaluator_name]
+    assert body["overwrite_changes"]["evaluator_removals"] == [
+        {
+            "name": evaluator_name,
+            "referenced_by_active_controls": True,
+            "control_ids": [control_id],
+            "control_names": [control_name],
+        }
+    ]
+
+    get_resp = client.get(f"/api/v1/agents/{agent_name}/evaluators")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["evaluators"] == []
+
