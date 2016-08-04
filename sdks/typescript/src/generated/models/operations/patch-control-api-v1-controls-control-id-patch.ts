@@ -7,3 +7,21 @@ import { remap as remap$ } from "../../lib/primitives.js";
 import * as models from "../index.js";
 
 export type PatchControlApiV1ControlsControlIdPatchRequest = {
+  controlId: number;
+  body: models.PatchControlRequest;
+};
+
+/** @internal */
+export type PatchControlApiV1ControlsControlIdPatchRequest$Outbound = {
+  control_id: number;
+  body: models.PatchControlRequest$Outbound;
+};
+
+/** @internal */
+export const PatchControlApiV1ControlsControlIdPatchRequest$outboundSchema:
+  z.ZodMiniType<
+    PatchControlApiV1ControlsControlIdPatchRequest$Outbound,
+    PatchControlApiV1ControlsControlIdPatchRequest
+  > = z.pipe(
+    z.object({
+      controlId: z.int(),
