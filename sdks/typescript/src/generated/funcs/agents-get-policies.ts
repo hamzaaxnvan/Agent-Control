@@ -43,3 +43,49 @@ export function agentsGetPolicies(
     | errors.HTTPValidationError
     | AgentControlSDKError
     | ResponseValidationError
+    | ConnectionError
+    | RequestAbortedError
+    | RequestTimeoutError
+    | InvalidRequestError
+    | UnexpectedClientError
+    | SDKValidationError
+  >
+> {
+  return new APIPromise($do(
+    client,
+    request,
+    options,
+  ));
+}
+
+async function $do(
+  client: AgentControlSDKCore,
+  request: operations.GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      models.GetAgentPoliciesResponse,
+      | errors.HTTPValidationError
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) =>
+      z.parse(
+        operations
+          .GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest$outboundSchema,
+        value,
+      ),
+    "Input validation failed",
+  );

@@ -186,3 +186,192 @@ class TestRegister:
 
         register(my_func)
 
+        class LaterModel(BaseModel):
+            value: str
+
+        my_func.__globals__["LaterModel"] = LaterModel
+
+        # When registered steps are materialized (schema derivation occurs at retrieval time).
+        with caplog.at_level(logging.WARNING):
+            steps = get_registered_steps()
+
+        # Then the forward reference resolves successfully without fallback warnings.
+        payload_schema = steps[0]["input_schema"]["properties"]["payload"]
+        assert ("$ref" in payload_schema) or (payload_schema.get("type") == "object")
+        assert "failed to resolve type hints" not in caplog.text
+
+
+class TestClear:
+    """Tests for clear()."""
+
+    def test_clear_empties_registry(self) -> None:
+        # Given multiple registered functions in the global registry.
+        def f1(x: str) -> str:
+            ...
+
+        def f2(x: str) -> str:
+            ...
+
+        register(f1)
+        register(f2)
+        assert len(get_registered_steps()) == 2
+
+        # When clear() is called.
+        clear()
+
+        # Then the registry becomes empty.
+        assert len(get_registered_steps()) == 0
+
+
+class TestDecoratorRegistration:
+    """Tests that @control() decorator registers functions in the registry."""
+
+    def test_decorator_registers_async_function(self) -> None:
+        # Given an async function decorated with @control().
+        from agent_control.control_decorators import control
+
+        @control()
+        async def my_chat(message: str) -> str:
+            """Handle a chat message."""
+            return message
+
+        # When registered steps are queried after decoration.
+        steps = get_registered_steps()
+
+        # Then the decorated async function appears as a single llm step with its docstring.
+        assert len(steps) == 1
+        assert steps[0]["name"] == "my_chat"
+        assert steps[0]["type"] == "llm"
+        assert steps[0]["description"] == "Handle a chat message."
+
+    def test_decorator_registers_sync_function(self) -> None:
+        # Given a sync function decorated with @control().
+        from agent_control.control_decorators import control
+
+        @control()
+        def my_process(input: str) -> str:
+            return input.upper()
+
+        # When registered steps are retrieved.
+        steps = get_registered_steps()
+
+        # Then the function is registered with the expected name.
+        assert len(steps) == 1
+        assert steps[0]["name"] == "my_process"
+
+    def test_decorator_registers_with_policy(self) -> None:
+        # Given a decorated function that includes a policy in the decorator arguments.
+        from agent_control.control_decorators import control
+
+        @control(policy="my-policy")
+        async def guarded(msg: str) -> str:
+            return msg
+
+        # When registered steps are fetched.
+        steps = get_registered_steps()
+
+        # Then the policy is persisted in step metadata.
+        assert steps[0]["metadata"] == {"policy": "my-policy"}
+
+    def test_decorator_registers_tool(self) -> None:
+        """Tool-like functions (with .name attribute) should register as type=tool."""
+
+        # Given a function decorated via @control() and marked with tool metadata attributes.
+        from agent_control.control_decorators import control
+
+        def _lookup(query: str) -> str:
+            """Look up a record."""
+            return query
+
+        _lookup.name = "lookup_tool"  # type: ignore[attr-defined]
+        _lookup.tool_name = "lookup_tool"  # type: ignore[attr-defined]
+
+        # When the decorator is applied to the tool-like function.
+        control()(_lookup)
+
+        # Then the registry contains a tool step with the tool's declared name.
+        steps = get_registered_steps()
+
+        assert len(steps) == 1
+        assert steps[0]["type"] == "tool"
+        assert steps[0]["name"] == "lookup_tool"
+
+    def test_decorator_registers_explicit_custom_type(self) -> None:
+        """A decorator-supplied type is retained by auto-discovery."""
+        from agent_control.control_decorators import control
+
+        @control(step_type="retriever")
+        async def retrieve(query: str) -> str:
+            return query
+
+        steps = get_registered_steps()
+
+        assert steps[0]["type"] == "retriever"
+
+    @pytest.mark.parametrize("step_type", ["", "   ", 123])
+    def test_explicit_type_must_be_non_empty_string(self, step_type: object) -> None:
+        """Explicit registry types reject invalid values."""
+
+        def step(query: str) -> str:
+            ...
+
+        with pytest.raises(ValueError, match="non-empty string"):
+            register(step, step_type=step_type)  # type: ignore[arg-type]
+
+    def test_stacked_decorators_deduplicate(self) -> None:
+        """Stacking @control() twice on the same function deduplicates by name."""
+
+        # Given a function wrapped by two @control() decorators with different policies.
+        from agent_control.control_decorators import control
+
+        @control(policy="p1")
+        @control(policy="p2")
+        async def stacked(msg: str) -> str:
+            return msg
+
+        # When the stacked decorators register the same function name.
+        steps = get_registered_steps()
+
+        # Then deduplication keeps one step, preserving the outermost decorator metadata.
+        assert len(steps) == 1
+        assert steps[0]["name"] == "stacked"
+        assert steps[0]["metadata"] == {"policy": "p1"}
+
+    def test_control_with_prior_wrapper_preserves_schema_fields(self) -> None:
+        # Given a user wrapper applied before @control() using functools.wraps.
+        from agent_control.control_decorators import control
+
+        def with_tracing(func: Any) -> Any:
+            @functools.wraps(func)
+            async def wrapped(*args: Any, **kwargs: Any) -> Any:
+                return await func(*args, **kwargs)
+
+            return wrapped
+
+        @control()
+        @with_tracing
+        async def wrapped_chat(message: str, include_context: bool = False) -> str:
+            return message
+
+        # When registered steps are materialized.
+        steps = get_registered_steps()
+
+        # Then registration keeps the original step identity and inferred schema fields.
+        assert len(steps) == 1
+        step = steps[0]
+        assert step["type"] == "llm"
+        assert step["name"] == "wrapped_chat"
+        assert step["input_schema"]["properties"]["message"]["type"] == "string"
+        assert step["input_schema"]["properties"]["include_context"]["type"] == "boolean"
+        assert step["output_schema"]["type"] == "string"
+
+
+class TestInitMerge:
+    """Tests the explicit+auto merge behavior used by init()."""
+
+    def test_auto_steps_merged_into_init(self) -> None:
+        """Steps from @control() decorators should be available for init merge."""
+
+        # Given an auto-registered control via decorator discovery.
+        from agent_control.control_decorators import control
+

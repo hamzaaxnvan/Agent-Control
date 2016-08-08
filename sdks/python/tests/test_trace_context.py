@@ -23,3 +23,28 @@ def test_get_trace_context_from_provider_returns_registered_context() -> None:
         "trace_id": "a" * 32,
         "span_id": "b" * 16,
     }
+
+
+def test_get_trace_context_from_provider_returns_none_when_unset() -> None:
+    assert get_trace_context_from_provider() is None
+
+
+def test_get_trace_context_from_provider_returns_none_when_provider_returns_none() -> None:
+    set_trace_context_provider(lambda: None)
+
+    assert get_trace_context_from_provider() is None
+
+
+def test_get_trace_context_from_provider_swallows_provider_failures() -> None:
+    def _raising_provider():
+        raise RuntimeError("boom")
+
+    set_trace_context_provider(_raising_provider)
+
+    assert get_trace_context_from_provider() is None
+
+
+def test_get_trace_context_from_provider_returns_none_for_invalid_shape() -> None:
+    set_trace_context_provider(  # type: ignore[arg-type]
+        lambda: {
+            "trace_id": "a" * 32,
