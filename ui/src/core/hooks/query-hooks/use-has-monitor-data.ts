@@ -25,30 +25,3 @@ function getStoredTimeRange(): TimeRange {
     // Ignore parse errors
   }
   return '7d'; // Default
-}
-
-/**
- * Lightweight hook to check if an agent has any monitoring data.
- * Used to determine the default tab (monitor vs controls).
- * Does NOT include timeseries data to minimize payload.
- * Uses the stored time range preference from localStorage.
- */
-export function useHasMonitorData(
-  agentName: string,
-  options?: {
-    enabled?: boolean;
-  }
-) {
-  return useQuery({
-    queryKey: ['has-monitor-data', agentName],
-    queryFn: async () => {
-      const timeRange = getStoredTimeRange();
-
-      const { data, error } = await api.observability.getStats({
-        agent_name: agentName,
-        time_range: timeRange,
-        include_timeseries: false, // Don't need timeseries, just totals
-      });
-
-      if (error) {
-        return false; // On error, default to no data

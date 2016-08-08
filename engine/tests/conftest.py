@@ -4,3 +4,9 @@ import pytest
 
 from agent_control_engine import clear_evaluator_cache, reset_evaluator_discovery
 from agent_control_evaluators import clear_evaluators
+
+
+@pytest.fixture(autouse=True)
+def clean_evaluator_state() -> None:
+    """Clean up evaluator registry and discovery state before each test.
+
