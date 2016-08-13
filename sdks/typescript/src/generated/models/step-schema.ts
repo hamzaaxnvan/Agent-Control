@@ -18,3 +18,23 @@ export type StepSchema = {
    */
   description?: string | null | undefined;
   /**
+   * JSON schema describing step input
+   */
+  inputSchema?: { [k: string]: any } | null | undefined;
+  /**
+   * Additional metadata for the step
+   */
+  metadata?: { [k: string]: any } | null | undefined;
+  /**
+   * Unique name for the step
+   */
+  name: string;
+  /**
+   * JSON schema describing step output
+   */
+  outputSchema?: { [k: string]: any } | null | undefined;
+  /**
+   * Step type for this schema (e.g., 'tool', 'llm')
+   */
+  type: string;
+};
