@@ -60,3 +60,24 @@ def test_sanitize_control_match_redacts_nested_condition_trace_errors() -> None:
                         "selector": {"path": "input"},
                         "evaluator": {"name": "regex", "config": {"pattern": "test"}},
                     },
+                    {
+                        "selector": {"path": "output"},
+                        "evaluator": {"name": "list", "config": {"values": ["done"]}},
+                    },
+                ]
+            },
+            action={"decision": "observe"},
+        ),
+    )
+    match = ControlMatch(
+        control_id=1,
+        control_name="composite-ctrl",
+        action="observe",
+        result=EvaluatorResult(
+            matched=False,
+            confidence=0.9,
+            error="RuntimeError: secret evaluator failure",
+            metadata={
+                "condition_trace": {
+                    "type": "and",
+                    "children": [
