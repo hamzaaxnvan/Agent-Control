@@ -70,39 +70,3 @@ def extractor_module():
     sys.modules.pop(module_name, None)
 
 
-def test_extract_request_text(extractor_module):
-    request = SimpleNamespace(
-        contents=[SimpleNamespace(parts=[MockPart("hello"), MockPart("world")])]
-    )
-
-    assert extractor_module.extract_request_text(request) == "hello\nworld"
-
-
-def test_extract_response_text(extractor_module):
-    response = MockLlmResponse(MockContent(role="model", parts=[MockPart("done")]))
-
-    assert extractor_module.extract_response_text(response) == "done"
-
-
-def test_extract_response_text_serializes_structured_parts(extractor_module):
-    response = MockLlmResponse(
-        MockContent(
-            role="model",
-            parts=[
-                MockPart(
-                    function_call=MockStructuredValue(
-                        {"name": "get_weather", "args": {"city": "Rome"}}
-                    )
-                )
-            ],
-        )
-    )
-
-    assert (
-        extractor_module.extract_response_text(response)
-        == '{"args": {"city": "Rome"}, "name": "get_weather"}'
-    )
-
-
-def test_resolve_agent_name_prefers_nested_agent(extractor_module):
-    context = SimpleNamespace(
