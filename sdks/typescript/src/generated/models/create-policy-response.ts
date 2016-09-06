@@ -6,20 +6,3 @@ import * as z from "zod/v4-mini";
 import { remap as remap$ } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
-import * as types from "../types/primitives.js";
-import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-export type CreatePolicyResponse = {
-  /**
-   * Identifier of the created policy
-   */
-  policyId: number;
-};
-
-/** @internal */
-export const CreatePolicyResponse$inboundSchema: z.ZodMiniType<
-  CreatePolicyResponse,
-  unknown
-> = z.pipe(
-  z.object({
-    policy_id: types.number(),
