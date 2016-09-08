@@ -88,3 +88,48 @@ async function $do(
   ]
 > {
   const parsed = safeParse(
+    request,
+    (value) =>
+      z.parse(models.RuntimeTokenExchangeRequest$outboundSchema, value),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = encodeJSON("body", payload, { explode: true });
+
+  const path = pathToFunc("/api/v1/auth/runtime-token-exchange")();
+
+  const headers = new Headers(compactMap({
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID:
+      "runtime_token_exchange_api_v1_auth_runtime_token_exchange_post",
+    oAuth2Scopes: null,
+
+    resolvedSecurity: requestSecurity,
+
+    securitySource: client._options.apiKeyHeader,
+    retryConfig: options?.retries
+      || client._options.retryConfig
+      || { strategy: "none" },
+    retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
+  };
+
+  const requestRes = client._createRequest(context, {
+    security: requestSecurity,
+    method: "POST",
+    baseURL: options?.serverURL,
+    path: path,
+    headers: headers,
+    body: body,

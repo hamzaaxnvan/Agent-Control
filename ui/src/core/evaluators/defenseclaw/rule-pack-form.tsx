@@ -51,3 +51,29 @@ export const DefenseClawRulePackForm = ({
             </Text>
             <ActionIcon
               aria-label={`Remove rule ${index + 1}`}
+              data-testid={`defenseclaw-remove-rule-${index}`}
+              type="button"
+              color="red"
+              variant="subtle"
+              disabled={form.values.rules.length === 1}
+              onClick={() => form.removeListItem('rules', index)}
+            >
+              <IconTrash size={16} />
+            </ActionIcon>
+          </Group>
+
+          <TextInput
+            label="Rule ID"
+            placeholder="AC-CMD-RM-RF"
+            required
+            {...form.getInputProps(`rules.${index}.id`)}
+          />
+          <TextInput
+            label="Title"
+            placeholder="Recursive deletion"
+            required
+            {...form.getInputProps(`rules.${index}.title`)}
+          />
+          <Textarea
+            label="Pattern"
+            placeholder="Enter the DefenseClaw pattern"
