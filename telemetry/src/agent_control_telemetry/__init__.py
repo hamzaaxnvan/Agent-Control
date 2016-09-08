@@ -8,3 +8,25 @@ from .sink_selection import (
     ControlEventSinkSelection,
     SinkSelectionError,
 )
+from .sinks import (
+    AsyncControlEventSink,
+    BaseAsyncControlEventSink,
+    BaseControlEventSink,
+    ControlEventSink,
+    SinkResult,
+)
+from .trace_context import (
+    TraceContext,
+    TraceContextProvider,
+    clear_trace_context_provider,
+    get_trace_context_from_provider,
+    set_trace_context_provider,
+)
+
+__all__ = [
+    "AsyncControlEventSink",
+    "BaseAsyncControlEventSink",
+    "BaseControlEventSink",
+    "ControlEventSink",
+    "SinkResult",
+    "DEFAULT_CONTROL_EVENT_SINK_NAME",
