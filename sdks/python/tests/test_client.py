@@ -264,3 +264,270 @@ async def test_runtime_evaluation_single_flights_cold_cache_exchange() -> None:
                 client.post_runtime_evaluation(
                     json={"target_type": "log_stream", "target_id": "ls-1"},
                     target_type="log_stream",
+                    target_id="ls-1",
+                )
+                for _ in range(5)
+            )
+        )
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200, 200]
+    assert exchange_calls == 1
+    assert evaluation_authorization_headers == ["Bearer runtime-token"] * 5
+
+
+@pytest.mark.asyncio
+async def test_runtime_evaluation_refreshes_token_before_expiry() -> None:
+    exchange_tokens = ["short-token", "fresh-token"]
+    exchange_expiries = [
+        (datetime.now(UTC) + timedelta(seconds=5)).isoformat(),
+        (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+    ]
+    evaluation_authorization_headers: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/runtime-token-exchange":
+            return httpx.Response(
+                200,
+                json={
+                    "token": exchange_tokens.pop(0),
+                    "expires_at": exchange_expiries.pop(0),
+                    "target_type": "log_stream",
+                    "target_id": "ls-1",
+                    "scopes": ["runtime.use"],
+                },
+            )
+
+        evaluation_authorization_headers.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"is_safe": True, "confidence": 1.0})
+
+    transport = httpx.MockTransport(handler)
+
+    async with AgentControlClient(
+        base_url="https://agent-control.test",
+        api_key="test-key",
+        runtime_auth_mode="jwt",
+        runtime_token_refresh_margin_seconds=30,
+        transport=transport,
+    ) as client:
+        for _ in range(2):
+            response = await client.post_runtime_evaluation(
+                json={"target_type": "log_stream", "target_id": "ls-1"},
+                target_type="log_stream",
+                target_id="ls-1",
+            )
+            assert response.status_code == 200
+
+    assert exchange_tokens == []
+    assert evaluation_authorization_headers == [
+        "Bearer short-token",
+        "Bearer fresh-token",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_token_cache_is_scoped_to_server_url() -> None:
+    exchange_paths: list[str] = []
+    authorization_headers: list[str | None] = []
+    expires_at = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    cache = RuntimeTokenCache()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        server_url = f"{request.url.scheme}://{request.url.host}"
+        if request.url.path == "/api/v1/auth/runtime-token-exchange":
+            exchange_paths.append(server_url)
+            return httpx.Response(
+                200,
+                json={
+                    "token": f"{request.url.host}-token",
+                    "expires_at": expires_at,
+                    "target_type": "log_stream",
+                    "target_id": "ls-1",
+                    "scopes": ["runtime.use"],
+                },
+            )
+
+        authorization_headers.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"is_safe": True, "confidence": 1.0})
+
+    transport = httpx.MockTransport(handler)
+
+    for base_url in ("https://server-a.test", "https://server-b.test"):
+        async with AgentControlClient(
+            base_url=base_url,
+            api_key="test-key",
+            runtime_auth_mode="jwt",
+            runtime_token_cache=cache,
+            transport=transport,
+        ) as client:
+            response = await client.post_runtime_evaluation(
+                json={"target_type": "log_stream", "target_id": "ls-1"},
+                target_type="log_stream",
+                target_id="ls-1",
+            )
+            assert response.status_code == 200
+
+    assert exchange_paths == ["https://server-a.test", "https://server-b.test"]
+    assert authorization_headers == [
+        "Bearer server-a.test-token",
+        "Bearer server-b.test-token",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_token_cache_is_scoped_to_api_key_identity() -> None:
+    exchange_api_key_headers: list[str | None] = []
+    authorization_headers: list[str | None] = []
+    expires_at = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    cache = RuntimeTokenCache()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/runtime-token-exchange":
+            api_key = request.headers.get("X-API-Key")
+            exchange_api_key_headers.append(api_key)
+            return httpx.Response(
+                200,
+                json={
+                    "token": f"runtime-token-for-{api_key}",
+                    "expires_at": expires_at,
+                    "target_type": "log_stream",
+                    "target_id": "ls-1",
+                    "scopes": ["runtime.use"],
+                },
+            )
+
+        authorization_headers.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={"is_safe": True, "confidence": 1.0})
+
+    transport = httpx.MockTransport(handler)
+
+    for api_key in ("key-a", "key-b"):
+        async with AgentControlClient(
+            base_url="https://agent-control.test",
+            api_key=api_key,
+            runtime_auth_mode="jwt",
+            runtime_token_cache=cache,
+            transport=transport,
+        ) as client:
+            response = await client.post_runtime_evaluation(
+                json={"target_type": "log_stream", "target_id": "ls-1"},
+                target_type="log_stream",
+                target_id="ls-1",
+            )
+            assert response.status_code == 200
+
+    assert exchange_api_key_headers == ["key-a", "key-b"]
+    assert authorization_headers == [
+        "Bearer runtime-token-for-key-a",
+        "Bearer runtime-token-for-key-b",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_evaluation_auto_falls_back_to_api_key_when_exchange_unavailable() -> None:
+    exchange_calls = 0
+    evaluation_api_key_headers: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal exchange_calls
+        if request.url.path == "/api/v1/auth/runtime-token-exchange":
+            exchange_calls += 1
+            return httpx.Response(503, json={"detail": "runtime auth disabled"})
+
+        evaluation_api_key_headers.append(request.headers.get("X-API-Key"))
+        return httpx.Response(200, json={"is_safe": True, "confidence": 1.0})
+
+    transport = httpx.MockTransport(handler)
+
+    async with AgentControlClient(
+        base_url="https://agent-control.test",
+        api_key="test-key",
+        runtime_auth_mode="auto",
+        transport=transport,
+    ) as client:
+        for _ in range(2):
+            response = await client.post_runtime_evaluation(
+                json={"target_type": "log_stream", "target_id": "ls-1"},
+                target_type="log_stream",
+                target_id="ls-1",
+            )
+            assert response.status_code == 200
+
+    assert exchange_calls == 1
+    assert evaluation_api_key_headers == ["test-key", "test-key"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_evaluation_auto_404_fallback_recovers_after_ttl() -> None:
+    exchange_calls = 0
+    evaluation_authorization_headers: list[str | None] = []
+    evaluation_api_key_headers: list[str | None] = []
+    expires_at = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    cache = RuntimeTokenCache(jwt_unavailable_ttl_seconds=0)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal exchange_calls
+        if request.url.path == "/api/v1/auth/runtime-token-exchange":
+            exchange_calls += 1
+            if exchange_calls == 1:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(
+                200,
+                json={
+                    "token": "runtime-token",
+                    "expires_at": expires_at,
+                    "target_type": "log_stream",
+                    "target_id": "ls-1",
+                    "scopes": ["runtime.use"],
+                },
+            )
+
+        evaluation_authorization_headers.append(request.headers.get("Authorization"))
+        evaluation_api_key_headers.append(request.headers.get("X-API-Key"))
+        return httpx.Response(200, json={"is_safe": True, "confidence": 1.0})
+
+    transport = httpx.MockTransport(handler)
+
+    async with AgentControlClient(
+        base_url="https://agent-control.test",
+        api_key="test-key",
+        runtime_auth_mode="auto",
+        runtime_token_cache=cache,
+        transport=transport,
+    ) as client:
+        for _ in range(2):
+            response = await client.post_runtime_evaluation(
+                json={"target_type": "log_stream", "target_id": "ls-1"},
+                target_type="log_stream",
+                target_id="ls-1",
+            )
+            assert response.status_code == 200
+
+    assert exchange_calls == 2
+    assert evaluation_authorization_headers == [None, "Bearer runtime-token"]
+    assert evaluation_api_key_headers == ["test-key", None]
+
+
+@pytest.mark.asyncio
+async def test_runtime_evaluation_auto_503_fallback_is_target_scoped() -> None:
+    exchange_targets: list[str] = []
+    evaluation_authorization_headers: list[str | None] = []
+    evaluation_api_key_headers: list[str | None] = []
+    expires_at = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/auth/runtime-token-exchange":
+            target_id = json.loads(request.content.decode())["target_id"]
+            exchange_targets.append(target_id)
+            if target_id == "ls-1":
+                return httpx.Response(503, json={"detail": "temporary unavailable"})
+            return httpx.Response(
+                200,
+                json={
+                    "token": "runtime-token",
+                    "expires_at": expires_at,
+                    "target_type": "log_stream",
+                    "target_id": target_id,
+                    "scopes": ["runtime.use"],
+                },
+            )
+
