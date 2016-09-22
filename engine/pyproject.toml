@@ -5,24 +5,3 @@ description = "Control execution engine for Agent Control"
 requires-python = ">=3.12"
 dependencies = [
     "agent-control-models>=8.6.0",
-    "agent-control-evaluators>=8.6.0",
-    "google-re2>=1.1",
-]
-authors = [
-    {name = "Agent Control Team"}
-]
-readme = "README.md"
-license = {text = "Apache-2.0"}
-
-[dependency-groups]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=4.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.8.0",
-]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
