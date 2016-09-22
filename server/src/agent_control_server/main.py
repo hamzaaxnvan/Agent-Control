@@ -113,3 +113,235 @@ async def _shutdown_observability_sink(sink: object) -> None:
     """Flush and close a custom async sink when it exposes lifecycle hooks."""
     flush = getattr(sink, "flush", None)
     if callable(flush):
+        try:
+            result = flush()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.warning("Observability sink flush failed during shutdown", exc_info=True)
+
+    for method_name in ("close", "shutdown"):
+        callback = getattr(sink, method_name, None)
+        if not callable(callback):
+            continue
+        try:
+            result = callback()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.warning(
+                "Observability sink %s failed during shutdown",
+                method_name,
+                exc_info=True,
+            )
+        return
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Lifespan context manager for FastAPI app startup and shutdown."""
+    _configure_logging_once()
+
+    # Install the request-auth provider selected by environment variables.
+    from .auth_framework.config import configure_auth_from_env
+
+    configure_auth_from_env()
+
+    # Discover evaluators at startup
+    discover_evaluators()
+    available = list(list_evaluators().keys())
+    logger.info(f"Evaluator discovery complete. Available evaluators: {available}")
+
+    try:
+        async with asyncio.timeout(settings.out_of_box_bootstrap_timeout_seconds):
+            seed_result = await seed_out_of_box_controls(
+                session_factory=AsyncSessionLocal,
+                namespace_key=default_out_of_box_namespace_key(),
+                available_evaluators=set(available),
+            )
+        if seed_result.created_count or seed_result.skipped_count:
+            logger.info(
+                "Out-of-box control bootstrap complete: created=%s "
+                "skipped_existing=%s skipped_missing_evaluator=%s skipped_conflict=%s",
+                seed_result.created_count,
+                len(seed_result.skipped_existing),
+                len(seed_result.skipped_missing_evaluator),
+                len(seed_result.skipped_conflict),
+            )
+    except TimeoutError:
+        logger.warning(
+            "Out-of-box control bootstrap timed out after %s seconds; continuing startup",
+            settings.out_of_box_bootstrap_timeout_seconds,
+        )
+    except Exception:
+        logger.warning("Out-of-box control bootstrap failed; continuing startup", exc_info=True)
+
+    # Initialize observability components (stored on app.state)
+    if observability_settings.enabled:
+        logger.info("Initializing observability components...")
+
+        # 1. Resolve the active sink from shared sink-selection config
+        sink_selection = ControlEventSinkSelection(
+            name=observability_settings.sink_name,
+            config=observability_settings.sink_config,
+        )
+        default_backend: ResolvedControlEventBackend | None = None
+        if sink_selection.name == DEFAULT_CONTROL_EVENT_SINK_NAME:
+            store = PostgresEventStore(AsyncSessionLocal)
+            default_backend = ResolvedControlEventBackend(
+                sink=EventStoreControlEventSink(store),
+                event_store=store,
+            )
+            logger.info("PostgresEventStore initialized")
+
+        backend = resolve_control_event_backend(
+            sink_selection,
+            default_backend=default_backend,
+        )
+        app.state.event_store = backend.event_store
+        app.state.event_sink = backend.sink
+
+        # 2. Create event ingestor
+        ingestor = DirectEventIngestor(
+            store=backend.sink,
+            log_to_stdout=observability_settings.stdout,
+        )
+        app.state.event_ingestor = ingestor
+        logger.info(
+            "DirectEventIngestor initialized (stdout=%s, sink=%s)",
+            observability_settings.stdout,
+            sink_selection.name,
+        )
+
+        logger.info("Observability initialization complete")
+
+    yield
+
+    # Shutdown: release auth provider resources (e.g., upstream HTTP clients)
+    from .auth_framework.config import teardown_auth
+
+    await teardown_auth()
+
+    # Shutdown: Clean up observability
+    if observability_settings.enabled and hasattr(app.state, "event_store"):
+        logger.info("Shutting down observability components...")
+        sink = getattr(app.state, "event_sink", None)
+        if sink is not None:
+            await _shutdown_observability_sink(sink)
+        if sink is None or sink is not app.state.event_store:
+            await app.state.event_store.close()
+        logger.info("EventStore closed")
+
+    await async_engine.dispose()
+    logger.info("Database engine disposed")
+
+
+app = FastAPI(
+    title="Agent Control Server",
+    description="""Server component for Agent Control - policy-based control for AI agents.
+
+## Architecture
+
+The system uses a simple hierarchical model:
+- **Agents**: AI systems that need control
+- **Policies**: Collections of controls assigned to agents
+- **Controls**: Individual control configurations
+
+## Hierarchy
+
+```
+Agent → Policy → Control(s)
+```
+
+## Quick Start
+
+1. Register your agent with `/api/v1/agents/initAgent`
+2. Create configured controls with `/api/v1/controls`
+3. Create a policy and add controls to it
+4. Assign the policy to your agent
+5. Query agent controls with `/api/v1/agents/{agent_name}/controls`
+   (use state filters on the same endpoint for disabled or unrendered associated controls)
+    """,
+    version=server_version,
+    lifespan=lifespan,
+)
+
+add_prometheus_metrics(app, settings.prometheus_metrics_prefix)
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.get_cors_origins(),
+    allow_credentials=True,
+    allow_methods=settings.get_allow_methods(),
+    allow_headers=settings.get_allow_headers(),
+)
+
+@app.middleware("http")
+async def attach_version_header(request, call_next):  # type: ignore[no-untyped-def]
+    """Attach server version metadata to every response."""
+    response = await call_next(request)
+    response.headers["X-Agent-Control-Server-Version"] = server_version
+    return response
+
+
+# =============================================================================
+# Exception Handlers (RFC 7807 / Kubernetes / GitHub-style)
+# =============================================================================
+
+# Register custom API error handler (highest priority for our errors)
+app.add_exception_handler(APIError, api_error_handler)  # type: ignore[arg-type]
+
+# Register handler for FastAPI's RequestValidationError (Pydantic validation)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)  # type: ignore[arg-type]
+
+# Register handler for standard HTTPException (older routes, FastAPI internals)
+app.add_exception_handler(HTTPException, http_exception_handler)  # type: ignore[arg-type]
+
+# Register catch-all handler for unexpected exceptions
+app.add_exception_handler(Exception, generic_exception_handler)
+
+# API v1 prefix for all routes
+api_v1_prefix = f"{settings.api_prefix}/{settings.api_version}"
+
+# API routers. Routers migrated to the auth framework mount the
+# non-validating header extractor only so OpenAPI advertises X-API-Key;
+# each endpoint's ``require_operation`` dependency owns authn + authz.
+app.include_router(
+    agent_router,
+    prefix=api_v1_prefix,
+    dependencies=[Depends(get_api_key_from_header)],
+)
+app.include_router(
+    policy_router,
+    prefix=api_v1_prefix,
+    dependencies=[Depends(get_api_key_from_header)],
+)
+app.include_router(
+    # Endpoint dependencies handle auth; this advertises X-API-Key.
+    control_router,
+    prefix=api_v1_prefix,
+    dependencies=[Depends(get_api_key_from_header)],
+)
+app.include_router(
+    # The auth framework on each endpoint owns authentication and
+    # authorization for control bindings, so this router is mounted
+    # without the router-level auth gate. See ``auth_framework`` for
+    # the provider contract. ``get_api_key_from_header`` is a non-
+    # validating extractor (``auto_error=False``); it is attached purely
+    # so the generated OpenAPI spec advertises the X-API-Key requirement
+    # on these routes - without it, downstream SDK generators would treat
+    # the routes as unauthenticated.
+    control_binding_router,
+    prefix=api_v1_prefix,
+    dependencies=[Depends(get_api_key_from_header)],
+)
+
+# Auth endpoints (runtime token exchange). Same rationale as control
+# bindings: framework on each endpoint owns authn + authz, and the
+# header extractor is attached for OpenAPI advertisement only.
+app.include_router(
+    auth_router,
+    prefix=api_v1_prefix,
+    dependencies=[Depends(get_api_key_from_header)],
+)

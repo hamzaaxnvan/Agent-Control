@@ -17,22 +17,3 @@ ENV AGENT_CONTROL_STATIC_EXPORT=true
 ENV NEXT_PUBLIC_STATIC_EXPORT=true
 
 RUN corepack enable && corepack prepare pnpm@9 --activate
-
-COPY ui/package.json ui/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
-
-COPY ui/ ./
-RUN pnpm build
-
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
-
-WORKDIR /app
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Configure uv environment variables
-ENV UV_COMPILE_BYTECODE=1
-ENV UV_LINK_MODE=copy
-
