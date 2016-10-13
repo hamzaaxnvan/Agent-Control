@@ -9,3 +9,25 @@ import type { ListFormValues } from './types';
  */
 export const listEvaluator: EvaluatorDefinition<ListFormValues> = {
   id: 'list',
+  displayName: 'List',
+
+  initialValues: {
+    values: '',
+    logic: 'any',
+    match_on: 'match',
+    match_mode: 'exact',
+    case_sensitive: false,
+  },
+
+  validate: {
+    values: (value) => {
+      const trimmedValues = (value as string)
+        .split('\n')
+        .filter((v) => v.trim() !== '');
+      if (trimmedValues.length === 0) {
+        return 'At least one value is required';
+      }
+      return null;
+    },
+  },
+
