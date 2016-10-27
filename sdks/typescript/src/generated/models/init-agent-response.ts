@@ -24,16 +24,3 @@ export type InitAgentResponse = {
   controls?: Array<Control> | undefined;
   /**
    * True if agent was newly created, False if updated
-   */
-  created: boolean;
-  /**
-   * True if overwrite mode changed registration data on an existing agent
-   */
-  overwriteApplied: boolean;
-  /**
-   * Detailed change summary for initAgent overwrite mode.
-   */
-  overwriteChanges?: InitAgentOverwriteChanges | undefined;
-};
-
-/** @internal */
