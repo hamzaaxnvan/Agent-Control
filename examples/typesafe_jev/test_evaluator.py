@@ -154,3 +154,81 @@ async def test_all_fires_when_every_question_trips() -> None:
         },
         answers(medical=0.97, severity=2.4),
     )
+    result = await evaluator.evaluate("text")
+
+    assert result.matched is True
+    assert sorted(result.metadata["tripped"]) == ["medical", "severity"]
+
+
+@pytest.mark.asyncio
+async def test_question_without_a_threshold_is_recorded_but_does_not_decide() -> None:
+    evaluator, fake = build(
+        {"questions": {"jailbreak": NOUL, "severity": INFO_ONLY}},
+        answers(jailbreak=0.02, severity=3.0),
+    )
+    result = await evaluator.evaluate("text")
+
+    assert set(fake.calls[0]["questions"]) == {"jailbreak", "severity"}
+    assert result.metadata["answers"]["severity"] == 3.0
+    assert result.metadata["deciding"] == ["jailbreak"]
+    assert result.matched is False
+
+
+@pytest.mark.asyncio
+async def test_each_question_uses_its_own_threshold() -> None:
+    evaluator, _ = build(
+        {
+            "questions": {
+                "strict": {"type": "noul", "instructions": "q", "threshold": 0.9},
+                "lenient": {"type": "noul", "instructions": "q", "threshold": 0.2},
+            }
+        },
+        answers(strict=0.5, lenient=0.5),
+    )
+    result = await evaluator.evaluate("text")
+
+    assert result.matched is True
+    assert result.metadata["tripped"] == ["lenient"]
+
+
+@pytest.mark.asyncio
+async def test_choice_equality() -> None:
+    evaluator, _ = build(
+        {
+            "questions": {
+                "intent": {
+                    "type": "choice",
+                    "instructions": "Route this",
+                    "criteria": {"billing": "money", "technical": "bugs"},
+                    "operator": "eq",
+                    "threshold": "billing",
+                }
+            }
+        },
+        answers(intent="billing"),
+    )
+    assert (await evaluator.evaluate("my card was charged twice")).matched is True
+
+
+# --- plumbing --------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_payload_field_selects_output_side() -> None:
+    evaluator, fake = build(
+        {"questions": {"toxic": NOUL}, "payload_field": "output"}, answers(toxic=0.1)
+    )
+    await evaluator.evaluate({"input": "user text", "output": "model text"})
+
+    assert fake.calls[0]["state"] == "model text"
+
+
+@pytest.mark.asyncio
+async def test_empty_state_short_circuits_without_calling_api() -> None:
+    evaluator, fake = build({"questions": {"jailbreak": NOUL}}, answers(jailbreak=0.9))
+    result = await evaluator.evaluate("   ")
+
+    assert result.matched is False
+    assert fake.calls == []
+
+

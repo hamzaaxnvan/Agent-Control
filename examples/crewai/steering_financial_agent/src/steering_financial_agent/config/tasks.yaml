@@ -1,4 +1,1 @@
 transfer_task:
-  description: >
-    Process this wire transfer request: {transfer_request}
-
