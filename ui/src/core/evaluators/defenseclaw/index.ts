@@ -26,3 +26,61 @@ const normalizeRule = (value: unknown): DefenseClawRuleFormValue => {
       ? (value.severity as DefenseClawRuleFormValue['severity'])
       : 'HIGH',
     confidence: typeof value.confidence === 'number' ? value.confidence : 0.99,
+    tags: Array.isArray(value.tags)
+      ? value.tags.filter((tag): tag is string => typeof tag === 'string')
+      : [],
+  };
+};
+
+const validateRules = (value: unknown): string | null => {
+  if (!Array.isArray(value) || value.length === 0) {
+    return 'At least one rule is required';
+  }
+  const rules = value as DefenseClawRuleFormValue[];
+  const ids = rules.map((rule) => rule.id.trim());
+  if (
+    rules.some(
+      (rule) => !rule.id.trim() || !rule.title.trim() || !rule.pattern.trim()
+    )
+  ) {
+    return 'Every rule requires an ID, title, and pattern';
+  }
+  if (new Set(ids).size !== ids.length) return 'Rule IDs must be unique';
+  if (
+    rules.some(
+      (rule) =>
+        !Number.isFinite(rule.confidence) ||
+        rule.confidence < 0 ||
+        rule.confidence > 1
+    )
+  ) {
+    return 'Rule confidence must be between 0 and 1';
+  }
+  if (rules.some((rule) => !severityValues.has(rule.severity))) {
+    return 'Every rule requires a supported severity';
+  }
+  if (rules.some((rule) => rule.tags.some((tag) => !tag.trim()))) {
+    return 'Rule tags cannot be blank';
+  }
+  return null;
+};
+
+export const defenseClawRulePackEvaluator: EvaluatorDefinition<DefenseClawRulePackFormValues> =
+  {
+    id: 'defenseclaw.rule_pack',
+    displayName: 'DefenseClaw Rule Pack',
+    defaultExecution: 'sdk',
+    supportedExecutions: ['sdk'],
+    initialValues: { rules: [createBlankDefenseClawRule()] },
+    validate: { rules: validateRules },
+    toConfig: (values) => ({
+      schema_version: 1,
+      rule_pack: {
+        version: 1,
+        category: 'agent-control',
+        rules: values.rules,
+      },
+    }),
+    fromConfig: (config) => {
+      const rulePack = isRecord(config.rule_pack) ? config.rule_pack : {};
+      const rules = Array.isArray(rulePack.rules)
