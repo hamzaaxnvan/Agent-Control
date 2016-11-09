@@ -19,10 +19,3 @@ export class Evaluators extends ClientSDK {
    * Built-in evaluators:
    * - **regex**: Regular expression pattern matching
    * - **list**: List-based value matching with flexible logic
-   * - **json**: JSON validation with schema, types, constraints
-   * - **sql**: SQL query validation
-   *
-   * Custom evaluators are registered per-agent via initAgent.
-   * Use GET /agents/{agent_name}/evaluators to list agent-specific schemas.
-   */
-  async list(
