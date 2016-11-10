@@ -102,3 +102,107 @@ class StepRecorder:
         input: Any | None = None,
         context: dict[str, Any] | None = None,
         tools: list[JSONObject] | None = None,
+        ground_truth: JSONValue | None = None,
+        container_types: Collection[str] | None = None,
+    ) -> StepRecorder:
+        """Start a nested recorder; it attaches to this node on ``__exit__``.
+
+        Inherits this node's ``container_types`` unless ``container_types``
+        is given explicitly.
+        """
+        return StepRecorder(
+            step_type,
+            name,
+            input=input,
+            context=context,
+            tools=tools,
+            ground_truth=ground_truth,
+            container_types=(
+                self._container_types if container_types is None else frozenset(container_types)
+            ),
+            _parent=self,
+        )
+
+    def add(self, step: Step | Mapping[str, Any]) -> None:
+        """Attach an already-built child step."""
+        self._children.append(step if isinstance(step, Step) else Step.model_validate(step))
+
+    def _record_call_result(
+        self,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        output: Any,
+        step_name: str | None,
+        step_type: str | None,
+        tools: ToolsConfiguration,
+        step_context: dict[str, Any] | None,
+        error: BaseException | None,
+    ) -> None:
+        payload = _create_evaluation_payload(
+            func, args, kwargs, output, step_name, step_type, tools
+        )
+        context = {**(payload.get("context") or {}), **(step_context or {})}
+        if error is not None:
+            context["error"] = repr(error)
+        if context:
+            payload["context"] = context
+        self._children.append(Step.model_validate(payload))
+
+    def call(
+        self,
+        func: Callable[..., T],
+        *args: Any,
+        step_type: str | None = None,
+        step_name: str | None = None,
+        tools: ToolsConfiguration = None,
+        step_context: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> T:
+        """Run ``func``, record it via ``@control()``'s capture logic, return its output.
+
+        ``step_context`` is merged into the recorded child's ``context`` (an
+        ``error`` key added on failure takes precedence over the same key in
+        ``step_context``). It is named ``step_context`` rather than ``context``
+        so it can't collide with a ``context`` keyword argument on ``func``
+        itself, which ``**kwargs`` would otherwise forward unchanged.
+        """
+        try:
+            output = func(*args, **kwargs)
+        except Exception as exc:
+            self._record_call_result(
+                func, args, kwargs, None, step_name, step_type, tools, step_context, exc
+            )
+            raise
+        self._record_call_result(
+            func, args, kwargs, output, step_name, step_type, tools, step_context, None
+        )
+        return output
+
+    async def acall(
+        self,
+        func: Callable[..., Awaitable[T]],
+        *args: Any,
+        step_type: str | None = None,
+        step_name: str | None = None,
+        tools: ToolsConfiguration = None,
+        step_context: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> T:
+        """Async counterpart to :meth:`call`."""
+        try:
+            output = await func(*args, **kwargs)
+        except Exception as exc:
+            self._record_call_result(
+                func, args, kwargs, None, step_name, step_type, tools, step_context, exc
+            )
+            raise
+        self._record_call_result(
+            func, args, kwargs, output, step_name, step_type, tools, step_context, None
+        )
+        return output
+
+    def build(self) -> Step:
+        """Recursively construct the frozen ``Step`` for this node and its children."""
+        input_value = self.input
+        if input_value is None and self.type == STEP_TYPE_TOOL:
