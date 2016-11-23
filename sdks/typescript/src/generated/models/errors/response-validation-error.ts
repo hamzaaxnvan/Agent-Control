@@ -23,3 +23,15 @@ export class ResponseValidationError extends AgentControlSDKError {
       response: Response;
       request: Request;
       body: string;
+      cause: unknown;
+      rawValue: unknown;
+      rawMessage: unknown;
+    },
+  ) {
+    super(message, extra);
+    this.name = "ResponseValidationError";
+    this.cause = extra.cause;
+    this.rawValue = extra.rawValue;
+    this.rawMessage = extra.rawMessage;
+  }
+
