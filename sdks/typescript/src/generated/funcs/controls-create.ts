@@ -90,3 +90,49 @@ async function $do(
       | SDKValidationError
     >,
     APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) => z.parse(models.CreateControlRequest$outboundSchema, value),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = encodeJSON("body", payload, { explode: true });
+
+  const path = pathToFunc("/api/v1/controls")();
+
+  const headers = new Headers(compactMap({
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID: "create_control_api_v1_controls_put",
+    oAuth2Scopes: null,
+
+    resolvedSecurity: requestSecurity,
+
+    securitySource: client._options.apiKeyHeader,
+    retryConfig: options?.retries
+      || client._options.retryConfig
+      || { strategy: "none" },
+    retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
+  };
+
+  const requestRes = client._createRequest(context, {
+    security: requestSecurity,
+    method: "PUT",
+    baseURL: options?.serverURL,
+    path: path,
+    headers: headers,
+    body: body,

@@ -574,3 +574,195 @@ class TestStatsTimeseries:
             timestamp=now - timedelta(minutes=55),
         )
 
+        await store.store([event], namespace_key=DEFAULT_NAMESPACE_KEY)
+
+        response = client.get(
+            "/api/v1/observability/stats",
+            params={
+                "agent_name": str(agent_name),
+                "time_range": "1h",
+                "include_timeseries": "true",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        timeseries = data["totals"]["timeseries"]
+        assert timeseries is not None
+
+        # 11-13 buckets should be present (depends on timing)
+        assert 11 <= len(timeseries) <= 13
+
+        # Only one bucket should have events
+        buckets_with_events = [b for b in timeseries if b["execution_count"] > 0]
+        assert len(buckets_with_events) == 1
+
+        # Empty buckets should have zero counts and None for averages
+        empty_bucket = next(b for b in timeseries if b["execution_count"] == 0)
+        assert empty_bucket["match_count"] == 0
+        assert empty_bucket["non_match_count"] == 0
+        assert empty_bucket["error_count"] == 0
+        assert empty_bucket["action_counts"] == {}
+        assert empty_bucket["avg_confidence"] is None
+        assert empty_bucket["avg_duration_ms"] is None
+
+
+class TestControlStats:
+    """Tests for control-level stats endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_control_stats_basic(self, client: TestClient, setup_observability):
+        """Test getting stats for a single control."""
+        store = setup_observability
+        agent_name = f"agent-{uuid4().hex[:12]}"
+
+        # Create events for multiple controls
+        events = [
+            create_test_event(control_id=1, agent_name=agent_name, matched=True, action="observe"),
+            create_test_event(control_id=1, agent_name=agent_name, matched=True, action="deny"),
+            create_test_event(control_id=2, agent_name=agent_name, matched=True, action="observe"),
+        ]
+        await store.store(events, namespace_key=DEFAULT_NAMESPACE_KEY)
+
+        # Get stats for control 1 only
+        response = client.get(
+            "/api/v1/observability/stats/controls/1",
+            params={"agent_name": str(agent_name), "time_range": "1h"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Verify response structure
+        assert data["agent_name"] == str(agent_name)
+        assert data["control_id"] == 1
+        assert data["control_name"] == "control-1"
+        assert "stats" in data
+        assert "controls" not in data  # No controls array in control-level response
+
+        # Verify only control 1's stats
+        assert data["stats"]["execution_count"] == 2
+        assert data["stats"]["match_count"] == 2
+        assert data["stats"]["action_counts"]["observe"] == 1
+        assert data["stats"]["action_counts"]["deny"] == 1
+
+    @pytest.mark.asyncio
+    async def test_control_stats_with_timeseries(self, client: TestClient, setup_observability):
+        """Test control stats with timeseries."""
+        store = setup_observability
+        agent_name = f"agent-{uuid4().hex[:12]}"
+        now = datetime.now(UTC)
+
+        # Create events for control 1 at different times
+        events = [
+            create_test_event(
+                control_id=1,
+                agent_name=agent_name,
+                matched=True,
+                action="observe",
+                timestamp=now - timedelta(minutes=30),
+            ),
+            create_test_event(
+                control_id=1,
+                agent_name=agent_name,
+                matched=True,
+                action="deny",
+                timestamp=now - timedelta(minutes=10),
+            ),
+            # Control 2 event (should not appear)
+            create_test_event(
+                control_id=2,
+                agent_name=agent_name,
+                matched=True,
+                action="observe",
+                timestamp=now - timedelta(minutes=20),
+            ),
+        ]
+        await store.store(events, namespace_key=DEFAULT_NAMESPACE_KEY)
+
+        response = client.get(
+            "/api/v1/observability/stats/controls/1",
+            params={
+                "agent_name": str(agent_name),
+                "time_range": "1h",
+                "include_timeseries": "true",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Verify timeseries is present and scoped to control 1
+        assert data["stats"]["timeseries"] is not None
+        assert len(data["stats"]["timeseries"]) > 0
+
+        # Only 2 events total (control 1 only)
+        assert data["stats"]["execution_count"] == 2
+
+        # Sum timeseries buckets should equal total
+        total_from_buckets = sum(b["execution_count"] for b in data["stats"]["timeseries"])
+        assert total_from_buckets == 2
+
+    @pytest.mark.asyncio
+    async def test_control_stats_no_data(self, client: TestClient, setup_observability):
+        """Test control stats when control has no events."""
+        store = setup_observability
+        agent_name = f"agent-{uuid4().hex[:12]}"
+
+        # Create event for control 1 only
+        event = create_test_event(control_id=1, agent_name=agent_name, matched=True)
+        await store.store([event], namespace_key=DEFAULT_NAMESPACE_KEY)
+
+        # Query for control 2 (no events)
+        response = client.get(
+            "/api/v1/observability/stats/controls/2",
+            params={"agent_name": str(agent_name), "time_range": "1h"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["control_id"] == 2
+        assert data["stats"]["execution_count"] == 0
+        assert data["stats"]["match_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_control_stats_normalize_historical_legacy_advisory_rows(
+        self, client: TestClient, setup_observability
+    ):
+        """Historical advisory rows are normalized to observe in control stats responses."""
+        store = setup_observability
+        agent_name = f"agent-{uuid4().hex[:12]}"
+        event = create_test_event(
+            control_id=11,
+            agent_name=agent_name,
+            matched=True,
+            action="observe",
+        )
+        legacy_payload = event.model_dump(mode="json")
+        legacy_payload["action"] = "log"
+
+        async with store.session_maker() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO control_execution_events (
+                        control_execution_id, timestamp, agent_name, data
+                    ) VALUES (
+                        :control_execution_id, :timestamp, :agent_name, CAST(:data AS JSONB)
+                    )
+                """),
+                {
+                    "control_execution_id": event.control_execution_id,
+                    "timestamp": event.timestamp,
+                    "agent_name": event.agent_name,
+                    "data": json.dumps(legacy_payload),
+                },
+            )
+            await session.commit()
+
+        response = client.get(
+            "/api/v1/observability/stats/controls/11",
+            params={"agent_name": str(agent_name), "time_range": "1h"},
+        )
+
+        assert response.status_code == 200
