@@ -40,17 +40,3 @@ class SecureResearchCrew:
         )
 
     @task
-    def research_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["research_task"],  # type: ignore[index]
-            agent=self.researcher(),
-        )
-
-    @task
-    def analysis_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["analysis_task"],  # type: ignore[index]
-            agent=self.analyst(),
-        )
-
-    @task

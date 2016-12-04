@@ -131,3 +131,402 @@ def _field_shape(value: Any) -> str:
 
 def _target_context_shape(context: dict[str, Any] | None) -> dict[str, str]:
     """Describe the target context passed to the upstream, values omitted."""
+    if not context:
+        return {"present": "false"}
+    return {
+        "present": "true",
+        "target_type": _field_shape(context.get("target_type", _MISSING)),
+        "target_id": _field_shape(context.get("target_id", _MISSING)),
+    }
+
+
+def _sanitized_validation_errors(response: httpx.Response) -> _ValidationSummary:
+    """Summarize an upstream validation body by field path and error kind.
+
+    Keeps only known validation kinds and request fields. Dynamic location
+    segments, unknown kinds, ``input``, ``ctx``, and ``msg`` may contain
+    caller-supplied values and are dropped. Oversized or undecodable bodies
+    yield an empty summary with an unknown total and a reason rather than
+    changing the upstream rejection's 502.
+    """
+    if len(response.content) > _MAX_VALIDATION_RESPONSE_BYTES:
+        return {"total": _UNKNOWN_VALIDATION_TOTAL, "errors": [], "status": "oversized"}
+    try:
+        body = response.json()
+    except (ValueError, RecursionError):
+        return {"total": _UNKNOWN_VALIDATION_TOTAL, "errors": [], "status": "unusable"}
+
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if not isinstance(detail, list):
+        return {"total": _UNKNOWN_VALIDATION_TOTAL, "errors": [], "status": "unusable"}
+
+    errors: list[_ValidationDiagnostic] = []
+    for item in detail[:_MAX_LOGGED_VALIDATION_ERRORS]:
+        if not isinstance(item, dict):
+            continue
+        loc = item.get("loc")
+        error_type = item.get("type")
+        errors.append(
+            {
+                "type": (
+                    error_type
+                    if isinstance(error_type, str) and error_type in _SAFE_VALIDATION_TYPES
+                    else "other"
+                ),
+                "loc": ".".join(
+                    part
+                    if isinstance(part, str) and part in _SAFE_VALIDATION_LOCATION_PARTS
+                    else "<other>"
+                    for part in loc[:_MAX_LOGGED_LOCATION_PARTS]
+                )
+                if isinstance(loc, list) and loc
+                else "unknown",
+            }
+        )
+    return {"total": len(detail), "errors": errors, "status": "parsed"}
+
+
+class _UpstreamGrant(BaseModel):
+    """Strict schema for the upstream authorization-service response.
+
+    Unknown fields are tolerated (so the upstream can evolve), but every
+    *known* field is type-checked. A wrong type on any field - or a
+    half-supplied target binding - causes the provider to fail closed
+    with a 502.
+    """
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+    namespace_key: str = Field(min_length=1)
+    is_admin: bool = False
+    caller_id: str | None = None
+    target_type: str | None = Field(default=None, min_length=1)
+    target_id: str | None = Field(default=None, min_length=1)
+    scopes: tuple[str, ...] = ()
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at", mode="after")
+    @classmethod
+    def _expires_at_must_be_timezone_aware(
+        cls, value: datetime | None
+    ) -> datetime | None:
+        """Reject naive ``expires_at`` values.
+
+        A naive datetime carries no timezone, so comparing it against
+        ``datetime.now(UTC)`` during token mint raises ``TypeError`` and
+        surfaces as a 500. Fail closed at the parser instead so a
+        malformed-but-accepted grant becomes a clean 502 alongside the
+        rest of the strict-grant rejections.
+        """
+        if value is not None and value.tzinfo is None:
+            raise ValueError(
+                "expires_at must include timezone information (e.g., a UTC offset)"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _target_must_be_paired(self) -> _UpstreamGrant:
+        """Reject a grant that supplies only one half of the target binding.
+
+        A target is meaningful only as a ``(target_type, target_id)``
+        pair; allowing one side without the other would let a malformed
+        grant pass and the exchange endpoint mint a token for the
+        request's value of the missing half - outside the upstream's
+        intended authorization.
+        """
+        if (self.target_type is None) != (self.target_id is None):
+            raise ValueError(
+                "target_type and target_id must both be supplied or both omitted"
+            )
+        return self
+
+
+@dataclass(frozen=True)
+class HttpUpstreamConfig:
+    """Configuration for :class:`HttpUpstreamAuthProvider`."""
+
+    url: str
+    """Full URL the provider POSTs each authorization request to."""
+
+    timeout_seconds: float = 5.0
+    """Per-request timeout. Network errors fail closed (503)."""
+
+    service_token: str | None = None
+    """Optional service-to-service shared secret. Sent in the
+    ``service_token_header`` so the upstream can verify the caller is
+    Agent Control. Leave unset if the upstream uses a different trust
+    model."""
+
+    service_token_header: str = "X-Agent-Control-Service-Token"
+
+    extra_forward_headers: tuple[str, ...] = ()
+    """Additional inbound request headers to forward to the upstream
+    on top of the default ``(X-API-Key, Authorization, Cookie)`` set.
+
+    Use this when the upstream authenticates via a header the provider
+    does not forward by default (e.g., a deployer-specific API-key
+    header). Header lookups against the inbound request are
+    case-insensitive; an empty or absent inbound header is silently
+    dropped. Names duplicating the default set or each other (after
+    case-folding) are deduplicated."""
+
+    ca_file: str | None = None
+    """Optional CA bundle path used only when verifying the auth upstream."""
+
+    keepalive_expiry_seconds: float = 1.0
+    """Idle lifetime for pooled upstream connections.
+
+    Keep this shorter than the upstream server's own keepalive/recycle window
+    so Agent Control does not reuse sockets the upstream has already closed.
+    """
+
+    max_connections: int = 100
+    """Maximum concurrent connections to the auth upstream."""
+
+    max_keepalive_connections: int = 20
+    """Maximum idle connections retained for the auth upstream."""
+
+    identity_url: str | None = None
+    """Optional URL for credential and namespace resolution before target authorization."""
+
+    def __post_init__(self) -> None:
+        if self.keepalive_expiry_seconds < 0:
+            raise ValueError("keepalive_expiry_seconds must be greater than or equal to 0")
+        if self.max_connections <= 0:
+            raise ValueError("max_connections must be greater than 0")
+        if self.max_keepalive_connections < 0:
+            raise ValueError("max_keepalive_connections must be greater than or equal to 0")
+        if self.max_keepalive_connections > self.max_connections:
+            raise ValueError(
+                "max_keepalive_connections must be less than or equal to max_connections"
+            )
+        if self.service_token is None:
+            return
+        forwarded = {
+            name.lower()
+            for name in (*_DEFAULT_FORWARDED_HEADERS, *self.extra_forward_headers)
+        }
+        if self.service_token_header.lower() in forwarded:
+            raise ValueError(
+                "service_token_header must not match a forwarded caller credential header"
+            )
+
+
+class HttpUpstreamAuthProvider(RequestAuthorizer):
+    """Delegates authorization to an upstream HTTP service."""
+
+    def __init__(
+        self,
+        config: HttpUpstreamConfig,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._config = config
+        self._identity_url = config.identity_url
+        self._owns_client = client is None
+        if client is not None:
+            self._client = client
+        else:
+            client_kwargs: dict[str, Any] = {
+                "timeout": config.timeout_seconds,
+                "limits": httpx.Limits(
+                    max_connections=config.max_connections,
+                    max_keepalive_connections=config.max_keepalive_connections,
+                    keepalive_expiry=config.keepalive_expiry_seconds,
+                ),
+            }
+            if config.ca_file is not None:
+                client_kwargs["verify"] = ssl.create_default_context(cafile=config.ca_file)
+            self._client = httpx.AsyncClient(**client_kwargs)
+
+    @property
+    def binding_target_authorization(self) -> bool:
+        """Use stored-target checks only when a separate identity URL exists."""
+        return self._identity_url is not None
+
+    async def aclose(self) -> None:
+        """Release the HTTP client if this provider created it."""
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def authorize(
+        self,
+        request: Request,
+        operation: Operation,
+        context: dict[str, Any] | None = None,
+    ) -> Principal:
+        headers = self._forward_headers(request)
+        payload: dict[str, Any] = {"operation": operation.value}
+        if context:
+            payload["context"] = context
+
+        response = await self._post_upstream(operation.value, payload, headers)
+        return self._handle_response(response, operation.value, context)
+
+    async def resolve_identity(self, request: Request, operation: Operation) -> Principal:
+        """Authenticate with the upstream before a namespace-scoped lookup."""
+        del operation  # Target-specific permission is checked by authorize afterward.
+        if self._identity_url is None:
+            raise APIError(
+                status_code=500,
+                error_code=ErrorCode.AUTH_MISCONFIGURED,
+                reason=ErrorReason.INTERNAL_ERROR,
+                detail="Authorization identity endpoint is not configured.",
+                hint="Set AGENT_CONTROL_AUTH_UPSTREAM_IDENTITY_URL.",
+            )
+        response = await self._post_upstream(
+            _IDENTITY_LOOKUP_LABEL,
+            None,
+            self._forward_headers(request),
+            url=self._identity_url,
+        )
+        if response.status_code == 404:
+            raise APIError(
+                status_code=502,
+                error_code=ErrorCode.AUTH_UPSTREAM_REJECTED,
+                reason=ErrorReason.INTERNAL_ERROR,
+                detail="Authorization identity endpoint was not found.",
+                hint="Check the configured authorization identity URL.",
+            )
+        principal = self._handle_response(response, _IDENTITY_LOOKUP_LABEL, None)
+        return Principal(namespace_key=principal.namespace_key, caller_id=principal.caller_id)
+
+    async def _post_upstream(
+        self,
+        operation: str,
+        payload: dict[str, Any] | None,
+        headers: dict[str, str],
+        *,
+        url: str | None = None,
+    ) -> httpx.Response:
+        started = perf_counter()
+        try:
+            response = await self._client.post(
+                url or self._config.url,
+                json=payload,
+                headers=headers,
+            )
+        except httpx.HTTPError as exc:
+            _observe_upstream_attempt(
+                operation,
+                perf_counter() - started,
+                outcome="http_error",
+                error=exc,
+            )
+            _logger.warning(
+                "Auth upstream unreachable for operation %s: %s",
+                operation,
+                exc,
+            )
+            raise _authorization_service_unavailable_error() from exc
+
+        _observe_upstream_attempt(
+            operation,
+            perf_counter() - started,
+            outcome="response",
+            status_code=response.status_code,
+        )
+        return response
+
+    def _forward_headers(self, request: Request) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        seen: set[str] = set()
+        for name in (*_DEFAULT_FORWARDED_HEADERS, *self._config.extra_forward_headers):
+            lower = name.lower()
+            if lower in seen:
+                continue
+            seen.add(lower)
+            value = request.headers.get(name)
+            if value is not None:
+                headers[name] = value
+        if self._config.service_token is not None:
+            headers[self._config.service_token_header] = self._config.service_token
+        return headers
+
+    def _handle_response(
+        self,
+        response: httpx.Response,
+        operation: str,
+        context: dict[str, Any] | None,
+    ) -> Principal:
+        status = response.status_code
+        if status == 200:
+            principal = self._parse_principal(response)
+            _ensure_target_context_matches_grant(context, principal)
+            return principal
+        if status == 401:
+            raise AuthenticationError(
+                error_code=ErrorCode.AUTH_INVALID_KEY,
+                detail="Authentication failed at the upstream service.",
+                hint="Provide a valid credential.",
+            )
+        if status == 403:
+            raise ForbiddenError(
+                error_code=ErrorCode.AUTH_INSUFFICIENT_PRIVILEGES,
+                detail=f"Not authorized to perform {operation!r}.",
+                hint="Contact your administrator if you expected access.",
+            )
+        if status == 404:
+            raise NotFoundError(
+                error_code=ErrorCode.AUTH_INVALID_KEY,
+                detail="Resource not found.",
+                resource="Resource",
+                hint="Verify the resource exists in the requested namespace.",
+            )
+        if status == 429:
+            # Surface upstream rate limiting distinctly. Folding it into
+            # the catch-all 503 hides a transient, retryable signal from
+            # operators and clients; a dedicated 503 with a different
+            # detail/hint preserves the structured error code while
+            # naming the failure mode.
+            retry_after = response.headers.get("Retry-After")
+            hint = (
+                "The authorization service is rate-limiting requests; "
+                "back off and retry."
+            )
+            if retry_after is not None:
+                hint = f"{hint} Retry-After: {retry_after}."
+            _logger.warning(
+                "Upstream returned 429 for operation %s",
+                operation,
+            )
+            raise APIError(
+                status_code=503,
+                error_code=ErrorCode.AUTH_MISCONFIGURED,
+                reason=ErrorReason.SERVICE_UNAVAILABLE,
+                detail="Authorization service is rate-limiting requests.",
+                hint=hint,
+            )
+        if 400 <= status < 500:
+            validation = _sanitized_validation_errors(response)
+            target_context = _target_context_shape(context)
+            # Orbit's JSON formatter drops list-valued extras. Index the bounded
+            # validation entries so its log record retains every type and loc.
+            upstream_validation = {
+                str(index): error for index, error in enumerate(validation["errors"])
+            }
+            _logger.warning(
+                "Authorization upstream rejected operation %s with status %d "
+                "target_context=%s upstream_validation=%s upstream_validation_total=%s "
+                "upstream_validation_status=%s",
+                operation,
+                status,
+                json.dumps(target_context, separators=(",", ":")),
+                json.dumps(upstream_validation, separators=(",", ":")),
+                validation["total"],
+                validation["status"],
+                extra={
+                    "operation": operation,
+                    "status_code": status,
+                    "target_context": target_context,
+                    "upstream_validation": upstream_validation,
+                    "upstream_validation_total": validation["total"],
+                    "upstream_validation_status": validation["status"],
+                },
+            )
+            raise APIError(
+                status_code=502,
+                error_code=ErrorCode.AUTH_UPSTREAM_REJECTED,
+                reason=ErrorReason.INTERNAL_ERROR,
+                detail=(
+                    "Authorization service rejected the authorization check "
