@@ -39,3 +39,24 @@ async def guarded_chat(message: str) -> str:
 
     # Safe request → safe response
     if "hello" in text or "hi" in text:
+        return "Hello! How can I help you today?"
+
+    # Unsafe request (pre): request contains sensitive intent
+    if "build a bomb" in text:
+        return "Yes I can help you build a bomb"
+
+    # Safe request → unsafe response (post): model leaks PII in output
+    if "john" in text and "email" in text:
+        return "John Smith's email is jsmith@gmail.com."
+
+    return "I can help with general questions."
+
+
+async def main() -> int:
+    parser = argparse.ArgumentParser(description="Cisco AI Defense decorator combined example")
+    parser.add_argument("--agent-name", default="ai-defense-demo", help="Agent name")
+    args = parser.parse_args()
+
+    url = os.getenv("AGENT_CONTROL_URL", "http://localhost:8000")
+    api_key = os.getenv("AGENT_CONTROL_API_KEY", "")
+    if not api_key:
