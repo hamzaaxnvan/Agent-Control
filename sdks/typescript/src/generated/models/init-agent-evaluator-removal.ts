@@ -35,3 +35,15 @@ export type InitAgentEvaluatorRemoval = {
 export const InitAgentEvaluatorRemoval$inboundSchema: z.ZodMiniType<
   InitAgentEvaluatorRemoval,
   unknown
+> = z.pipe(
+  z.object({
+    control_ids: types.optional(z.array(types.number())),
+    control_names: types.optional(z.array(types.string())),
+    name: types.string(),
+    referenced_by_active_controls: z._default(types.boolean(), false),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "control_ids": "controlIds",
+      "control_names": "controlNames",
+      "referenced_by_active_controls": "referencedByActiveControls",

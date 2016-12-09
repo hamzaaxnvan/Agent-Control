@@ -26,17 +26,3 @@ class SecureResearchCrew:
     @agent
     def analyst(self) -> Agent:
         return Agent(
-            config=self.agents_config["analyst"],  # type: ignore[index]
-            tools=[validate_data],
-            verbose=True,
-        )
-
-    @agent
-    def writer(self) -> Agent:
-        return Agent(
-            config=self.agents_config["writer"],  # type: ignore[index]
-            tools=[write_report],
-            verbose=True,
-        )
-
-    @task
