@@ -11,3 +11,17 @@ test.describe('Luna Evaluator', () => {
 
     await expect(
       mockedPage.getByText('Scorer label', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Scorer ID', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Scorer version ID', { exact: true })
+    ).toBeVisible();
+  });
+
+  test('displays comparison fields', async ({ mockedPage }) => {
+    await openEvaluatorForm(mockedPage, 'Galileo Luna');
+
+    await expect(
+      mockedPage.getByText('Operator', { exact: true })
