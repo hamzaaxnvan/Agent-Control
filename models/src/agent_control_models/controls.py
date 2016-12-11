@@ -387,3 +387,392 @@ class EnumTemplateParameter(TemplateParameterBase):
     default: str | None = Field(None, description="Optional default value")
 
     @field_validator("allowed_values")
+    @classmethod
+    def validate_allowed_values(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("allowed_values must not be empty")
+        if any(not item for item in value):
+            raise ValueError("allowed_values must contain non-empty strings")
+        if len(set(value)) != len(value):
+            raise ValueError("allowed_values must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def validate_default(self) -> Self:
+        if self.default is not None and self.default not in self.allowed_values:
+            raise ValueError("Default must be one of allowed_values")
+        return self
+
+
+class BooleanTemplateParameter(TemplateParameterBase):
+    """Boolean template parameter."""
+
+    type: Literal["boolean"] = "boolean"
+    default: bool | None = Field(None, description="Optional default value")
+
+
+class RegexTemplateParameter(TemplateParameterBase):
+    """RE2 regex template parameter."""
+
+    type: Literal["regex_re2"] = "regex_re2"
+    default: str | None = Field(None, description="Optional default regex pattern")
+    placeholder: str | None = Field(None, description="Optional placeholder regex")
+
+    @field_validator("default", "placeholder")
+    @classmethod
+    def validate_regex_values(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _validate_re2_value(value, field_name="regex pattern")
+
+
+type TemplateParameterDefinition = Annotated[
+    StringTemplateParameter
+    | StringListTemplateParameter
+    | EnumTemplateParameter
+    | BooleanTemplateParameter
+    | RegexTemplateParameter,
+    Field(discriminator="type"),
+]
+
+
+class TemplateDefinition(BaseModel):
+    """Reusable template with typed parameters and a JSON definition template."""
+
+    description: str | None = Field(
+        None,
+        description="Metadata describing the template itself",
+    )
+    parameters: dict[str, TemplateParameterDefinition] = Field(
+        default_factory=dict,
+        description="Typed parameter definitions keyed by parameter name",
+    )
+    definition_template: JsonValue = Field(
+        ...,
+        description="Template payload containing $param binding objects",
+    )
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameter_names(
+        cls, value: dict[str, TemplateParameterDefinition]
+    ) -> dict[str, TemplateParameterDefinition]:
+        for name in value:
+            if not _TEMPLATE_PARAMETER_NAME_RE.fullmatch(name):
+                raise ValueError(
+                    "Parameter names must match [a-zA-Z_][a-zA-Z0-9_]*"
+                )
+        return value
+
+    @field_validator("definition_template")
+    @classmethod
+    def validate_definition_template_structure(cls, value: JsonValue) -> JsonValue:
+        """Limit template nesting and size to keep rendering bounded."""
+        return _validate_template_definition_structure(value)
+
+
+class TemplateControlInput(BaseModel):
+    """Template-backed input payload for control create/update requests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: TemplateDefinition = Field(..., description="Template definition to render")
+    template_values: dict[str, TemplateValue] = Field(
+        default_factory=dict,
+        description="Template parameter values keyed by parameter name",
+    )
+
+
+class UnrenderedTemplateControl(BaseModel):
+    """Stored state of a template control that hasn't been rendered yet.
+
+    An unrendered template has a template definition and possibly partial
+    parameter values, but no concrete condition/action/execution fields.
+    It is always ``enabled=False`` and excluded from evaluation.
+    """
+
+    template: TemplateDefinition = Field(
+        ..., description="Template definition awaiting parameter values"
+    )
+    template_values: dict[str, TemplateValue] = Field(
+        default_factory=dict,
+        description="Partial or empty parameter values",
+    )
+    enabled: Literal[False] = Field(
+        False,
+        description="Unrendered templates are always disabled",
+    )
+
+
+class ControlAction(BaseModel):
+    """What to do when control matches."""
+
+    decision: ActionDecision = Field(
+        ..., description="Action to take when control is triggered"
+    )
+    steering_context: SteeringContext | None = Field(
+        None,
+        description=(
+            "Steering context object for steer actions. Strongly recommended when "
+            "decision='steer' to provide correction suggestions. If not provided, the "
+            "evaluator result message will be used as fallback."
+        )
+    )
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def validate_decision(cls, value: str) -> ActionDecision:
+        return validate_action(value)
+
+
+def _validate_common_control_constraints(
+    condition: ConditionNode,
+    action: ControlAction,
+) -> None:
+    """Validate control constraints shared by authoring and runtime models."""
+    if condition.max_depth() > MAX_CONDITION_DEPTH:
+        raise ValueError(
+            f"Condition nesting depth exceeds maximum of {MAX_CONDITION_DEPTH}"
+        )
+
+    if (
+        action.decision == "steer"
+        and not condition.is_leaf()
+        and action.steering_context is None
+    ):
+        raise ValueError("Composite steer controls require action.steering_context")
+
+
+class ConditionNode(BaseModel):
+    """Recursive boolean condition tree for control evaluation."""
+
+    selector: ControlSelector | None = Field(
+        default=None,
+        description="Leaf selector. Must be provided together with evaluator.",
+    )
+    evaluator: EvaluatorSpec | None = Field(
+        default=None,
+        description="Leaf evaluator. Must be provided together with selector.",
+    )
+    and_: list[ConditionNode] | None = Field(
+        default=None,
+        alias="and",
+        serialization_alias="and",
+        description="Logical AND over child conditions.",
+    )
+    or_: list[ConditionNode] | None = Field(
+        default=None,
+        alias="or",
+        serialization_alias="or",
+        description="Logical OR over child conditions.",
+    )
+    not_: ConditionNode | None = Field(
+        default=None,
+        alias="not",
+        serialization_alias="not",
+        description="Logical NOT over a single child condition.",
+    )
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        use_enum_values=True,
+        validate_assignment=True,
+        extra="ignore",
+        serialize_by_alias=True,
+    )
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> Self:
+        """Ensure each node is exactly one of leaf/and/or/not."""
+        has_selector = self.selector is not None
+        has_evaluator = self.evaluator is not None
+        has_leaf = has_selector and has_evaluator
+        if has_selector != has_evaluator:
+            raise ValueError("Leaf condition requires both selector and evaluator")
+
+        populated = sum(
+            1
+            for present in (
+                has_leaf,
+                self.and_ is not None,
+                self.or_ is not None,
+                self.not_ is not None,
+            )
+            if present
+        )
+        if populated != 1:
+            raise ValueError("Condition node must contain exactly one of leaf, and, or, not")
+
+        if self.and_ is not None and len(self.and_) == 0:
+            raise ValueError("'and' must contain at least one child condition")
+        if self.or_ is not None and len(self.or_) == 0:
+            raise ValueError("'or' must contain at least one child condition")
+
+        return self
+
+    def kind(self) -> Literal["leaf", "and", "or", "not"]:
+        """Return the logical node type."""
+        if self.is_leaf():
+            return "leaf"
+        if self.and_ is not None:
+            return "and"
+        if self.or_ is not None:
+            return "or"
+        return "not"
+
+    def is_leaf(self) -> bool:
+        """Return True when this node is a leaf selector/evaluator pair."""
+        return self.selector is not None and self.evaluator is not None
+
+    def children_in_order(self) -> list[ConditionNode]:
+        """Return child conditions in evaluation order."""
+        if self.and_ is not None:
+            return self.and_
+        if self.or_ is not None:
+            return self.or_
+        if self.not_ is not None:
+            return [self.not_]
+        return []
+
+    def iter_leaves(self) -> Iterator[ConditionNode]:
+        """Yield leaf nodes in left-to-right traversal order."""
+        if self.is_leaf():
+            yield self
+            return
+
+        for child in self.children_in_order():
+            yield from child.iter_leaves()
+
+    def iter_leaf_parts(self) -> Iterator[ConditionLeafParts]:
+        """Yield leaf selector/evaluator pairs in left-to-right traversal order."""
+        leaf_parts = self.leaf_parts()
+        if leaf_parts is not None:
+            yield leaf_parts
+            return
+
+        for child in self.children_in_order():
+            yield from child.iter_leaf_parts()
+
+    def max_depth(self) -> int:
+        """Return the maximum nesting depth of this condition tree."""
+        children = self.children_in_order()
+        if not children:
+            return 1
+        return 1 + max(child.max_depth() for child in children)
+
+    def leaf_parts(self) -> ConditionLeafParts | None:
+        """Return the selector/evaluator pair for leaf nodes."""
+        if not self.is_leaf():
+            return None
+        selector = self.selector
+        evaluator = self.evaluator
+        if selector is None or evaluator is None:
+            return None
+        return selector, evaluator
+
+    model_config["json_schema_extra"] = {
+        "examples": [
+            {
+                "selector": {"path": "output"},
+                "evaluator": {"name": "regex", "config": {"pattern": r"\d{3}-\d{2}-\d{4}"}},
+            },
+            {
+                "and": [
+                    {
+                        "selector": {"path": "context.risk_level"},
+                        "evaluator": {
+                            "name": "list",
+                            "config": {"values": ["high", "critical"]},
+                        },
+                    },
+                    {
+                        "not": {
+                            "selector": {"path": "context.user_role"},
+                            "evaluator": {
+                                "name": "list",
+                                "config": {"values": ["admin", "security"]},
+                            },
+                        }
+                    },
+                ]
+            },
+        ]
+    }
+
+
+ConditionNode.model_rebuild()
+
+
+def _build_observability_identity(
+    condition: ConditionNode,
+) -> ControlObservabilityIdentity:
+    """Build a stable selector/evaluator identity for a condition tree."""
+    all_evaluators: list[str] = []
+    all_selector_paths: list[str] = []
+    seen_evaluators: set[str] = set()
+    seen_selector_paths: set[str] = set()
+    leaf_count = 0
+
+    for selector, evaluator in condition.iter_leaf_parts():
+        leaf_count += 1
+        selector_path = selector.path or "*"
+
+        if evaluator.name not in seen_evaluators:
+            seen_evaluators.add(evaluator.name)
+            all_evaluators.append(evaluator.name)
+
+        if selector_path not in seen_selector_paths:
+            seen_selector_paths.add(selector_path)
+            all_selector_paths.append(selector_path)
+
+    return ControlObservabilityIdentity(
+        selector_path=all_selector_paths[0] if all_selector_paths else None,
+        evaluator_name=all_evaluators[0] if all_evaluators else None,
+        leaf_count=leaf_count,
+        all_evaluators=all_evaluators,
+        all_selector_paths=all_selector_paths,
+    )
+
+
+class _ConditionBackedControlMixin:
+    """Shared helpers for control models backed by a condition tree."""
+
+    condition: ConditionNode
+
+    def iter_condition_leaves(self) -> Iterator[ConditionNode]:
+        """Yield leaf conditions in evaluation order."""
+        yield from self.condition.iter_leaves()
+
+    def iter_condition_leaf_parts(self) -> Iterator[ConditionLeafParts]:
+        """Yield leaf selector/evaluator pairs in evaluation order."""
+        yield from self.condition.iter_leaf_parts()
+
+    def observability_identity(self) -> ControlObservabilityIdentity:
+        """Return a deterministic representative identity for observability."""
+        return _build_observability_identity(self.condition)
+
+
+def canonicalize_control_payload(data: Any) -> Any:
+    """Rewrite legacy selector/evaluator payloads into canonical condition shape."""
+    if not isinstance(data, dict):
+        return data
+
+    has_condition = "condition" in data
+    has_selector = "selector" in data
+    has_evaluator = "evaluator" in data
+
+    if has_condition and (has_selector or has_evaluator):
+        raise ValueError(
+            "Control definition mixes canonical condition fields "
+            "with legacy selector/evaluator fields."
+        )
+    if has_selector != has_evaluator:
+        raise ValueError(
+            "Legacy control definition must include both selector and evaluator."
+        )
+    if not has_condition and has_selector:
+        canonical = dict(data)
+        selector = canonical.pop("selector")
+        evaluator = canonical.pop("evaluator")
+        canonical["condition"] = {
+            "selector": selector,
