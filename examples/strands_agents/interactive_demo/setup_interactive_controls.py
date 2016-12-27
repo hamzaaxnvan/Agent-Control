@@ -125,3 +125,66 @@ INTERACTIVE_CONTROLS = [
             },
             "condition": {
                 "selector": {"path": "input"},  # Check entire tool input
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        "pattern": r"\b\d{3}-\d{2}-\d{4}\b|\b\d{9}\b|\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"
+                    }
+                },
+            },
+            "action": {"decision": "deny"},
+            "tags": ["pii", "security", "tools"]
+        }
+    }
+]
+
+
+async def create_agent(client: AgentControlClient) -> str:
+    """Create the interactive support demo agent."""
+    print(f"\n✓ Creating agent: {AGENT_NAME}")
+
+    agent = Agent(
+        agent_name=AGENT_NAME,
+        agent_description="Interactive demo with real-time safety"
+    )
+
+    try:
+        await agents.register_agent(client, agent, steps=[])
+        print(f"  Agent: {AGENT_NAME}")
+        return AGENT_NAME
+    except Exception:
+        print(f"  Agent already exists")
+        return AGENT_NAME
+
+
+async def create_control_with_retry(
+    client: AgentControlClient,
+    name: str,
+    control_definition: dict
+) -> int:
+    """Create or update a control."""
+    try:
+        result = await controls.create_control(client, name=name, data=control_definition)
+        return result["control_id"]
+    except Exception as e:
+        if "409" in str(e):
+            controls_list = await controls.list_controls(client, name=name, limit=1)
+            if controls_list["controls"]:
+                control_id = controls_list["controls"][0]["id"]
+                await controls.set_control_data(client, control_id, control_definition)
+                return control_id
+        raise
+
+
+async def create_interactive_controls(client: AgentControlClient) -> list[int]:
+    """Create all interactive demo controls."""
+    print(f"\n✓ Creating {len(INTERACTIVE_CONTROLS)} controls")
+    control_ids = []
+
+    for control_spec in INTERACTIVE_CONTROLS:
+        name = control_spec["name"]
+        definition = control_spec["definition"]
+        control_id = await create_control_with_retry(client, name, definition)
+        control_ids.append(control_id)
+        print(f"  • {name} (ID: {control_id})")
+
