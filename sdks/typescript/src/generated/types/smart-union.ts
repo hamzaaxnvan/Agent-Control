@@ -28,3 +28,96 @@ export function smartUnion<
 >(
   options: Options,
 ): z.ZodMiniType<z.output<Options[number]>, z.input<Options[number]>> {
+  return z.pipe(
+    z.unknown(),
+    z.transform((input, ctx) => {
+      const candidates: Candidate[] = [];
+      const errors: z.core.$ZodIssue[][] = options.map(() => []);
+
+      const parentUnrecognizedCtr = startCountingUnrecognized();
+      const parentZeroDefaultCtr = startCountingDefaultToZeroValue();
+
+      // Filter out invalid options
+      for (const [i, option] of options.entries()) {
+        const unrecognizedCtr = startCountingUnrecognized();
+        const zeroDefaultCtr = startCountingDefaultToZeroValue();
+        const result = option.safeParse(input);
+        const inexactCount = unrecognizedCtr.end();
+        const zeroDefaultCount = zeroDefaultCtr.end();
+        if (result.success) {
+          candidates.push({
+            data: result.data,
+            inexactCount,
+            zeroDefaultCount,
+            fieldCount: -1, // We'll count this later if needed
+          });
+          continue;
+        }
+        errors[i]!.push(...result.error.issues);
+      }
+
+      // No valid options
+      if (candidates.length === 0) {
+        parentUnrecognizedCtr.end(0);
+        parentZeroDefaultCtr.end(0);
+        ctx.issues.push({
+          input: input,
+          code: "invalid_union",
+          errors: errors,
+        });
+        return z.NEVER;
+      }
+
+      let best = candidates[0]!;
+
+      // Find the best option
+      for (const candidate of candidates) {
+        // Minor optimization to avoid counting fields if there's only one candidate
+        if (candidates.length > 1) {
+          candidate.fieldCount = countFieldsRecursive(candidate.data);
+        }
+        best = better(candidate, best);
+      }
+
+      // The cost of this union should be the cost of the best candidate not all the candidates
+      parentUnrecognizedCtr.end(best.inexactCount);
+      parentZeroDefaultCtr.end(best.zeroDefaultCount);
+
+      return best.data;
+    }),
+  ) as any;
+}
+
+function better(a: Candidate, b: Candidate): Candidate {
+  // First prefer exact matches over inexact ones
+  const aIsExact = a.inexactCount === 0;
+  const bIsExact = b.inexactCount === 0;
+  if (aIsExact !== bIsExact) {
+    return aIsExact ? a : b;
+  }
+
+  // Then compare field counts
+  const actualFieldCountA = a.fieldCount - a.zeroDefaultCount;
+  const actualFieldCountB = b.fieldCount - b.zeroDefaultCount;
+  if (actualFieldCountA !== actualFieldCountB) {
+    return actualFieldCountA > actualFieldCountB ? a : b;
+  }
+  return a.inexactCount < b.inexactCount ? a : b;
+}
+
+/**
+ * Counts the number of fields in a parsed value recursively.
+ * @param `parsed` assumed to *not* contain cycles
+ * fieldCount: total number of fields found
+ * inexactCount: number of primitive values that are not unrecognized enum values
+ */
+function countFieldsRecursive(parsed: unknown): number {
+  let fieldCount = 0;
+
+  const queue: unknown[] = [parsed];
+  let index = 0;
+
+  while (index < queue.length) {
+    const value = queue[index++];
+    if (value === undefined || isDiscriminatedUnionUnknown(value)) {
+      continue;
