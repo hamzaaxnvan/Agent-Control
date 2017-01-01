@@ -1,0 +1,29 @@
+# Agent Control Root Configuration
+#
+# This monorepo contains:
+# - models/ - Shared data models (published as agent-control-models)
+# - engine/ - Evaluation engine (bundled into SDK and server)
+# - evaluators/ - Evaluator implementations (bundled into server)
+# - sdks/python/ - Python SDK (published as agent-control-sdk)
+# - server/ - FastAPI server (published as agent-control-server)
+
+[project]
+name = "agent-control"
+version = "8.15.0"
+description = "Agent Control - protect your AI agents with controls"
+requires-python = ">=3.12,<3.15"
+
+[tool.uv.workspace]
+members = [
+    "models",
+    "server",
+    "sdks/python",
+    "telemetry",
+    "engine",
+    "evaluators/builtin",
+    # NOTE: evaluators/contrib/* excluded - install separately when needed
+]
+
+[tool.uv]
+# Require resolution to be compatible with the following environments so that CI and local dev
+# pick versions with wheels available across platforms (fixes ruff wheel mismatch on Linux x86_64).
