@@ -31,3 +31,14 @@ def run_migrations_offline() -> None:
         compare_type=True,
         transaction_per_migration=True,
     )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    url = _get_migration_url()
+    connectable = create_engine(url, future=True, poolclass=pool.NullPool)
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,

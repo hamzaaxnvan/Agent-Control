@@ -64,36 +64,3 @@ def _write_fake_repo(
         f"""
         [project]
         name = "agent-control"
-        version = "1.0.0"
-
-        [tool.semantic_release]
-        version_toml = [
-            "pyproject.toml:project.version",
-            {version_entry}
-        ]
-        """,
-    )
-    _write_text(
-        root / "evaluators" / "builtin" / "pyproject.toml",
-        f"""
-        [project]
-        name = "agent-control-evaluators"
-        version = "1.0.0"
-
-        [project.optional-dependencies]
-        dev = []
-        {extra_entry}
-
-        [tool.uv.sources]
-        agent-control-models = {{ workspace = true }}
-        {source_entry}
-        """,
-    )
-    _write_text(
-        root / "evaluators" / "contrib" / "example" / "pyproject.toml",
-        """
-        [project]
-        name = "agent-control-evaluator-example"
-        version = "1.0.0"
-
-        [project.entry-points."agent_control.evaluators"]

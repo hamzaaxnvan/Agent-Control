@@ -11,16 +11,3 @@ import { Control, Control$inboundSchema } from "./control.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
 import {
   InitAgentOverwriteChanges,
-  InitAgentOverwriteChanges$inboundSchema,
-} from "./init-agent-overwrite-changes.js";
-
-/**
- * Response from agent initialization.
- */
-export type InitAgentResponse = {
-  /**
-   * Active protection controls for the agent
-   */
-  controls?: Array<Control> | undefined;
-  /**
-   * True if agent was newly created, False if updated
