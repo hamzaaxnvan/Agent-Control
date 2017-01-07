@@ -84,3 +84,32 @@ export const defenseClawRulePackEvaluator: EvaluatorDefinition<DefenseClawRulePa
     fromConfig: (config) => {
       const rulePack = isRecord(config.rule_pack) ? config.rule_pack : {};
       const rules = Array.isArray(rulePack.rules)
+        ? rulePack.rules.map(normalizeRule)
+        : [];
+      return {
+        rules: rules.length > 0 ? rules : [createBlankDefenseClawRule()],
+      };
+    },
+    FormComponent: DefenseClawRulePackForm,
+  };
+
+export const defenseClawOpaPolicyEvaluator: EvaluatorDefinition<DefenseClawOpaPolicyFormValues> =
+  {
+    id: 'defenseclaw.opa_policy',
+    displayName: 'DefenseClaw OPA Policy',
+    defaultExecution: 'sdk',
+    supportedExecutions: ['sdk'],
+    initialValues: {
+      domain: 'guardrail',
+      block_at: 'HIGH',
+      alert_at: 'MEDIUM',
+      cisco_trust_level: 'full',
+    },
+    validate: {
+      domain: (value) =>
+        value === 'guardrail' ? null : 'Domain must be guardrail',
+      block_at: (value) =>
+        severityValues.has(String(value))
+          ? null
+          : 'Select a supported block severity',
+      alert_at: (value) =>
