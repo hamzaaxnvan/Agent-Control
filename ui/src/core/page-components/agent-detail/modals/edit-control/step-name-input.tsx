@@ -61,3 +61,130 @@ export function StepNameInput({ form, steps = [] }: StepNameInputProps) {
     form.setFieldValue('step_names', values.join(', '));
   };
 
+  const regexMatchInfo = useMemo(() => {
+    const pattern = form.values.step_name_regex.trim();
+    if (!pattern) {
+      return {
+        hasPattern: false,
+        isValid: true,
+        matchCount: 0,
+        matchedStepNames: [] as string[],
+        errorMessage: '',
+      };
+    }
+
+    try {
+      const regex = new RegExp(pattern);
+      const matchedStepNames = steps
+        .map((step) => step.name)
+        .filter((stepName) => regex.test(stepName));
+
+      return {
+        hasPattern: true,
+        isValid: true,
+        matchCount: matchedStepNames.length,
+        matchedStepNames,
+        errorMessage: '',
+      };
+    } catch (error) {
+      return {
+        hasPattern: true,
+        isValid: false,
+        matchCount: 0,
+        matchedStepNames: [] as string[],
+        errorMessage: error instanceof Error ? error.message : 'Invalid regex',
+      };
+    }
+  }, [form.values.step_name_regex, steps]);
+
+  return (
+    <Box>
+      <Group gap="xs" mb={8} wrap="nowrap">
+        <Group gap={4}>
+          <Text size="sm" fw={500}>
+            Step name
+          </Text>
+          <Tooltip
+            label={
+              <Stack gap={0}>
+                <Text size="xs">
+                  {isRegexMode
+                    ? 'Optional RE2 pattern to match step names.'
+                    : 'Select step names to scope this control.'}
+                </Text>
+                <Text size="xs">
+                  {isRegexMode
+                    ? 'Toggle off to select step names from dropdown.'
+                    : 'Toggle on to use a regex pattern instead.'}
+                </Text>
+              </Stack>
+            }
+          >
+            <IconInfoCircle size={14} color="gray" />
+          </Tooltip>
+        </Group>
+        <Switch
+          size="xs"
+          label="Regex"
+          checked={isRegexMode}
+          onChange={(e) => handleRegexToggle(e.currentTarget.checked)}
+        />
+      </Group>
+      {isRegexMode ? (
+        <TextInput
+          size="sm"
+          placeholder="^db_.*"
+          rightSection={
+            regexMatchInfo.hasPattern ? (
+              <Tooltip
+                multiline
+                label={
+                  regexMatchInfo.isValid ? (
+                    <Stack gap={4}>
+                      <Text size="xs">
+                        {regexMatchInfo.matchCount} matching step
+                        {regexMatchInfo.matchCount === 1 ? '' : 's'}
+                      </Text>
+                      {regexMatchInfo.matchCount > 0 ? (
+                        <Text size="xs">
+                          {regexMatchInfo.matchedStepNames.join(', ')}
+                        </Text>
+                      ) : (
+                        <Text size="xs">No step names matched.</Text>
+                      )}
+                    </Stack>
+                  ) : (
+                    <Text size="xs">
+                      Invalid regex: {regexMatchInfo.errorMessage}
+                    </Text>
+                  )
+                }
+              >
+                <Group gap={4} wrap="nowrap">
+                  {regexMatchInfo.isValid ? (
+                    regexMatchInfo.matchCount > 0 ? (
+                      <IconCircleCheck
+                        size={14}
+                        color="var(--mantine-color-green-6)"
+                      />
+                    ) : (
+                      <IconCircleX
+                        size={14}
+                        color="var(--mantine-color-gray-6)"
+                      />
+                    )
+                  ) : (
+                    <IconAlertCircle
+                      size={14}
+                      color="var(--mantine-color-red-6)"
+                    />
+                  )}
+                  <Text size="xs" c={regexMatchInfo.isValid ? 'dimmed' : 'red'}>
+                    {regexMatchInfo.isValid ? regexMatchInfo.matchCount : '!'}
+                  </Text>
+                </Group>
+              </Tooltip>
+            ) : undefined
+          }
+          rightSectionPointerEvents="all"
+          {...form.getInputProps('step_name_regex')}
