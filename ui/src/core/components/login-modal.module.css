@@ -10,15 +10,3 @@
   position: absolute;
   inset: 0;
   display: block;
-}
-
-.lightLogo {
-  display: none;
-}
-
-[data-mantine-color-scheme='dark'] .darkLogo {
-  display: none;
-}
-
-[data-mantine-color-scheme='dark'] .lightLogo {
-  display: block;
