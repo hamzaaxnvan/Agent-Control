@@ -10,3 +10,27 @@ export type DeleteControlApiV1ControlsControlIdDeleteRequest = {
   /**
    * If true, dissociate from all policy/agent links before deleting. If false, fail if control is associated with any policy or agent.
    */
+  force?: boolean | undefined;
+};
+
+/** @internal */
+export type DeleteControlApiV1ControlsControlIdDeleteRequest$Outbound = {
+  control_id: number;
+  force: boolean;
+};
+
+/** @internal */
+export const DeleteControlApiV1ControlsControlIdDeleteRequest$outboundSchema:
+  z.ZodMiniType<
+    DeleteControlApiV1ControlsControlIdDeleteRequest$Outbound,
+    DeleteControlApiV1ControlsControlIdDeleteRequest
+  > = z.pipe(
+    z.object({
+      controlId: z.int(),
+      force: z._default(z.boolean(), false),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        controlId: "control_id",
+      });
+    }),
