@@ -7,3 +7,12 @@ import { remap as remap$ } from "../../lib/primitives.js";
 
 export type SetAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest = {
   agentName: string;
+  policyId: number;
+};
+
+/** @internal */
+export type SetAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest$Outbound =
+  {
+    agent_name: string;
+    policy_id: number;
+  };

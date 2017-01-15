@@ -22,27 +22,3 @@ export type UpsertControlBindingRequest = {
   /**
    * Whether the binding is active.
    */
-  enabled?: boolean | undefined;
-  /**
-   * Opaque external identifier within the target_type.
-   */
-  targetId: string;
-  /**
-   * Opaque attachment kind.
-   */
-  targetType: string;
-};
-
-/** @internal */
-export type UpsertControlBindingRequest$Outbound = {
-  control_id: number;
-  enabled: boolean;
-  target_id: string;
-  target_type: string;
-};
-
-/** @internal */
-export const UpsertControlBindingRequest$outboundSchema: z.ZodMiniType<
-  UpsertControlBindingRequest$Outbound,
-  UpsertControlBindingRequest
-> = z.pipe(
