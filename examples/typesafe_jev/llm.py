@@ -179,3 +179,94 @@ def provider() -> str:
     if os.getenv("ANTHROPIC_API_KEY"):
         return "anthropic"
     return "offline"
+
+
+def model_name() -> str:
+    """Return the model identifier for the active provider."""
+    return {
+        "gateway": GATEWAY_MODEL or "gateway",
+        "openai": OPENAI_MODEL,
+        "anthropic": ANTHROPIC_MODEL,
+    }.get(provider(), "offline-script")
+
+
+def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url, data=json.dumps(payload).encode(), headers=headers, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        _raise_if_filtered(error)
+        raise
+
+
+def _gateway_credential() -> str:
+    """Return the gateway credential, exchanging client credentials if needed."""
+    if GATEWAY_API_KEY:
+        return GATEWAY_API_KEY
+    if not (GATEWAY_TOKEN_URL and GATEWAY_CLIENT_ID and GATEWAY_CLIENT_SECRET):
+        raise RuntimeError(
+            "Set LLM_API_KEY, or LLM_TOKEN_URL with LLM_CLIENT_ID and LLM_CLIENT_SECRET."
+        )
+
+    global _gateway_token
+    with _gateway_lock:
+        if _gateway_token is not None and time.time() < _gateway_token[1]:
+            return _gateway_token[0]
+
+        basic = base64.b64encode(
+            f"{GATEWAY_CLIENT_ID}:{GATEWAY_CLIENT_SECRET}".encode()
+        ).decode()
+        request = urllib.request.Request(
+            GATEWAY_TOKEN_URL,
+            data=b"grant_type=client_credentials",
+            headers={
+                "Accept": "*/*",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {basic}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = json.loads(response.read())
+
+        token = data.get("access_token")
+        if not token:
+            raise RuntimeError(f"Token response had no access_token: {data}")
+        # Refresh a minute early rather than racing the expiry.
+        _gateway_token = (token, time.time() + int(data.get("expires_in", 3600)) - 60)
+        return token
+
+
+def _offline(conversation: list[dict[str, Any]]) -> Turn:
+    """A scripted stand-in used when no API key is set.
+
+    It imitates the two things the real model does: it asks for the tool when
+    the message wants customer data, and it reads the rows back afterwards.
+    """
+    if conversation and conversation[-1].get("role") == "tool":
+        rows = json.loads(str(conversation[-1].get("content") or "[]"))
+        if not rows:
+            return Turn("I could not find a matching customer.", [])
+        parts = [", ".join(f"{k}: {v}" for k, v in row.items()) for row in rows[:3]]
+        return Turn("Here is what I found. " + " | ".join(parts), [])
+
+    message = ""
+    for entry in conversation:
+        if entry.get("role") == "user":
+            message = str(entry.get("content") or "")
+    lower = message.lower()
+
+    def call(arguments: dict[str, Any]) -> Turn:
+        return Turn("", [ToolCall("offline-1", "lookup_customers", arguments)])
+
+    if any(w in lower for w in ("every", "all customers", "mailing list", "export")):
+        region = "Northeast" if "northeast" in lower else "all"
+        return call({"region": region, "fields": ["name", "email", "address"]})
+    if any(w in lower for w in ("ssn", "social security", "card number")):
+        return call({"name": customers.CURRENT_CUSTOMER, "fields": ["ssn", "card"]})
+    if "address" in lower:
+        return call({"name": customers.CURRENT_CUSTOMER, "fields": ["address"]})
+    if any(w in lower for w in ("balance", "invoice", "charge", "billing")):
