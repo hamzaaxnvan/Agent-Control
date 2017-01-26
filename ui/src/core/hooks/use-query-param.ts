@@ -37,16 +37,3 @@ export function useQueryParam(
 
   // Track if we're currently updating to prevent loops
   const isUpdatingRef = useRef(false);
-
-  // Update URL when value changes
-  const setValue = useCallback(
-    (newValue: string) => {
-      if (!router.isReady || isUpdatingRef.current) return;
-
-      isUpdatingRef.current = true;
-
-      const query = { ...router.query };
-      if (newValue) {
-        query[key] = newValue;
-      } else {
-        delete query[key];
