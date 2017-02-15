@@ -7,13 +7,3 @@ import { ClientSDK, RequestOptions } from "../lib/sdks.js";
 import * as models from "../models/index.js";
 import { unwrapAsync } from "../types/fp.js";
 
-export class Evaluation extends ClientSDK {
-  /**
-   * Analyze content safety
-   *
-   * @remarks
-   * Analyze content for safety and control violations.
-   *
-   * The effective control set is the de-duplicated union of the agent's
-   * direct controls, policy-derived controls, and (when ``target_type`` and
-   * ``target_id`` are both supplied) controls attached to that target via
