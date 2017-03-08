@@ -11,3 +11,16 @@ export function defaultToZeroValue<T>(value: T): Unrecognized<T> {
   globalCount++;
   return unrecognized(value);
 }
+
+export function startCountingDefaultToZeroValue() {
+  refCount++;
+  const start = globalCount;
+  return {
+    /**
+     * Ends counting and returns the delta.
+     * @param delta - If provided, only this amount is added to the parent counter
+     *   (used for nested unions where we only want to record the winning option's count).
+     *   If not provided, records all counts since start().
+     */
+    end: (delta?: number) => {
+      const count = globalCount - start;
