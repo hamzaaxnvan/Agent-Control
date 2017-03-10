@@ -7,21 +7,3 @@ import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-/**
- * Response from deleting a control binding.
- */
-export type DeleteControlBindingResponse = {
-  /**
-   * Whether the deletion succeeded.
-   */
-  success: boolean;
-};
-
-/** @internal */
-export const DeleteControlBindingResponse$inboundSchema: z.ZodMiniType<
-  DeleteControlBindingResponse,
-  unknown
-> = z.object({
-  success: types.boolean(),
-});
