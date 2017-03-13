@@ -129,3 +129,134 @@ def build_tokens(path: str, method: str, op: dict[str, object]) -> list[str]:
     return [method, *path_tokens]
 
 
+def build_group_forms(group_tokens: list[str]) -> tuple[set[str], set[str], set[str]]:
+    forms: set[str] = set()
+    singular_forms: set[str] = set()
+    plural_forms: set[str] = set()
+    for token in group_tokens:
+        singular = singularize(token)
+        plural = pluralize(singular)
+        forms.add(token)
+        forms.add(singular)
+        forms.add(plural)
+        singular_forms.add(singular)
+        plural_forms.add(plural)
+    return forms, singular_forms, plural_forms
+
+
+def normalize_tokens(tokens: list[str]) -> list[str]:
+    if not tokens:
+        return ["call"]
+    normalized = [token for token in tokens]
+    normalized[0] = VERB_RENAMES.get(normalized[0], normalized[0])
+    return normalized
+
+
+def derive_name(
+    tokens: list[str],
+    group_forms: set[str],
+    group_singular_forms: set[str],
+    group_plural_forms: set[str],
+    strip_group_tokens: bool,
+) -> str:
+    working = normalize_tokens(tokens)
+
+    if (
+        len(working) >= 2
+        and working[0] == "get"
+        and working[1] in group_plural_forms
+        and working[1] not in group_singular_forms
+    ):
+        working = ["list", *working[2:]]
+
+    if strip_group_tokens:
+        while len(working) >= 2 and working[1] in group_forms:
+            del working[1]
+        if (
+            len(working) >= 3
+            and working[-2] in PREPOSITIONS
+            and working[-1] in group_forms
+        ):
+            working = working[:-2]
+
+    if not working:
+        working = ["call"]
+
+    candidate = lower_camel(working)
+    if candidate[0].isdigit():
+        candidate = f"op{candidate.capitalize()}"
+    return candidate
+
+
+def iter_operations(schema: dict[str, object]) -> list[Operation]:
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        raise ValueError("OpenAPI schema is missing a valid 'paths' object.")
+
+    operations: list[Operation] = []
+    for path, methods in paths.items():
+        if not isinstance(path, str) or not isinstance(methods, dict):
+            continue
+        for method, op in methods.items():
+            if not isinstance(method, str):
+                continue
+            method_lower = method.lower()
+            if method_lower not in HTTP_METHOD_RANK:
+                continue
+            if not isinstance(op, dict):
+                continue
+            group, group_tokens = infer_group(path, op)
+            tokens = build_tokens(path, method_lower, op)
+            operations.append(
+                Operation(
+                    path=path,
+                    method=method_lower,
+                    group=group,
+                    group_tokens=group_tokens,
+                    tokens=tokens,
+                )
+            )
+
+    operations.sort(
+        key=lambda op: (
+            op.path,
+            HTTP_METHOD_RANK[op.method],
+        )
+    )
+    return operations
+
+
+def resolve_names(operations: list[Operation]) -> dict[tuple[str, str], tuple[str, str]]:
+    used_by_group: dict[str, set[str]] = defaultdict(set)
+    resolved: dict[tuple[str, str], tuple[str, str]] = {}
+
+    for op in operations:
+        explicit_name = METHOD_NAME_EXCEPTIONS.get((op.path, op.method))
+        if explicit_name is not None:
+            names_for_group = used_by_group[op.group]
+            if explicit_name in names_for_group:
+                raise ValueError(
+                    f"Exception name collision in group '{op.group}': {explicit_name}"
+                )
+            names_for_group.add(explicit_name)
+            resolved[(op.path, op.method)] = (op.group, explicit_name)
+            continue
+
+        group_forms, singular_forms, plural_forms = build_group_forms(op.group_tokens)
+        preferred = derive_name(
+            op.tokens,
+            group_forms,
+            singular_forms,
+            plural_forms,
+            strip_group_tokens=True,
+        )
+        name = preferred
+        used_names = used_by_group[op.group]
+
+        if name in used_names:
+            fallback = derive_name(
+                op.tokens,
+                group_forms,
+                singular_forms,
+                plural_forms,
+                strip_group_tokens=False,
