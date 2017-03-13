@@ -172,3 +172,177 @@ class LlmEvaluator(Evaluator[LlmEvaluatorConfig]):
         """Prepare scorer input/output fields from selected data."""
         if isinstance(data, dict):
             input_text = _extract_dict_text(data, "input")
+            output_text = _extract_dict_text(data, "output")
+            if _has_text(input_text) or _has_text(output_text):
+                return input_text, output_text
+
+        text = _coerce_payload_text(data)
+        if self.config.payload_field == "output":
+            return None, text
+        return text, None
+
+    def _score_matches(self, score: JSONValue) -> bool:
+        """Apply the configured local threshold comparison to a raw LLM scorer score."""
+        operator = self.config.operator
+        threshold = self.config.threshold
+
+        if operator == "any":
+            return bool(score)
+        if operator == "eq":
+            return score == threshold
+        if operator == "ne":
+            return score != threshold
+        if operator == "contains":
+            return _contains(score, threshold)
+
+        score_number = coerce_number(score)
+        threshold_number = coerce_number(threshold)
+        if score_number is None:
+            raise ValueError(f"LLM scorer score {score!r} is not numeric")
+        if threshold_number is None:
+            raise ValueError(f"LLM scorer threshold {threshold!r} is not numeric")
+
+        if operator == "gt":
+            return score_number > threshold_number
+        if operator == "gte":
+            return score_number >= threshold_number
+        if operator == "lt":
+            return score_number < threshold_number
+        if operator == "lte":
+            return score_number <= threshold_number
+
+        raise ValueError(f"Unsupported LLM scorer operator: {operator}")
+
+    async def evaluate(self, data: Any) -> EvaluatorResult:
+        """Evaluate selected data with Galileo LLM-as-judge direct scorer invocation.
+
+        Args:
+            data: The data selected from the runtime step.
+
+        Returns:
+            EvaluatorResult with local threshold decision and scorer metadata.
+        """
+        return await self._evaluate(data, step=None)
+
+    async def evaluate_with_context(self, data: Any, step: Step) -> EvaluatorResult:
+        """Evaluate selected data while dual-writing the complete runtime step.
+
+        Args:
+            data: Data selected by the configured control selector.
+            step: Complete runtime step for structured scorer context.
+
+        Returns:
+            EvaluatorResult with local threshold decision and scorer metadata.
+        """
+        return await self._evaluate(data, step=step)
+
+    async def evaluate_with_extensions(
+        self,
+        data: Any,
+        step: Step,
+        extensions: JSONObject | None,
+    ) -> EvaluatorResult:
+        """Evaluate using opaque authenticated metadata supplied by Agent Control.
+
+        ``extensions`` carries the authenticated principal's ``namespace_key``
+        (mapped to ``organization_id``), optional ``caller_id`` (``user_id``),
+        and optional ``metadata.project_id``.  When ``target_type`` is
+        ``"log_stream"`` or ``"agent_stream"``, ``target_id`` is forwarded as
+        ``run_id`` in the Galileo execution context.  If ``target_type`` /
+        ``target_id`` are absent or unsupported, ``run_id`` will be ``None``.
+
+        Note: ``target_type`` and ``target_id`` are optional in the general SDK
+        API.  Pass them via :func:`agent_control.init` (or the equivalent SDK
+        call) when using ``galileo.llm`` so that Galileo can associate scorer
+        results with the correct run.
+        """
+        return await self._evaluate(
+            data,
+            step=step,
+            extensions=extensions,
+        )
+
+    @staticmethod
+    def _execution_context_from_extensions(
+        extensions: JSONObject | None,
+    ) -> GalileoExecutionContext | None:
+        """Translate trusted opaque auth metadata into Galileo's request context."""
+        if extensions is None:
+            return None
+
+        metadata = extensions.get("metadata")
+        metadata_obj = metadata if isinstance(metadata, dict) else {}
+        organization_id = extensions.get("namespace_key")
+        # The runtime envelope's caller_id is supplied by the authenticated
+        # principal and is the caller identity Galileo associates with this run.
+        user_id = extensions.get("caller_id")
+        project_id = metadata_obj.get("project_id")
+        target_type = extensions.get("target_type")
+        target_id = extensions.get("target_id")
+        run_id = (
+            target_id
+            if target_type in ("log_stream", "agent_stream")
+            and isinstance(target_id, str)
+            and target_id
+            else None
+        )
+        if not isinstance(organization_id, str) or not organization_id:
+            raise ValueError("Authenticated execution metadata is missing organization_id")
+
+        return GalileoExecutionContext(
+            organization_id=organization_id,
+            user_id=user_id if isinstance(user_id, str) and user_id else None,
+            project_id=project_id if isinstance(project_id, str) and project_id else None,
+            run_id=run_id,
+        )
+
+    async def _evaluate(
+        self,
+        data: Any,
+        *,
+        step: Step | None,
+        extensions: JSONObject | None = None,
+    ) -> EvaluatorResult:
+        """Run an LLM scorer evaluation with optional structured runtime context."""
+        if step is None:
+            return EvaluatorResult(
+                matched=False,
+                confidence=0.0,
+                message="LLM scorer requires a runtime step; evaluation skipped.",
+                metadata=self._base_metadata(),
+                error="LLM scorer requires a runtime step; evaluation skipped.",
+            )
+
+        try:
+            execution_context = self._execution_context_from_extensions(extensions)
+        except ValueError as exc:
+            return self._handle_error(exc)
+        if execution_context is None:
+            return EvaluatorResult(
+                matched=False,
+                confidence=0.0,
+                message="LLM scorer requires authenticated execution context; evaluation skipped.",
+                metadata=self._base_metadata(),
+                error="LLM scorer requires authenticated execution context; evaluation skipped.",
+            )
+
+        input_text, output_text = self._prepare_payload(data)
+        if not (_has_text(input_text) or _has_text(output_text)):
+            return EvaluatorResult(
+                matched=False,
+                confidence=1.0,
+                message="No data to score with LLM scorer",
+                metadata=self._base_metadata(),
+            )
+
+        try:
+            scorer_kwargs = self._scorer_kwargs()
+            scorer_kwargs["step"] = step
+            scorer_kwargs["selected_data"] = data
+            scorer_kwargs["selected_data_payload_field"] = self.config.payload_field
+            scorer_kwargs["execution_context"] = execution_context
+            response = await self._get_client().invoke(
+                **scorer_kwargs,
+                input=input_text if _has_text(input_text) else None,
+                output=output_text if _has_text(output_text) else None,
+                config=self.config.scorer_config,
