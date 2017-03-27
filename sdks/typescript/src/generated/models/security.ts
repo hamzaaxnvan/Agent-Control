@@ -11,10 +11,3 @@ export type Security = {
 
 /** @internal */
 export type Security$Outbound = {
-  APIKeyHeader?: string | undefined;
-};
-
-/** @internal */
-export const Security$outboundSchema: z.ZodMiniType<
-  Security$Outbound,
-  Security
