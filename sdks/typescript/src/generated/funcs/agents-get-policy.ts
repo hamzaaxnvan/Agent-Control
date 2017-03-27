@@ -70,3 +70,40 @@ async function $do(
       | AgentControlSDKError
       | ResponseValidationError
       | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) =>
+      z.parse(
+        operations
+          .GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest$outboundSchema,
+        value,
+      ),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = null;
+
+  const pathParams = {
+    agent_name: encodeSimple("agent_name", payload.agent_name, {
+      explode: false,
+      charEncoding: "percent",
+    }),
+  };
+
+  const path = pathToFunc("/api/v1/agents/{agent_name}/policy")(pathParams);
+
+  const headers = new Headers(compactMap({
+    Accept: "application/json",
+  }));
