@@ -8,3 +8,36 @@ export class SDKValidationError extends Error {
   /**
    * The raw value that failed validation.
    */
+  public readonly rawValue: unknown;
+
+  /**
+   * The raw message that failed validation.
+   */
+  public readonly rawMessage: unknown;
+
+  // Allows for backwards compatibility for `instanceof` checks of `ResponseValidationError`
+  static override [Symbol.hasInstance](
+    instance: unknown,
+  ): instance is SDKValidationError {
+    if (!(instance instanceof Error)) return false;
+    if (!("rawValue" in instance)) return false;
+    if (!("rawMessage" in instance)) return false;
+    if (!("pretty" in instance)) return false;
+    if (typeof instance.pretty !== "function") return false;
+    return true;
+  }
+
+  constructor(message: string, cause: unknown, rawValue: unknown) {
+    super(`${message}: ${cause}`);
+    this.name = "SDKValidationError";
+    this.cause = cause;
+    this.rawValue = rawValue;
+    this.rawMessage = message;
+  }
+
+  /**
+   * Return a pretty-formatted error message if the underlying validation error
+   * is a ZodError or some other recognized error type, otherwise return the
+   * default error message.
+   */
+  public pretty(): string {
