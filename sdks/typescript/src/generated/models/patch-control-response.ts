@@ -16,22 +16,3 @@ export type PatchControlResponse = {
    * Current enabled status (if control has data configured)
    */
   enabled?: boolean | null | undefined;
-  /**
-   * Current control name (may have changed)
-   */
-  name: string;
-  /**
-   * Whether the update succeeded
-   */
-  success: boolean;
-};
-
-/** @internal */
-export const PatchControlResponse$inboundSchema: z.ZodMiniType<
-  PatchControlResponse,
-  unknown
-> = z.object({
-  enabled: z.optional(z.nullable(types.boolean())),
-  name: types.string(),
-  success: types.boolean(),
-});

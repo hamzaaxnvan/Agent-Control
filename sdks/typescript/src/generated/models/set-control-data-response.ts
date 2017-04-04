@@ -11,17 +11,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 export type SetControlDataResponse = {
   /**
    * Whether the control data was updated
-   */
-  success: boolean;
-};
-
-/** @internal */
-export const SetControlDataResponse$inboundSchema: z.ZodMiniType<
-  SetControlDataResponse,
-  unknown
-> = z.object({
-  success: types.boolean(),
-});
-
-export function setControlDataResponseFromJSON(
-  jsonString: string,
