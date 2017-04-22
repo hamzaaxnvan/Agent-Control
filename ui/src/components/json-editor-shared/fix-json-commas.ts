@@ -12,18 +12,3 @@ export function removeTrailingCommasOutsideStrings(text: string): string {
       continue;
     }
 
-    if (inString) {
-      escaped = char === '\\' ? !escaped : false;
-      fixed += char;
-      continue;
-    }
-
-    if (char === ',') {
-      let lookahead = index + 1;
-      while (lookahead < text.length && /\s/.test(text[lookahead] ?? '')) {
-        lookahead += 1;
-      }
-
-      const next = text[lookahead];
-      if (next === '}' || next === ']') {
-        continue;

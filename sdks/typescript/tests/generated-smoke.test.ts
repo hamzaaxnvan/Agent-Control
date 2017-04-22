@@ -26,31 +26,3 @@ describe("generated client layout", () => {
         throw new Error(`Generated source missing for export specifier '${specifier}': ${tsSourcePath}`);
       }
     }
-  });
-
-  it("serializes structured Step scorer context", () => {
-    const serialized = stepToJSON({
-      type: "llm",
-      name: "answer",
-      input: "question",
-      output: "answer",
-      groundTruth: "expected",
-      tools: [
-        {
-          name: "search",
-          description: "Search documents",
-          input_schema: { type: "object" },
-        },
-      ],
-    });
-
-    expect(JSON.parse(serialized)).toEqual({
-      type: "llm",
-      name: "answer",
-      input: "question",
-      output: "answer",
-      ground_truth: "expected",
-      tools: [
-        {
-          name: "search",
-          description: "Search documents",
