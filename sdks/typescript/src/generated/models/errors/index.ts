@@ -4,3 +4,5 @@
 
 export * from "./agent-control-sdk-default-error.js";
 export * from "./agent-control-sdk-error.js";
+export * from "./http-client-errors.js";
+export * from "./http-validation-error.js";
