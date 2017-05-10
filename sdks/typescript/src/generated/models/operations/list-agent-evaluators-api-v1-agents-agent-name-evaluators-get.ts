@@ -7,3 +7,13 @@ import { remap as remap$ } from "../../lib/primitives.js";
 
 export type ListAgentEvaluatorsApiV1AgentsAgentNameEvaluatorsGetRequest = {
   agentName: string;
+  cursor?: string | null | undefined;
+  limit?: number | undefined;
+};
+
+/** @internal */
+export type ListAgentEvaluatorsApiV1AgentsAgentNameEvaluatorsGetRequest$Outbound =
+  {
+    agent_name: string;
+    cursor?: string | null | undefined;
+    limit: number;

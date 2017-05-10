@@ -22,3 +22,51 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  *     non_match_count: Number of times the control did not match
  *     deny_count: Number of deny actions
  *     steer_count: Number of steer actions
+ *     observe_count: Number of observe actions
+ *     error_count: Number of errors during evaluation
+ *     avg_confidence: Average confidence score
+ *     avg_duration_ms: Average execution duration in milliseconds
+ *
+ * Invariant:
+ *     deny_count + steer_count + observe_count == match_count
+ */
+export type ControlStats = {
+  /**
+   * Average confidence
+   */
+  avgConfidence: number;
+  /**
+   * Average duration (ms)
+   */
+  avgDurationMs?: number | null | undefined;
+  /**
+   * Control ID
+   */
+  controlId: number;
+  /**
+   * Control name
+   */
+  controlName: string;
+  /**
+   * Deny actions
+   */
+  denyCount: number;
+  /**
+   * Evaluation errors
+   */
+  errorCount: number;
+  /**
+   * Total executions
+   */
+  executionCount: number;
+  /**
+   * Total matches
+   */
+  matchCount: number;
+  /**
+   * Total non-matches
+   */
+  nonMatchCount: number;
+  /**
+   * Observe actions
+   */
