@@ -32,38 +32,3 @@ export class Policies extends ClientSDK {
    *     HTTPException 409: Policy with this name already exists
    *     HTTPException 500: Database error during creation
    */
-  async create(
-    request: models.CreatePolicyRequest,
-    options?: RequestOptions,
-  ): Promise<models.CreatePolicyResponse> {
-    return unwrapAsync(policiesCreate(
-      this,
-      request,
-      options,
-    ));
-  }
-
-  /**
-   * List policy's controls
-   *
-   * @remarks
-   * List all controls associated with a policy.
-   *
-   * Args:
-   *     policy_id: ID of the policy
-   *     db: Database session (injected)
-   *
-   * Returns:
-   *     GetPolicyControlsResponse with list of control IDs
-   *
-   * Raises:
-   *     HTTPException 404: Policy not found
-   */
-  async listControls(
-    request:
-      operations.ListPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest,
-    options?: RequestOptions,
-  ): Promise<models.GetPolicyControlsResponse> {
-    return unwrapAsync(policiesListControls(
-      this,
-      request,
