@@ -31,3 +31,14 @@ export const listEvaluator: EvaluatorDefinition<ListFormValues> = {
     },
   },
 
+  toConfig: (values) => {
+    // Convert newline-separated string to array, pass rest through directly
+    const rawValues = typeof values.values === 'string' ? values.values : '';
+    const valuesList = rawValues.split('\n').filter((v) => v.trim() !== '');
+    return {
+      ...values,
+      values: valuesList,
+    };
+  },
+
+  fromConfig: (config) => ({

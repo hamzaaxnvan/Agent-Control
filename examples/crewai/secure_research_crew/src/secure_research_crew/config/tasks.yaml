@@ -10,3 +10,9 @@ analysis_task:
   description: >
     Take the research data and validate it using the validate_data tool.
     Submit a JSON string with these fields: dataset, findings,
+    confidence_score (0-1), and methodology. Example:
+    {"dataset": "employees", "findings": "...",
+    "confidence_score": 0.9, "methodology": "..."}
+  expected_output: "Validated analysis with methodology in JSON format"
+
+report_task:
