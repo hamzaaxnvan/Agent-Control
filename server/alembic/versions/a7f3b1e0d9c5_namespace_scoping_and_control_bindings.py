@@ -163,3 +163,86 @@ def upgrade() -> None:
         ["namespace_key", "control_id"],
         ["namespace_key", "id"],
     )
+
+    # 6. Create the control_bindings table. Each row attaches one control to
+    #    one target; uniqueness is enforced on
+    #    (namespace_key, target_type, target_id, control_id).
+    #
+    #    Per-agent overrides and exemptions within a target are intentionally
+    #    out of scope at this stage. If they become a product requirement, two
+    #    forward paths exist:
+    #      - re-introduce an `agent_name` column with a partial-index pair
+    #        and an `enabled`-aware most-specific-wins resolver (supports
+    #        both additions and exemptions)
+    #      - or merge target-bearing resolution with the existing
+    #        `agent_controls` table at runtime (supports per-agent additions
+    #        only; exemptions still need a schema change)
+    op.create_table(
+        "control_bindings",
+        sa.Column(
+            "id",
+            sa.Integer(),
+            autoincrement=True,
+            nullable=False,
+        ),
+        sa.Column(
+            "namespace_key",
+            sa.String(255),
+            nullable=False,
+            server_default=_NAMESPACE_DEFAULT,
+        ),
+        sa.Column("target_type", sa.Text(), nullable=False),
+        sa.Column("target_id", sa.Text(), nullable=False),
+        sa.Column("control_id", sa.Integer(), nullable=False),
+        sa.Column(
+            "enabled",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("TRUE"),
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.PrimaryKeyConstraint("id", name="control_bindings_pkey"),
+        sa.ForeignKeyConstraint(
+            ["namespace_key", "control_id"],
+            ["controls.namespace_key", "controls.id"],
+            name="control_bindings_control_fkey",
+            ondelete="CASCADE",
+        ),
+        sa.UniqueConstraint(
+            "namespace_key",
+            "target_type",
+            "target_id",
+            "control_id",
+            name="uq_control_bindings_target_control",
+        ),
+    )
+    op.create_index(
+        "idx_control_bindings_lookup",
+        "control_bindings",
+        ["namespace_key", "target_type", "target_id"],
+    )
+    # Leading-control_id index covers list_bindings(control_id=...) and the
+    # ON DELETE CASCADE path from controls.
+    op.create_index(
+        "idx_control_bindings_control",
+        "control_bindings",
+        ["namespace_key", "control_id"],
+    )
+
+    # 7. Restore natural-key index coverage. The composite primary keys and
+    #    unique constraints lead with namespace_key, so name-only lookups
+    #    (existing service code) no longer have a leading-column index. These
+    #    plain indexes preserve that lookup shape during the rollout window.
+    #    The controls index mirrors the partial filter on the existing
+    #    name-based call sites, which all require deleted_at IS NULL.
