@@ -25,16 +25,3 @@ def set_trace_context_provider(provider: TraceContextProvider | None) -> None:
 def get_trace_context_from_provider() -> TraceContext | None:
     """Return trace context from the registered provider, if any."""
     if _trace_context_provider is None:
-        return None
-
-    try:
-        trace_context = _trace_context_provider()
-    except Exception:
-        return None
-
-    if trace_context is None:
-        return None
-
-    trace_id = trace_context.get("trace_id")
-    span_id = trace_context.get("span_id")
-    if not isinstance(trace_id, str) or not isinstance(span_id, str):
