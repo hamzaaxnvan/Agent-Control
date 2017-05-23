@@ -12,3 +12,10 @@ export type DefenseClawRuleFormValue = {
   pattern: string;
   title: string;
   severity: DefenseClawSeverity;
+  confidence: number;
+  tags: string[];
+};
+
+export type DefenseClawRulePackFormValues = {
+  rules: DefenseClawRuleFormValue[];
+};
