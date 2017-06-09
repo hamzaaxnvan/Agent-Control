@@ -32,3 +32,38 @@ import { Result } from "../types/fp.js";
  * @remarks
  * Idempotent detach by natural key. Returns ``deleted=False`` when no
  * matching binding exists.
+ */
+export function controlBindingsDeleteByKey(
+  client: AgentControlSDKCore,
+  request: models.DeleteControlBindingByKeyRequest,
+  options?: RequestOptions,
+): APIPromise<
+  Result<
+    models.DeleteControlBindingByKeyResponse,
+    | errors.HTTPValidationError
+    | AgentControlSDKError
+    | ResponseValidationError
+    | ConnectionError
+    | RequestAbortedError
+    | RequestTimeoutError
+    | InvalidRequestError
+    | UnexpectedClientError
+    | SDKValidationError
+  >
+> {
+  return new APIPromise($do(
+    client,
+    request,
+    options,
+  ));
+}
+
+async function $do(
+  client: AgentControlSDKCore,
+  request: models.DeleteControlBindingByKeyRequest,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      models.DeleteControlBindingByKeyResponse,
+      | errors.HTTPValidationError
