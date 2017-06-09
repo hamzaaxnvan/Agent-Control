@@ -20,3 +20,47 @@ fi
 if [[ ! -f "${SPEC_PATH}" ]]; then
   echo "OpenAPI spec not found at ${SPEC_PATH}. Generate it with: make openapi-spec" >&2
   exit 1
+fi
+
+if [[ ! -f "${OVERLAY_GENERATOR}" ]]; then
+  echo "Overlay generator not found at ${OVERLAY_GENERATOR}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${NORMALIZE_GENERATOR}" ]]; then
+  echo "Generated SDK normalizer not found at ${NORMALIZE_GENERATOR}" >&2
+  exit 1
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to generate overlay at ${OVERLAY_PATH}" >&2
+  exit 1
+fi
+
+python3 "${OVERLAY_GENERATOR}" \
+  --schema "${SPEC_PATH}" \
+  --out "${OVERLAY_PATH}"
+
+rm -rf "${TMP_OUTPUT_DIR}"
+mkdir -p "${TMP_OUTPUT_DIR}"
+cp "${SDK_ROOT}/gen.yaml" "${TMP_OUTPUT_DIR}/gen.yaml"
+
+"${SPEAKEASY_BIN}" --logLevel error overlay apply \
+  --schema "${SPEC_PATH}" \
+  --overlay "${OVERLAY_PATH}" \
+  --strict \
+  --out "${TMP_SPEC_PATH}"
+
+"${SPEAKEASY_BIN}" --logLevel error generate sdk \
+  --auto-yes \
+  --lang typescript \
+  --schema "${TMP_SPEC_PATH}" \
+  --out "${TMP_OUTPUT_DIR}"
+
+if [[ ! -d "${TMP_OUTPUT_DIR}/src" ]]; then
+  echo "Expected generated source directory at ${TMP_OUTPUT_DIR}/src" >&2
+  exit 1
+fi
+
+rm -rf "${GENERATED_DIR}"
+mkdir -p "${GENERATED_DIR}"

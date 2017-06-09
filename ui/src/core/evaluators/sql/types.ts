@@ -12,3 +12,17 @@ export type SqlFormValues = {
   block_ddl: boolean;
   block_dcl: boolean;
   // Table/Schema Access
+  allowed_tables: string; // Comma-separated
+  blocked_tables: string; // Comma-separated
+  allowed_schemas: string; // Comma-separated
+  blocked_schemas: string; // Comma-separated
+  // Column Presence
+  required_columns: string; // Comma-separated
+  column_presence_logic: 'any' | 'all';
+  column_context: 'select' | 'where' | '';
+  column_context_scope: 'top_level' | 'all';
+  // Limits
+  require_limit: boolean;
+  max_limit: number | '';
+  max_result_window: number | '';
+  // Options
