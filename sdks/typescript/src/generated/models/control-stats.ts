@@ -46,27 +46,3 @@ export type ControlStats = {
   /**
    * Control name
    */
-  controlName: string;
-  /**
-   * Deny actions
-   */
-  denyCount: number;
-  /**
-   * Evaluation errors
-   */
-  errorCount: number;
-  /**
-   * Total executions
-   */
-  executionCount: number;
-  /**
-   * Total matches
-   */
-  matchCount: number;
-  /**
-   * Total non-matches
-   */
-  nonMatchCount: number;
-  /**
-   * Observe actions
-   */
