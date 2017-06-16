@@ -17,3 +17,13 @@ export type RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteR
     policy_id: number;
     control_id: number;
   };
+
+/** @internal */
+export const RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest$outboundSchema:
+  z.ZodMiniType<
+    RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest$Outbound,
+    RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest
+  > = z.pipe(
+    z.object({
+      policyId: z.int(),
+      controlId: z.int(),
