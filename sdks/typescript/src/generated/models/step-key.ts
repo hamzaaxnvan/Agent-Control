@@ -8,14 +8,3 @@ import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
-/**
- * Identifies a registered step schema by type and name.
- */
-export type StepKey = {
-  /**
-   * Registered step name
-   */
-  name: string;
-  /**
-   * Step type
-   */

@@ -156,3 +156,161 @@ const AgentDetailPage = ({ agentId, defaultTab }: AgentDetailPageProps) => {
   });
 
   if (agentLoading) {
+    return (
+      <Box p="xl" maw={1400} mx="auto" my={0}>
+        <Center h={400}>
+          <Stack align="center" gap="md">
+            <Loader size="lg" />
+            <Text c="dimmed">Loading agent details...</Text>
+          </Stack>
+        </Center>
+      </Box>
+    );
+  }
+
+  if (agentError || !agent) {
+    return (
+      <Box p="xl" maw={1400} mx="auto" my={0}>
+        <Alert
+          icon={<IconAlertCircle size={16} />}
+          title="Error loading agent"
+          color="red"
+        >
+          <Stack gap="xs">
+            <Text>Failed to fetch agent details. Please try again later.</Text>
+            <Text size="sm" c="dimmed" mt="xs">
+              Possible reasons:
+            </Text>
+            <Stack gap={4} pl="md">
+              <Text size="sm" c="dimmed">
+                • Check server for API errors
+              </Text>
+              <Text size="sm" c="dimmed">
+                • The agent ID might be incorrect
+              </Text>
+            </Stack>
+          </Stack>
+        </Alert>
+      </Box>
+    );
+  }
+
+  const handleEditControlSuccess = () => {
+    closeModal();
+    // Do not clear selectedControl so modal content stays visible during close animation.
+  };
+
+  function renderEditModalBody() {
+    if (selectedControl) {
+      return (
+        <EditControlContent
+          control={selectedControl}
+          agentId={agentId}
+          onClose={handleCloseEditModal}
+          onSuccess={handleEditControlSuccess}
+          onCloseRef={editCloseRef}
+        />
+      );
+    }
+    // We have a controlId in the URL and the controls list has loaded, but no control in that list matched → invalid or deleted
+    const controlNotFound = controlId && controlsResponse && !selectedControl;
+    if (controlNotFound) {
+      return (
+        <Stack gap="md" py="md">
+          <Alert
+            icon={<IconAlertCircle size={16} />}
+            title="Control not found"
+            color="orange"
+            variant="light"
+          >
+            <Text size="sm">
+              No control matches ID &quot;{controlId}&quot;. It may have been
+              deleted or the link is invalid.
+            </Text>
+          </Alert>
+          <Group justify="flex-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCloseEditModal}
+              data-testid="edit-modal-close-invalid-control"
+            >
+              Close
+            </Button>
+          </Group>
+        </Stack>
+      );
+    }
+
+    if (controlId) {
+      return (
+        <Center py="xl">
+          <Stack align="center" gap="md">
+            <Loader size="sm" />
+            <Text size="sm" c="dimmed">
+              Loading control…
+            </Text>
+          </Stack>
+        </Center>
+      );
+    }
+    return null;
+  }
+
+  return (
+    <Box p="xl" maw={1400} mx="auto" my={0}>
+      <Stack gap="lg">
+        <Stack gap={4}>
+          <Title order={2} fw={600}>
+            {agent.agent.agent_name}
+          </Title>
+          {agent.agent.agent_description ? (
+            <Text size="sm" c="dimmed">
+              {agent.agent.agent_description}
+            </Text>
+          ) : null}
+        </Stack>
+
+        <Tabs
+          value={activeTab}
+          onChange={(value) => {
+            setActiveTab(value);
+            if (value === 'monitor') {
+              router.push(
+                getAgentRoute(agentId, { tab: 'monitor', query: router.query }),
+                undefined,
+                {
+                  shallow: true,
+                }
+              );
+            } else if (value === 'controls') {
+              router.push(
+                getAgentRoute(agentId, {
+                  tab: 'controls',
+                  query: router.query,
+                }),
+                undefined,
+                {
+                  shallow: true,
+                }
+              );
+            }
+          }}
+        >
+          <Box mb="md">
+            <Group justify="space-between" pos="relative">
+              <Tabs.List>
+                <Tabs.Tab
+                  value="controls"
+                  leftSection={<IconShield size={16} />}
+                >
+                  Controls
+                </Tabs.Tab>
+                <Tabs.Tab
+                  value="monitor"
+                  leftSection={<IconChartBar size={16} />}
+                >
+                  Monitor
+                </Tabs.Tab>
+              </Tabs.List>
+
