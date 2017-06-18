@@ -5,3 +5,10 @@
 import * as z from "zod/v4-mini";
 import { remap as remap$ } from "../lib/primitives.js";
 
+/**
+ * Request body for the /login endpoint.
+ */
+export type LoginRequest = {
+  apiKey: string;
+};
+
