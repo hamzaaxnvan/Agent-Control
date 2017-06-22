@@ -43,3 +43,95 @@ def _build_messages(
 ) -> list[dict[str, str]]:
     """Build Chat Inspection messages from selected data.
 
+    - history: pass-through if data has 'messages' list; else fallback to single
+    - single: synthesize one message with role based on payload_field
+    """
+    if strategy == "history":
+        if isinstance(data, dict) and isinstance(data.get("messages"), list):
+            msgs: list[dict[str, str]] = []
+            for m in data["messages"]:
+                if isinstance(m, dict) and "content" in m:
+                    role = str(m.get("role", "user"))
+                    content = str(m.get("content", ""))
+                    msgs.append({"role": role, "content": content})
+            if msgs:
+                return msgs
+        # Fallback to single
+
+    role = "assistant" if payload_field == "output" else "user"
+    content = _coerce_message_content(data, payload_field)
+    return [{"role": role, "content": content}]
+
+
+def _coerce_message_content(data: Any, payload_field: str | None) -> str:
+    if data is None:
+        return ""
+
+    if isinstance(data, dict):
+        candidate: Any = None
+        preferred_keys: list[str] = []
+        if payload_field is not None:
+            preferred_keys.append(payload_field)
+        if payload_field == "output":
+            preferred_keys.extend(["output", "content", "text", "message"])
+        else:
+            preferred_keys.extend(["input", "content", "text", "message"])
+
+        for key in preferred_keys:
+            if key in data and data[key] is not None:
+                candidate = data[key]
+                break
+
+        if candidate is None:
+            candidate = data
+        return _stringify_message_content(candidate)
+
+    return _stringify_message_content(data)
+
+
+def _stringify_message_content(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        return str(value)
+
+
+@register_evaluator
+class CiscoAIDefenseEvaluator(Evaluator[CiscoAIDefenseConfig]):
+    """Cisco AI Defense evaluator.
+
+    Maps InspectResponse.is_safe to EvaluatorResult.matched.
+    """
+
+    metadata = EvaluatorMetadata(
+        name="cisco.ai_defense",
+        version=_PACKAGE_VERSION,
+        description="Cisco AI Defense Chat Inspection integration",
+        requires_api_key=True,
+        timeout_ms=15000,
+    )
+
+    config_model = CiscoAIDefenseConfig
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Evaluator is available only if httpx dependency exists."""
+        return AI_DEFENSE_HTTPX_AVAILABLE
+
+    def __init__(self, config: CiscoAIDefenseConfig) -> None:
+        self.config = config
+
+        # Validate and resolve configuration eagerly to avoid per-call work.
+        # API key
+        try:
+            api_key = _load_api_key(self.config.api_key_env)
+        except RuntimeError as e:
+            # Fail fast during construction so misconfiguration is caught early.
+            raise ValueError(str(e)) from e
+
