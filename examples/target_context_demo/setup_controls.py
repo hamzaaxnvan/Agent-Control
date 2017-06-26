@@ -62,3 +62,36 @@ PROD_CONTROL: dict[str, Any] = {
     "scope": {"step_types": ["llm"], "stages": ["pre"]},
     "condition": {
         "selector": {"path": "input"},
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": ["DROP TABLE", "rm -rf", "sudo"],
+                "logic": "any",
+                "match_on": "match",
+                "match_mode": "contains",
+                "case_sensitive": False,
+            },
+        },
+    },
+    "action": {"decision": "deny"},
+    "tags": ["env-bound", "prod-only"],
+}
+
+
+async def _create_or_get_control(
+    client: AgentControlClient, name: str, definition: dict[str, Any]
+) -> int:
+    """Create a control by name; return its ID. Surfaces 409 cleanly."""
+    response = await client.http_client.put(
+        "/api/v1/controls",
+        json={"name": name, "data": definition},
+    )
+    if response.status_code == 409:
+        # Control already exists from a previous run — look it up.
+        page = await client.http_client.get(
+            "/api/v1/controls", params={"name": name}
+        )
+        page.raise_for_status()
+        for entry in page.json().get("controls", []):
+            if entry.get("name") == name:
+                return int(entry["id"])
