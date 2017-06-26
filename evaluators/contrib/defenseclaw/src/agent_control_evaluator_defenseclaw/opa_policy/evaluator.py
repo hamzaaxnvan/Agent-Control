@@ -19,10 +19,3 @@ def _resolve_package_version() -> str:
         return "0.0.0.dev"
 
 
-@register_evaluator
-class DefenseClawOpaPolicyEvaluator(Evaluator[DefenseClawOpaPolicyConfig]):
-    """Evaluate selected data with a typed DefenseClaw OPA policy."""
-
-    metadata = EvaluatorMetadata(
-        name="defenseclaw.opa_policy",
-        version=_resolve_package_version(),
