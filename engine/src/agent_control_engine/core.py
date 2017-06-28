@@ -209,3 +209,425 @@ class _EvalTask:
 class _ConditionEvaluation:
     """Internal result for recursive condition evaluation."""
 
+    result: EvaluatorResult
+    trace: dict[str, Any]
+
+
+class ControlEngine:
+    """Executes controls against requests with parallel evaluation.
+
+    Controls are evaluated in parallel using asyncio. On the first
+    deny match, remaining tasks are cancelled for efficiency.
+
+    Args:
+        controls: Sequence of controls to evaluate.
+        context: Execution context. 'sdk' runs controls with execution="sdk",
+                 'server' runs controls with execution="server".
+    """
+
+    def __init__(
+        self,
+        controls: Sequence[ControlWithIdentity],
+        context: Literal["sdk", "server"] = "server",
+        *,
+        include_raw_selected_data: bool | None = None,
+    ):
+        self.controls = controls
+        self.context = context
+        self.include_raw_selected_data = (
+            _env_flag("AGENT_CONTROL_INCLUDE_RAW_SELECTED_DATA")
+            if include_raw_selected_data is None
+            else include_raw_selected_data
+        )
+
+    @staticmethod
+    def _truncated_message(message: str | None) -> str | None:
+        """Truncate long evaluator messages in condition traces."""
+        if not message:
+            return None
+        if len(message) <= 200:
+            return message
+        return f"{message[:197]}..."
+
+    @staticmethod
+    def _format_exception(error: BaseException) -> str:
+        """Format exceptions consistently for result.error fields."""
+        return f"{type(error).__name__}: {error}"
+
+    @staticmethod
+    def _build_error_result(
+        error: str,
+        *,
+        message_prefix: str = "Evaluation failed",
+    ) -> EvaluatorResult:
+        """Create a failed evaluator result from an internal error string."""
+        return EvaluatorResult(
+            matched=False,
+            confidence=0.0,
+            message=f"{message_prefix}: {error}",
+            error=error,
+        )
+
+    def _skipped_trace(self, node: ConditionNode, reason: str) -> dict[str, Any]:
+        """Build an unevaluated trace subtree for short-circuited branches."""
+        trace: dict[str, Any] = {
+            "type": node.kind(),
+            "evaluated": False,
+            "matched": None,
+            "short_circuit_reason": reason,
+        }
+        if node.is_leaf():
+            leaf_parts = node.leaf_parts()
+            if leaf_parts is None:
+                raise ValueError("Leaf condition must contain selector and evaluator")
+            selector, evaluator = leaf_parts
+            trace["selector_path"] = selector.path
+            trace["evaluator_name"] = evaluator.name
+            trace["confidence"] = None
+            trace["error"] = None
+            return trace
+
+        trace["children"] = [
+            self._skipped_trace(child, reason) for child in node.children_in_order()
+        ]
+        return trace
+
+    async def _evaluate_leaf(
+        self,
+        item: ControlWithIdentity,
+        node: ConditionNode,
+        request: EvaluationRequest,
+        semaphore: asyncio.Semaphore,
+        extensions: JSONObject | None,
+    ) -> _ConditionEvaluation:
+        """Evaluate a leaf selector/evaluator pair.
+
+        The shared semaphore limits concurrent leaf evaluator executions across
+        the entire engine run. Composite conditions evaluate serially, so a
+        single control only holds one semaphore slot at a time, but multi-leaf
+        controls may acquire and release that shared slot more than once while
+        traversing their tree.
+        """
+        leaf_parts = node.leaf_parts()
+        if leaf_parts is None:
+            raise ValueError("Leaf condition must contain selector and evaluator")
+        selector, evaluator_spec = leaf_parts
+
+        selector_path = selector.path or "*"
+        data = select_data(request.step, selector_path)
+
+        try:
+            async with semaphore:
+                evaluator = get_evaluator_instance(evaluator_spec)
+                timeout = evaluator.get_timeout_seconds()
+                if timeout <= 0:
+                    timeout = DEFAULT_EVALUATOR_TIMEOUT
+
+                result = await asyncio.wait_for(
+                    evaluator.evaluate_with_extensions(data, request.step, extensions),
+                    timeout=timeout,
+                )
+        except TimeoutError:
+            error_msg = f"TimeoutError: Evaluator exceeded {timeout}s timeout"
+            logger.warning(
+                "Evaluator timeout for control '%s' (evaluator: %s): %s",
+                item.name,
+                evaluator_spec.name,
+                error_msg,
+                exc_info=True,
+            )
+            result = self._build_error_result(error_msg)
+        except Exception as e:
+            error_msg = self._format_exception(e)
+            logger.error(
+                "Evaluator error for control '%s' (evaluator: %s): %s",
+                item.name,
+                evaluator_spec.name,
+                error_msg,
+                exc_info=True,
+            )
+            result = self._build_error_result(error_msg)
+
+        trace = {
+            "type": "leaf",
+            "evaluated": True,
+            "matched": result.matched,
+            "selector_path": selector_path,
+            "evaluator_name": evaluator_spec.name,
+            "confidence": result.confidence,
+            "error": result.error,
+            "message": self._truncated_message(result.message),
+        }
+        metadata = dict(result.metadata or {})
+        if self.include_raw_selected_data:
+            metadata["engine_selected_data"] = data
+        metadata["engine_selected_data_preview"] = _selected_data_preview(data)
+        metadata["condition_trace"] = trace
+        return _ConditionEvaluation(
+            result=result.model_copy(update={"metadata": metadata}),
+            trace=trace,
+        )
+
+    def _build_composite_result(
+        self,
+        *,
+        matched: bool,
+        confidence: float,
+        trace: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> EvaluatorResult:
+        """Create a composite evaluator result with a condition trace."""
+        result_metadata = dict(metadata or {})
+        result_metadata["condition_trace"] = trace
+
+        if error is not None:
+            return EvaluatorResult(
+                matched=False,
+                confidence=0.0,
+                message=(
+                    "Condition evaluation aborted due to a child evaluator error: "
+                    f"{error}"
+                ),
+                metadata=result_metadata,
+                error=error,
+            )
+
+        message = "Condition tree matched" if matched else "Condition tree did not match"
+        return EvaluatorResult(
+            matched=matched,
+            confidence=confidence,
+            message=message,
+            metadata=result_metadata,
+        )
+
+    @staticmethod
+    def _composite_metadata(
+        child_evaluations: Sequence[_ConditionEvaluation],
+        *,
+        matched: bool,
+    ) -> dict[str, Any] | None:
+        """Select stable child metadata to preserve on composite results.
+
+        The engine_selected_data_preview value in this metadata is not all
+        evaluator inputs. It is the bounded selected value preview from the leaf
+        metadata the engine preserves for the final composite result:
+        - or where one child matches: engine_selected_data_preview comes from the
+          matching child.
+        - and where one child fails: engine_selected_data_preview comes from the
+          failing child.
+        - and where all children match: engine_selected_data_preview comes from the
+          first matching child, usually the first leaf.
+        - or where no children match: engine_selected_data_preview comes from the
+          first evaluated child.
+        - not: engine_selected_data_preview comes from its child.
+        """
+        source_result: EvaluatorResult | None = None
+        if matched:
+            source_result = next(
+                (
+                    evaluation.result
+                    for evaluation in child_evaluations
+                    if evaluation.result.matched
+                ),
+                None,
+            )
+        if source_result is None and child_evaluations:
+            source_result = child_evaluations[0].result
+        if source_result is None or source_result.metadata is None:
+            return None
+        return dict(source_result.metadata)
+
+    async def _evaluate_condition(
+        self,
+        item: ControlWithIdentity,
+        node: ConditionNode,
+        request: EvaluationRequest,
+        semaphore: asyncio.Semaphore,
+        extensions: JSONObject | None,
+    ) -> _ConditionEvaluation:
+        """Evaluate a recursive condition tree."""
+        if node.is_leaf():
+            return await self._evaluate_leaf(item, node, request, semaphore, extensions)
+
+        kind = node.kind()
+        children = node.children_in_order()
+        child_evaluations: list[_ConditionEvaluation] = []
+
+        if kind == "not":
+            child_eval = await self._evaluate_condition(
+                item, children[0], request, semaphore, extensions
+            )
+            trace = {
+                "type": "not",
+                "evaluated": True,
+                "matched": None if child_eval.result.error else (not child_eval.result.matched),
+                "children": [child_eval.trace],
+            }
+            if child_eval.result.error:
+                return _ConditionEvaluation(
+                    result=self._build_composite_result(
+                        matched=False,
+                        confidence=0.0,
+                        trace=trace,
+                        metadata=child_eval.result.metadata,
+                        error=child_eval.result.error,
+                    ),
+                    trace=trace,
+                )
+
+            result = self._build_composite_result(
+                matched=not child_eval.result.matched,
+                confidence=child_eval.result.confidence,
+                trace=trace,
+                metadata=child_eval.result.metadata,
+            )
+            return _ConditionEvaluation(result=result, trace=trace)
+
+        for index, child in enumerate(children):
+            child_eval = await self._evaluate_condition(
+                item, child, request, semaphore, extensions
+            )
+            child_evaluations.append(child_eval)
+
+            if child_eval.result.error:
+                remaining = children[index + 1 :]
+                trace = {
+                    "type": kind,
+                    "evaluated": True,
+                    "matched": None,
+                    "children": [
+                        evaluation.trace for evaluation in child_evaluations
+                    ]
+                    + [self._skipped_trace(rest, "error") for rest in remaining],
+                    "short_circuit_reason": "error",
+                }
+                return _ConditionEvaluation(
+                    result=self._build_composite_result(
+                        matched=False,
+                        confidence=0.0,
+                        trace=trace,
+                        metadata=child_eval.result.metadata,
+                        error=child_eval.result.error,
+                    ),
+                    trace=trace,
+                )
+
+            should_short_circuit = (
+                kind == "and" and not child_eval.result.matched
+            ) or (kind == "or" and child_eval.result.matched)
+            if should_short_circuit:
+                remaining = children[index + 1 :]
+                matched = child_eval.result.matched if kind == "or" else False
+                trace = {
+                    "type": kind,
+                    "evaluated": True,
+                    "matched": matched,
+                    "children": [
+                        evaluation.trace for evaluation in child_evaluations
+                    ]
+                    + [
+                        self._skipped_trace(
+                            rest,
+                            "or_matched" if kind == "or" else "and_failed",
+                        )
+                        for rest in remaining
+                    ],
+                    "short_circuit_reason": (
+                        "or_matched" if kind == "or" else "and_failed"
+                    ),
+                }
+                confidence = min(
+                    evaluation.result.confidence for evaluation in child_evaluations
+                )
+                result = self._build_composite_result(
+                    matched=matched,
+                    confidence=confidence,
+                    trace=trace,
+                    metadata=child_eval.result.metadata,
+                )
+                return _ConditionEvaluation(result=result, trace=trace)
+
+        confidence = min(evaluation.result.confidence for evaluation in child_evaluations)
+        matched = all(
+            evaluation.result.matched for evaluation in child_evaluations
+        ) if kind == "and" else any(
+            evaluation.result.matched for evaluation in child_evaluations
+        )
+        trace = {
+            "type": kind,
+            "evaluated": True,
+            "matched": matched,
+            "children": [evaluation.trace for evaluation in child_evaluations],
+        }
+        result = self._build_composite_result(
+            matched=matched,
+            confidence=confidence,
+            trace=trace,
+            metadata=self._composite_metadata(child_evaluations, matched=matched),
+        )
+        return _ConditionEvaluation(result=result, trace=trace)
+
+    def get_applicable_controls(
+        self,
+        request: EvaluationRequest,
+        selector_errors: list[ControlMatch] | None = None,
+    ) -> list[ControlWithIdentity]:
+        """Get all controls that apply to the current request."""
+        applicable = []
+        step = request.step
+        step_type = step.type
+        step_name = step.name
+
+        for item in self.controls:
+            control_def = item.control
+
+            if not control_def.enabled:
+                continue
+
+            scope = control_def.scope
+            if scope.stages and request.stage not in scope.stages:
+                continue
+            if scope.step_types and step_type not in scope.step_types:
+                continue
+
+            # Filter by locality based on context
+            if control_def.execution != self.context:
+                continue
+
+            # Optional step name scoping
+            if scope.step_names or scope.step_name_regex:
+                match = False
+                if scope.step_names and step_name in scope.step_names:
+                    match = True
+                if not match and scope.step_name_regex:
+                    try:
+                        if _compile_regex(scope.step_name_regex).search(step_name) is not None:
+                            match = True
+                    except re2.error as e:
+                        # Invalid pattern should have been caught at model validation;
+                        # skip defensively but surface an error if requested.
+                        if selector_errors is not None:
+                            selector_errors.append(
+                                ControlMatch(
+                                    control_id=item.id,
+                                    control_name=item.name,
+                                    action=control_def.action.decision,
+                                    result=EvaluatorResult(
+                                        matched=False,
+                                        confidence=0.0,
+                                        message=(
+                                            "Control skipped due to invalid step_name_regex: "
+                                            f"'{scope.step_name_regex}'"
+                                        ),
+                                        error=f"Invalid step_name_regex: {e}",
+                                    ),
+                                    steering_context=control_def.action.steering_context,
+                                )
+                            )
+                        continue
+                if not match:
+                    continue
+
+            applicable.append(item)
+
