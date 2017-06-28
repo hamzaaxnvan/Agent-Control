@@ -5,3 +5,6 @@ export {
   buildCodeMirrorRefactorLightbulbExtension,
   buildCodeMirrorStandaloneDebugExtensions,
   canRenderInlineServerValidationError,
+  caretAfterPrettyJsonReplace,
+  computeAutoEdit,
+  extractEvaluatorNames,
