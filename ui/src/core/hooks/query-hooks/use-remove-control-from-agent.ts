@@ -27,3 +27,18 @@ export function useRemoveControlFromAgent() {
     }: RemoveControlFromAgentParams) => {
       const { data, error, response } = await api.agents.removeControl(
         agentId,
+        controlId
+      );
+
+      if (error || !data) {
+        throw parseApiError(
+          error,
+          'Failed to remove control from agent',
+          response?.status
+        );
+      }
+
+      return {
+        success: data.success,
+        removed_direct_association: data.removed_direct_association,
+        control_still_active: data.control_still_active,
