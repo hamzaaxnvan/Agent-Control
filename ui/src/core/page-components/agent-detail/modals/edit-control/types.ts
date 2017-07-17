@@ -69,27 +69,3 @@ export type EditControlProps = {
   onClose: () => void;
   /** Callback when save succeeds */
   onSuccess?: () => void;
-};
-
-export type JsonEditorViewProps = {
-  /** Current JSON text shown in the editor */
-  jsonText: string;
-  /** Update handler when JSON text changes */
-  handleJsonChange: (text: string) => void;
-  /** Syntactic/validation error message for the JSON text */
-  jsonError?: string | null;
-  setJsonError?: (error: string | null) => void;
-  validationError?: ProblemDetail | null;
-  setValidationError?: (error: ProblemDetail | null) => void;
-  onValidateConfig?: (
-    config: Record<string, unknown>,
-    options?: { signal?: AbortSignal }
-  ) => Promise<void>;
-  onValidationStatusChange?: (
-    status: 'idle' | 'validating' | 'valid' | 'invalid'
-  ) => void;
-  validateDebounceMs?: number;
-  /** Optional height for the editor area */
-  height?: number;
-  /** Optional label for the JSON editor */
-  label?: string;
