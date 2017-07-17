@@ -672,3 +672,340 @@ class TestInputExtraction:
         async def mock_evaluate(
             agent_name,
             step,
+            stage,
+            server_url,
+            trace_id=None,
+            span_id=None,
+            controls=None,
+            event_agent_name=None,
+        ):
+            if stage == "pre":
+                captured_step.update(step)
+            return mock_safe_response
+
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", side_effect=mock_evaluate):
+
+            @control()
+            async def process(input: str) -> str:
+                return input.upper()
+
+            await process("hello world")
+
+            assert captured_step["input"] == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_extracts_message_param(self, mock_agent, mock_safe_response):
+        """Test extraction of 'message' parameter."""
+        captured_step = {}
+
+        async def mock_evaluate(
+            agent_name,
+            step,
+            stage,
+            server_url,
+            trace_id=None,
+            span_id=None,
+            controls=None,
+            event_agent_name=None,
+        ):
+            if stage == "pre":
+                captured_step.update(step)
+            return mock_safe_response
+
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", side_effect=mock_evaluate):
+
+            @control()
+            async def chat(message: str, context: dict) -> str:
+                return f"Response: {message}"
+
+            await chat("Hello!", {"user": "test"})
+
+            assert captured_step["input"] == "Hello!"
+
+    @pytest.mark.asyncio
+    async def test_extracts_query_param(self, mock_agent, mock_safe_response):
+        """Test extraction of 'query' parameter."""
+        captured_step = {}
+
+        async def mock_evaluate(
+            agent_name,
+            step,
+            stage,
+            server_url,
+            trace_id=None,
+            span_id=None,
+            controls=None,
+            event_agent_name=None,
+        ):
+            if stage == "pre":
+                captured_step.update(step)
+            return mock_safe_response
+
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", side_effect=mock_evaluate):
+
+            @control()
+            async def search(query: str, limit: int = 10) -> list:
+                return [query]
+
+            await search("test query")
+
+            assert captured_step["input"] == "test query"
+
+
+# =============================================================================
+# SYNC FUNCTION TESTS
+# =============================================================================
+
+class TestSyncFunctions:
+    """Tests for sync function support."""
+
+    def test_sync_function_passes(self, mock_agent, mock_safe_response):
+        """Test that sync functions work correctly."""
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", return_value=mock_safe_response):
+
+            @control()
+            def process(input: str) -> str:
+                return input.upper()
+
+            result = process("hello")
+            assert result == "HELLO"
+
+    def test_sync_function_blocks(self, mock_agent, mock_unsafe_response):
+        """Test that sync functions can be blocked."""
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", return_value=mock_unsafe_response):
+
+            @control()
+            def process(input: str) -> str:
+                return input.upper()
+
+            with pytest.raises(ControlViolationError):
+                process("blocked")
+
+
+# =============================================================================
+# STACKING TESTS
+# =============================================================================
+
+class TestStackedDecorators:
+    """Tests for stacking multiple control decorators."""
+
+    @pytest.mark.asyncio
+    async def test_stacked_controls(self, mock_agent, mock_safe_response):
+        """Test multiple decorators on same function."""
+        call_count = 0
+
+        async def mock_evaluate(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return mock_safe_response
+
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", side_effect=mock_evaluate):
+
+            @control(policy="policy-1")
+            @control(policy="policy-2")
+            async def process(input: str) -> str:
+                return input
+
+            await process("test")
+            
+            # Each decorator calls pre + post = 4 total
+            assert call_count == 4
+
+
+# =============================================================================
+# CONTROL VIOLATION TESTS
+# =============================================================================
+
+class TestControlViolationError:
+    """Tests for ControlViolationError exception."""
+
+    def test_exception_creation(self):
+        """Test ControlViolationError can be created with all fields."""
+        violation = ControlViolationError(
+            control_name="test-control",
+            message="Test violation",
+            metadata={"key": "value"}
+        )
+        
+        assert violation.control_name == "test-control"
+        assert violation.message == "Test violation"
+        assert violation.metadata == {"key": "value"}
+
+    def test_exception_string(self):
+        """Test ControlViolationError string representation."""
+        violation = ControlViolationError(control_name="my-control", message="Something bad")
+        
+        assert "my-control" in str(violation)
+        assert "Something bad" in str(violation)
+
+    def test_is_exception(self):
+        """Test ControlViolationError is an Exception."""
+        violation = ControlViolationError(control_name="test", message="message")
+        assert isinstance(violation, Exception)
+
+        with pytest.raises(ControlViolationError):
+            raise violation
+
+
+class TestControlSteerError:
+    """Tests for ControlSteerError exception."""
+
+    def test_exception_creation(self):
+        """Test ControlSteerError can be created with all fields."""
+        steer_error = ControlSteerError(
+            control_name="steer-control",
+            message="Need to adjust approach",
+            metadata={"pattern": "offensive"},
+            steering_context="Please rephrase using respectful language"
+        )
+
+        assert steer_error.control_name == "steer-control"
+        assert steer_error.message == "Need to adjust approach"
+        assert steer_error.metadata == {"pattern": "offensive"}
+        assert steer_error.steering_context == "Please rephrase using respectful language"
+
+    def test_exception_steering_context_fallback(self):
+        """Test steering_context falls back to metadata if not provided."""
+        steer_error = ControlSteerError(
+            control_name="steer-control",
+            message="Test message",
+            metadata={"steering_context": "Fallback steering context from metadata"}
+        )
+
+        assert steer_error.steering_context == "Fallback steering context from metadata"
+
+    def test_exception_steering_context_default(self):
+        """Test steering_context defaults to 'No steering context provided' if not in metadata."""
+        steer_error = ControlSteerError(
+            control_name="steer-control",
+            message="Test message",
+            metadata={}
+        )
+
+        assert steer_error.steering_context == "No steering context provided"
+
+    def test_exception_string(self):
+        """Test ControlSteerError string representation."""
+        steer_error = ControlSteerError(
+            control_name="my-steer-control",
+            message="Needs correction",
+            steering_context="Use this approach instead"
+        )
+
+        assert "my-steer-control" in str(steer_error)
+        assert "Needs correction" in str(steer_error)
+        assert "Use this approach instead" in str(steer_error)
+
+    def test_is_exception(self):
+        """Test ControlSteerError is an Exception."""
+        steer_error = ControlSteerError(control_name="test", message="message")
+        assert isinstance(steer_error, Exception)
+
+        with pytest.raises(ControlSteerError):
+            raise steer_error
+
+    def test_input_output_data(self):
+        """Test ControlSteerError stores input/output data."""
+        steer_error = ControlSteerError(
+            control_name="test-control",
+            message="Test",
+            input_data={"query": "bad input"},
+            output_data={"response": "bad output"}
+        )
+
+        assert steer_error.input_data == {"query": "bad input"}
+        assert steer_error.output_data == {"response": "bad output"}
+
+
+# =============================================================================
+# STEP NAME TESTS
+# =============================================================================
+
+class TestStepName:
+    """Tests for custom step_name parameter."""
+
+    @pytest.mark.asyncio
+    async def test_custom_step_name_used_in_payload(self, mock_agent, mock_safe_response):
+        """Test that custom step_name is passed to evaluation payload."""
+        # GIVEN: A mock evaluation function that captures step payloads
+        captured_steps = []
+
+        async def mock_evaluate(
+            agent_name,
+            step,
+            stage,
+            server_url,
+            trace_id=None,
+            span_id=None,
+            controls=None,
+            event_agent_name=None,
+        ):
+            captured_steps.append(step)
+            return mock_safe_response
+
+        # GIVEN: Agent control is initialized and evaluation is mocked
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", side_effect=mock_evaluate):
+
+            # GIVEN: A function decorated with custom step_name
+            @control(step_name="custom_handler")
+            async def my_function(message: str) -> str:
+                return f"Response: {message}"
+
+            # WHEN: The decorated function is called
+            await my_function("test")
+
+            # THEN: Both pre and post evaluation payloads should be captured
+            assert len(captured_steps) == 2
+
+            # THEN: Both payloads should use the custom step name
+            assert captured_steps[0]["name"] == "custom_handler"
+            assert captured_steps[1]["name"] == "custom_handler"
+
+    @pytest.mark.asyncio
+    async def test_default_step_name_uses_function_name(self, mock_agent, mock_safe_response):
+        """Test that without step_name, function name is used."""
+        # GIVEN: A mock evaluation function that captures step payloads
+        captured_steps = []
+
+        async def mock_evaluate(
+            agent_name,
+            step,
+            stage,
+            server_url,
+            trace_id=None,
+            span_id=None,
+            controls=None,
+            event_agent_name=None,
+        ):
+            captured_steps.append(step)
+            return mock_safe_response
+
+        # GIVEN: Agent control is initialized and evaluation is mocked
+        with patch("agent_control.control_decorators._get_current_agent", return_value=mock_agent), \
+             patch("agent_control.control_decorators._evaluate", side_effect=mock_evaluate):
+
+            # GIVEN: A function decorated without custom step_name
+            @control()
+            async def my_special_function(message: str) -> str:
+                return f"Response: {message}"
+
+            # WHEN: The decorated function is called
+            await my_special_function("test")
+
+            # THEN: Both pre and post evaluation payloads should be captured
+            assert len(captured_steps) == 2
+
+            # THEN: Both payloads should use the function name as default step name
+            assert captured_steps[0]["name"] == "my_special_function"
+            assert captured_steps[1]["name"] == "my_special_function"
+
+    @pytest.mark.asyncio
+    async def test_step_name_with_tool_decorator(self, mock_agent, mock_safe_response):
+        """Test step_name overrides tool name from @tool decorator."""

@@ -18,3 +18,23 @@ export type DeleteControlBindingByKeyRequest = {
 export type DeleteControlBindingByKeyRequest$Outbound = {
   control_id: number;
   target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const DeleteControlBindingByKeyRequest$outboundSchema: z.ZodMiniType<
+  DeleteControlBindingByKeyRequest$Outbound,
+  DeleteControlBindingByKeyRequest
+> = z.pipe(
+  z.object({
+    controlId: z.int(),
+    targetId: z.string(),
+    targetType: z.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      controlId: "control_id",
+      targetId: "target_id",
+      targetType: "target_type",
+    });
+  }),
