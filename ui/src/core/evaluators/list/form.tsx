@@ -19,3 +19,45 @@ export const ListForm = ({ form }: EvaluatorFormProps<ListFormValues>) => {
           />
         }
         labelProps={labelPropsInline}
+        placeholder="Enter values (one per line)"
+        minRows={4}
+        maxRows={8}
+        autosize
+        size="sm"
+        {...form.getInputProps('values')}
+      />
+
+      <Select
+        label={
+          <LabelWithTooltip
+            label="Logic"
+            tooltip="How to combine multiple values when matching"
+          />
+        }
+        labelProps={labelPropsInline}
+        data={[
+          { value: 'any', label: 'Any (match if any value matches)' },
+          { value: 'all', label: 'All (match if all values match)' },
+        ]}
+        size="sm"
+        {...form.getInputProps('logic')}
+        onChange={(value) =>
+          form.setFieldValue(
+            'logic',
+            (value as ListFormValues['logic']) || 'any'
+          )
+        }
+      />
+
+      <Select
+        label={
+          <LabelWithTooltip
+            label="Match on"
+            tooltip="Whether to trigger when value matches or when it does not match"
+          />
+        }
+        labelProps={labelPropsInline}
+        data={[
+          { value: 'match', label: 'Match (trigger when matched)' },
+          { value: 'no_match', label: 'No match (trigger when not matched)' },
+        ]}
