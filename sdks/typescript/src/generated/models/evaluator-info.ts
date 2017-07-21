@@ -16,21 +16,3 @@ export type EvaluatorInfo = {
   /**
    * JSON Schema for config
    */
-  configSchema: { [k: string]: any };
-  /**
-   * Evaluator description
-   */
-  description: string;
-  /**
-   * Evaluator name
-   */
-  name: string;
-  /**
-   * Whether evaluator requires API key
-   */
-  requiresApiKey: boolean;
-  /**
-   * Default timeout in milliseconds
-   */
-  timeoutMs: number;
-  /**
