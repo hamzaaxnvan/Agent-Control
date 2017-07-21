@@ -1,0 +1,33 @@
+[project]
+name = "agent-control-sdk"
+version = "8.15.0"
+description = "Python SDK for Agent Control - protect your AI agents with controls"
+requires-python = ">=3.12"
+# Note: agent-control-models, agent-control-engine, and agent-control-telemetry
+#       are bundled at build time
+# Note: agent-control-evaluators is a runtime dependency (NOT vendored) to avoid
+#       duplicate module conflict when galileo extras are installed
+dependencies = [
+    "httpx>=0.26.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.0.0",  # For typed configuration via environment variables
+    "docstring-parser>=0.15",  # For @tool decorator schema inference
+    "google-re2>=1.1",  # For engine (bundled)
+    "jsonschema>=4.0.0",  # For models/engine (bundled)
+    "agent-control-evaluators>=8.6.0",  # NOT vendored - avoid conflict with galileo
+]
+authors = [
+    {name = "Agent Control Team"}
+]
+readme = "README.md"
+license = {text = "Apache-2.0"}
+keywords = ["agent", "protection", "security", "sdk", "llm", "ai-safety"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
