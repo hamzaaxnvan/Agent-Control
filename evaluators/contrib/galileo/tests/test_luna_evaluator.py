@@ -1,0 +1,957 @@
+"""Tests for the direct Galileo Luna evaluator and client."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from base64 import urlsafe_b64decode
+from typing import Literal
+from unittest.mock import AsyncMock, patch
+
+import httpx
+import pytest
+from agent_control_models import EvaluatorResult, JSONValue, Step
+from pydantic import UUID4, BaseModel, ConfigDict, ValidationError
+
+LUNA_ENV = {
+    "GALILEO_API_SECRET_KEY": "test-secret",
+    "GALILEO_LUNA_INVOKE_URL": "http://luna-invoke:8090",
+    "GALILEO_FEATURE_FLAG_SCORER_INVOKE_RUNTIME": "enabled",
+}
+LEGACY_LUNA_ENV = {
+    "GALILEO_API_SECRET_KEY": "test-secret",
+    "GALILEO_LUNA_INVOKE_URL": "http://luna-invoke:8090",
+}
+SCORER_ID = "3d45ef0d-5f14-4f1a-a8f1-8ab758da18b4"
+SCORER_VERSION_ID = "07fb9c96-9752-4cf5-a253-1a396100e9d2"
+
+
+class _LegacyOrbitInputs(BaseModel):
+    """Released Orbit input shape used for backward-compatibility assertions."""
+
+    query: JSONValue = ""
+    response: JSONValue = ""
+
+
+class _LegacyOrbitRequest(BaseModel):
+    """Released Orbit request shape, whose default extra handling is additive."""
+
+    scorer_id: UUID4
+    scorer_version_id: UUID4 | None = None
+    scorer_label: str | None = None
+    inputs: _LegacyOrbitInputs
+    config: dict[str, object] | None = None
+
+
+class _Orbit1720Inputs(BaseModel):
+    """Input portion of the Orbit #1720 scorer-invoke request contract."""
+
+    query: JSONValue = ""
+    response: JSONValue = ""
+    ground_truth: JSONValue = None
+    tools: list[dict[str, JSONValue]] | None = None
+
+
+class _Orbit1720Record(BaseModel):
+    """Caller-controlled record fields accepted by Orbit #1720."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["llm", "retriever", "tool", "workflow", "agent", "control", "trace", "session"]
+    name: str | None = None
+    input: JSONValue = None
+    output: JSONValue = None
+    context: dict[str, JSONValue] | None = None
+    tools: list[dict[str, JSONValue]] | None = None
+    dataset_output: JSONValue = None
+
+
+class _Orbit1720Config(BaseModel):
+    """Strict configuration accepted by Orbit #1720."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    threshold: float | None = None
+    score_threshold: float | None = None
+    request_timeout_seconds: float | None = None
+
+
+class _Orbit1720Request(BaseModel):
+    """Test mirror of Orbit #1720's public scorer-invoke request schema."""
+
+    scorer_id: UUID4
+    scorer_version_id: UUID4 | None = None
+    scorer_label: str | None = None
+    inputs: _Orbit1720Inputs
+    record: _Orbit1720Record | None = None
+    config: _Orbit1720Config | None = None
+
+
+def _decode_jwt_segment(segment: str) -> dict[str, object]:
+    """Decode one base64url JSON segment from an internal JWT."""
+    padded = segment + ("=" * (-len(segment) % 4))
+    return json.loads(urlsafe_b64decode(padded.encode()).decode())
+
+
+def _decode_jwt_payload(token: str) -> dict[str, object]:
+    """Decode the claims segment from an internal JWT."""
+    return _decode_jwt_segment(token.split(".")[1])
+
+
+class TestLunaEvaluatorConfig:
+    """Tests for direct Luna evaluator configuration."""
+
+    def test_config_accepts_scorer_id_with_all_optional_fields(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluatorConfig
+
+        config = LunaEvaluatorConfig(
+            scorer_id="scorer-123",
+            scorer_version_id="version-123",
+            scorer_label="toxicity",
+            threshold=0.7,
+            operator="gte",
+            config={"request_timeout_seconds": 8},
+        )
+
+        assert config.scorer_id == "scorer-123"
+        assert config.scorer_version_id == "version-123"
+        assert config.scorer_label == "toxicity"
+        assert config.threshold == 0.7
+        assert config.operator == "gte"
+        assert config.scorer_config is not None
+        assert config.scorer_config.model_dump(exclude_none=True) == {
+            "request_timeout_seconds": 8.0
+        }
+        assert config.payload_field == "input"
+
+    def test_config_rejects_option_not_supported_by_orbit(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluatorConfig
+
+        # Given: a scorer option outside Orbit's allowlisted invoke contract
+        unsupported_config = {"temperature": 0}
+
+        # When/Then: Agent Control reports the contract error before making an HTTP request
+        with pytest.raises(ValidationError, match="temperature"):
+            LunaEvaluatorConfig(scorer_id="scorer-123", config=unsupported_config)
+
+    def test_config_accepts_scorer_id_without_label(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluatorConfig
+
+        config = LunaEvaluatorConfig(scorer_id="scorer-123")
+
+        assert config.scorer_id == "scorer-123"
+        assert config.scorer_label is None
+
+    def test_config_requires_scorer_id(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluatorConfig
+
+        with pytest.raises(ValidationError, match="scorer_id"):
+            LunaEvaluatorConfig(threshold=0.5)
+
+    def test_config_rejects_label_only(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluatorConfig
+
+        with pytest.raises(ValidationError, match="scorer_id"):
+            LunaEvaluatorConfig(scorer_label="toxicity", threshold=0.5)
+
+    def test_config_rejects_version_only(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluatorConfig
+
+        with pytest.raises(ValidationError, match="scorer_id"):
+            LunaEvaluatorConfig(scorer_version_id="version-123", threshold=0.5)
+
+    def test_numeric_operator_requires_numeric_threshold(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluatorConfig
+
+        with pytest.raises(ValidationError, match="numeric threshold"):
+            LunaEvaluatorConfig(scorer_id="scorer-123", threshold="high", operator="gte")
+
+
+class TestGalileoLunaClient:
+    """Tests for the GalileoLunaClient HTTP contract."""
+
+    def test_scorer_invoke_request_requires_scorer_id(self) -> None:
+        from agent_control_evaluator_galileo.luna import ScorerInvokeInputs, ScorerInvokeRequest
+
+        with pytest.raises(ValidationError, match="scorer_id"):
+            ScorerInvokeRequest(
+                scorer_label="toxicity",
+                inputs=ScorerInvokeInputs(query="hello"),
+            )
+
+    def test_scorer_invoke_request_shape_with_all_fields(self) -> None:
+        from agent_control_evaluator_galileo.luna import (
+            ScorerInvokeConfig,
+            ScorerInvokeInputs,
+            ScorerInvokeRequest,
+        )
+
+        request = ScorerInvokeRequest(
+            scorer_id="scorer-123",
+            scorer_version_id="version-123",
+            scorer_label="toxicity",
+            inputs=ScorerInvokeInputs(query={"messages": [{"role": "user", "content": "hello"}]}),
+            config=ScorerInvokeConfig(request_timeout_seconds=7),
+        )
+
+        assert request.to_dict() == {
+            "scorer_id": "scorer-123",
+            "scorer_version_id": "version-123",
+            "scorer_label": "toxicity",
+            "inputs": {
+                "query": {"messages": [{"role": "user", "content": "hello"}]},
+                "response": "",
+            },
+            "config": {"request_timeout_seconds": 7.0},
+        }
+
+    def test_scorer_invoke_record_preserves_legacy_pydantic_contract(self) -> None:
+        from agent_control_evaluator_galileo.luna import ScorerInvokeRecord
+
+        record = ScorerInvokeRecord(
+            type="llm",
+            name="answer",
+            input={"question": "hello"},
+            output={"answer": "world"},
+            context={"session_id": "session-1"},
+            tools=[{"name": "search"}],
+            dataset_output={"expected": "world"},
+            metrics={"duration_ns": 12},
+            custom_field={"value": "preserved"},
+        )
+
+        assert record.model_dump() == {
+            "type": "llm",
+            "name": "answer",
+            "input": {"question": "hello"},
+            "output": {"answer": "world"},
+            "context": {"session_id": "session-1"},
+            "tools": [{"name": "search"}],
+            "dataset_output": {"expected": "world"},
+            "metrics": {"duration_ns": 12},
+            "custom_field": {"value": "preserved"},
+        }
+        with pytest.raises(ValidationError, match="type"):
+            ScorerInvokeRecord(type="unsupported", name="answer")
+
+    def test_scorer_invoke_request_serialization_keeps_legacy_record_shape(self) -> None:
+        from agent_control_evaluator_galileo.luna import (
+            ScorerInvokeInputs,
+            ScorerInvokeRecord,
+            ScorerInvokeRequest,
+        )
+
+        request = ScorerInvokeRequest(
+            scorer_id="scorer-123",
+            inputs=ScorerInvokeInputs(query="hello"),
+            record=ScorerInvokeRecord(type="tool", name="search", input={"q": "hello"}),
+        )
+
+        assert request.to_dict() == {
+            "scorer_id": "scorer-123",
+            "inputs": {"query": "hello", "response": ""},
+            "record": {"type": "tool", "name": "search", "input": {"q": "hello"}},
+            "config": {},
+        }
+
+    def test_execution_context_serializes_missing_optional_claims_as_null(self) -> None:
+        from agent_control_evaluator_galileo.luna import ScorerInvokeInputs, ScorerInvokeRequest
+        from agent_control_evaluator_galileo.luna.client import GalileoExecutionContext
+
+        request = ScorerInvokeRequest(
+            scorer_id="scorer-123",
+            inputs=ScorerInvokeInputs(query="hello"),
+            execution_context=GalileoExecutionContext(organization_id="org-1"),
+        )
+
+        assert request.to_dict()["execution_context"] == {
+            "organization_id": "org-1",
+            "user_id": None,
+            "project_id": None,
+            "run_id": None,
+        }
+
+    def test_scorer_invoke_request_rejects_unknown_config(self) -> None:
+        from agent_control_evaluator_galileo.luna import (
+            ScorerInvokeInputs,
+            ScorerInvokeRequest,
+        )
+
+        # Given: an option the current Orbit scorer-invoke schema does not accept
+        unsupported_config = {"top_k": 1}
+
+        # When/Then: the mirrored client contract rejects it locally
+        with pytest.raises(ValidationError, match="top_k"):
+            ScorerInvokeRequest(
+                scorer_id="scorer-123",
+                inputs=ScorerInvokeInputs(query="hello"),
+                config=unsupported_config,
+            )
+
+    def test_scorer_invoke_request_omits_optional_fields_when_absent(self) -> None:
+        from agent_control_evaluator_galileo.luna import ScorerInvokeInputs, ScorerInvokeRequest
+
+        request = ScorerInvokeRequest(
+            scorer_id="scorer-123",
+            inputs=ScorerInvokeInputs(query="hello"),
+        )
+
+        body = request.to_dict()
+        assert body["scorer_id"] == "scorer-123"
+        assert "scorer_version_id" not in body
+        assert "scorer_label" not in body
+        assert body["config"] == {}
+
+    def test_legacy_scorer_invoke_request_serialization_has_no_record_field(self) -> None:
+        from agent_control_evaluator_galileo.luna import ScorerInvokeInputs, ScorerInvokeRequest
+
+        request = ScorerInvokeRequest(
+            scorer_id="scorer-123",
+            inputs=ScorerInvokeInputs(query="hello"),
+        )
+
+        assert request.to_dict() == {
+            "scorer_id": "scorer-123",
+            "inputs": {"query": "hello", "response": ""},
+            "config": {},
+        }
+
+    @pytest.mark.parametrize("empty_value", ["", " ", {}, []])
+    def test_scorer_invoke_request_requires_input_or_output(self, empty_value: object) -> None:
+        from agent_control_evaluator_galileo.luna import ScorerInvokeRequest
+
+        with pytest.raises(
+            ValidationError, match="Either inputs.query or inputs.response must be set"
+        ):
+            ScorerInvokeRequest(
+                scorer_id="scorer-123",
+                inputs={"query": empty_value, "response": empty_value},
+            )
+
+    def test_scorer_invoke_response_shape(self) -> None:
+        from agent_control_evaluator_galileo.luna import ScorerInvokeResponse
+
+        response = ScorerInvokeResponse.from_dict(
+            {
+                "scorer_label": "toxicity",
+                "score": 0.82,
+                "status": "success",
+                "execution_time": 0.12,
+                "error_message": None,
+            }
+        )
+
+        assert response.model_dump() == {
+            "scorer_label": "toxicity",
+            "score": 0.82,
+            "status": "success",
+            "execution_time": 0.12,
+            "error_message": None,
+        }
+        assert response.raw_response["scorer_label"] == "toxicity"
+
+    def test_client_normalizes_luna_invoke_service_root(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        with patch.dict(
+            os.environ,
+            LUNA_ENV | {"GALILEO_LUNA_INVOKE_URL": "  http://luna-invoke:8090/  "},
+            clear=True,
+        ):
+            client = GalileoLunaClient()
+
+        assert client.luna_invoke_url == "http://luna-invoke:8090/api/v1/scorers/invoke"
+
+    def test_client_uses_full_luna_invoke_url_as_configured(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        with patch.dict(
+            os.environ,
+            LUNA_ENV
+            | {"GALILEO_LUNA_INVOKE_URL": "  http://luna-invoke:8090/luna/scorers/invoke/  "},
+            clear=True,
+        ):
+            client = GalileoLunaClient()
+
+        assert client.luna_invoke_url == "http://luna-invoke:8090/luna/scorers/invoke"
+
+    def test_client_rejects_unreadable_luna_invoke_ca_bundle(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        with patch.dict(
+            os.environ,
+            LUNA_ENV | {"GALILEO_LUNA_INVOKE_CA_FILE": "/nonexistent/ca.pem"},
+            clear=True,
+        ):
+            with pytest.raises(ValueError, match="Failed to load CA bundle"):
+                GalileoLunaClient()
+
+    @pytest.mark.asyncio
+    async def test_client_applies_ca_bundle_and_connection_limits(self) -> None:
+        import ssl
+
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+        from agent_control_evaluator_galileo.luna.client import (
+            DEFAULT_KEEPALIVE_EXPIRY_SECS,
+            DEFAULT_MAX_CONNECTIONS,
+            DEFAULT_MAX_KEEPALIVE_CONNECTIONS,
+        )
+
+        captured: dict[str, object] = {}
+        real_async_client = httpx.AsyncClient
+
+        def recording_client(**kwargs: object) -> httpx.AsyncClient:
+            captured.update(kwargs)
+            return real_async_client(**kwargs)
+
+        ssl_context = ssl.create_default_context()
+        with (
+            patch.dict(os.environ, LUNA_ENV, clear=True),
+            patch.object(GalileoLunaClient, "_load_ssl_context", return_value=ssl_context),
+        ):
+            client = GalileoLunaClient(luna_invoke_ca_file="/etc/luna-invoke-ca.pem")
+
+        with patch(
+            "agent_control_evaluator_galileo.luna.client.httpx.AsyncClient", recording_client
+        ):
+            try:
+                await client._get_client()
+            finally:
+                await client.close()
+
+        assert captured["verify"] is client._ssl_context
+        limits = captured["limits"]
+        assert isinstance(limits, httpx.Limits)
+        assert limits.keepalive_expiry == DEFAULT_KEEPALIVE_EXPIRY_SECS
+        assert limits.max_connections == DEFAULT_MAX_CONNECTIONS
+        assert limits.max_keepalive_connections == DEFAULT_MAX_KEEPALIVE_CONNECTIONS
+
+    @pytest.mark.asyncio
+    async def test_client_applies_connection_tuning_env(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+        real_async_client = httpx.AsyncClient
+
+        def recording_client(**kwargs: object) -> httpx.AsyncClient:
+            captured.update(kwargs)
+            return real_async_client(**kwargs)
+
+        with patch.dict(
+            os.environ,
+            {
+                "GALILEO_API_SECRET_KEY": "test-secret",
+                "GALILEO_LUNA_INVOKE_URL": "http://luna-invoke:8090",
+                "GALILEO_LUNA_KEEPALIVE_EXPIRY_SECONDS": "0.25",
+                "GALILEO_LUNA_MAX_CONNECTIONS": "17",
+                "GALILEO_LUNA_MAX_KEEPALIVE_CONNECTIONS": "4",
+            },
+            clear=True,
+        ):
+            client = GalileoLunaClient()
+
+        with patch(
+            "agent_control_evaluator_galileo.luna.client.httpx.AsyncClient", recording_client
+        ):
+            try:
+                await client._get_client()
+            finally:
+                await client.close()
+
+        assert client.keepalive_expiry_seconds == 0.25
+        assert client.max_connections == 17
+        assert client.max_keepalive_connections == 4
+        limits = captured["limits"]
+        assert isinstance(limits, httpx.Limits)
+        assert limits.keepalive_expiry == 0.25
+        assert limits.max_connections == 17
+        assert limits.max_keepalive_connections == 4
+
+    def test_client_ignores_empty_connection_tuning_env(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+        from agent_control_evaluator_galileo.luna.client import (
+            DEFAULT_CLIENT_POOL_SIZE,
+            DEFAULT_KEEPALIVE_EXPIRY_SECS,
+            DEFAULT_MAX_CONNECTIONS,
+            DEFAULT_MAX_KEEPALIVE_CONNECTIONS,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "GALILEO_API_SECRET_KEY": "test-secret",
+                "GALILEO_LUNA_INVOKE_URL": "http://luna-invoke:8090",
+                "GALILEO_LUNA_KEEPALIVE_EXPIRY_SECONDS": "",
+                "GALILEO_LUNA_MAX_CONNECTIONS": " ",
+                "GALILEO_LUNA_MAX_KEEPALIVE_CONNECTIONS": "",
+                "GALILEO_LUNA_CLIENT_POOL_SIZE": " ",
+            },
+            clear=True,
+        ):
+            client = GalileoLunaClient()
+
+        assert client.keepalive_expiry_seconds == DEFAULT_KEEPALIVE_EXPIRY_SECS
+        assert client.max_connections == DEFAULT_MAX_CONNECTIONS
+        assert client.max_keepalive_connections == DEFAULT_MAX_KEEPALIVE_CONNECTIONS
+        assert client.client_pool_size == DEFAULT_CLIENT_POOL_SIZE
+
+    @pytest.mark.asyncio
+    async def test_client_pool_size_rotates_across_http_clients(self) -> None:
+        import agent_control_evaluator_galileo.luna.client as luna_client_module
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        class FakeAsyncClient:
+            def __init__(self, **kwargs: object) -> None:
+                self.kwargs = kwargs
+                self.is_closed = False
+
+            async def aclose(self) -> None:
+                self.is_closed = True
+
+        created: list[FakeAsyncClient] = []
+
+        def recording_client(**kwargs: object) -> FakeAsyncClient:
+            client = FakeAsyncClient(**kwargs)
+            created.append(client)
+            return client
+
+        with patch.dict(
+            os.environ,
+            {
+                "GALILEO_API_SECRET_KEY": "test-secret",
+                "GALILEO_LUNA_INVOKE_URL": "http://luna-invoke:8090",
+                "GALILEO_LUNA_CLIENT_POOL_SIZE": "3",
+            },
+            clear=True,
+        ):
+            client = GalileoLunaClient()
+
+        with patch.object(luna_client_module.httpx, "AsyncClient", recording_client):
+            try:
+                selected = [await client._get_client() for _ in range(5)]
+            finally:
+                await client.close()
+
+        assert client.client_pool_size == 3
+        assert len(created) == 3
+        assert selected == [created[0], created[1], created[2], created[0], created[1]]
+        assert all(created_client.is_closed for created_client in created)
+
+    @pytest.mark.asyncio
+    async def test_pooled_client_selection_waits_for_client_lock(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        class FakeAsyncClient:
+            is_closed = False
+
+            async def aclose(self) -> None:
+                self.is_closed = True
+
+        with patch.dict(
+            os.environ,
+            {
+                "GALILEO_API_SECRET_KEY": "test-secret",
+                "GALILEO_LUNA_INVOKE_URL": "http://luna-invoke:8090",
+                "GALILEO_LUNA_CLIENT_POOL_SIZE": "2",
+            },
+            clear=True,
+        ):
+            client = GalileoLunaClient()
+
+        first_client = FakeAsyncClient()
+        second_client = FakeAsyncClient()
+        client._clients = [first_client, second_client]  # type: ignore[list-item]
+
+        await client._client_lock.acquire()
+        try:
+            pending_selection = asyncio.create_task(client._get_client())
+            await asyncio.sleep(0)
+
+            assert not pending_selection.done()
+        finally:
+            client._client_lock.release()
+
+        try:
+            assert await pending_selection is first_client
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_close_waits_for_client_lock_before_resetting_state(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        class FakeAsyncClient:
+            is_closed = False
+
+            async def aclose(self) -> None:
+                self.is_closed = True
+
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+
+        http_client = FakeAsyncClient()
+        client._client = http_client  # type: ignore[assignment]
+        client._clients = [http_client]  # type: ignore[list-item]
+
+        await client._client_lock.acquire()
+        try:
+            pending_close = asyncio.create_task(client.close())
+            await asyncio.sleep(0)
+
+            assert not pending_close.done()
+            assert client._client is http_client
+            assert not http_client.is_closed
+        finally:
+            client._client_lock.release()
+
+        await pending_close
+
+        assert client._client is None
+        assert client._clients == []
+        assert client._next_client_index == 0
+        assert http_client.is_closed
+
+    @pytest.mark.parametrize(
+        "env_values, expected",
+        [
+            ({"GALILEO_LUNA_KEEPALIVE_EXPIRY_SECONDS": "soon"}, "not a number"),
+            ({"GALILEO_LUNA_MAX_CONNECTIONS": "many"}, "not an integer"),
+            ({"GALILEO_LUNA_MAX_KEEPALIVE_CONNECTIONS": "some"}, "not an integer"),
+            (
+                {"GALILEO_LUNA_KEEPALIVE_EXPIRY_SECONDS": "-0.1"},
+                "greater than or equal to 0",
+            ),
+            ({"GALILEO_LUNA_MAX_CONNECTIONS": "0"}, "greater than 0"),
+            (
+                {"GALILEO_LUNA_MAX_KEEPALIVE_CONNECTIONS": "-1"},
+                "greater than or equal to 0",
+            ),
+            (
+                {
+                    "GALILEO_LUNA_MAX_CONNECTIONS": "2",
+                    "GALILEO_LUNA_MAX_KEEPALIVE_CONNECTIONS": "3",
+                },
+                "less than or equal",
+            ),
+            ({"GALILEO_LUNA_CLIENT_POOL_SIZE": "many"}, "not an integer"),
+            ({"GALILEO_LUNA_CLIENT_POOL_SIZE": "0"}, "greater than 0"),
+        ],
+    )
+    def test_client_reports_invalid_connection_tuning_env(
+        self, env_values: dict[str, str], expected: str
+    ) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        env = LUNA_ENV | env_values
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(ValueError) as exc_info:
+                GalileoLunaClient()
+
+        assert expected in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_client_posts_to_luna_invoke_scorer_invoke(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+        from agent_control_evaluator_galileo.luna.client import GalileoExecutionContext
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            captured["headers"] = dict(request.headers)
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(
+                200,
+                json={
+                    "scorer_label": "toxicity",
+                    "score": 0.82,
+                    "status": "success",
+                    "execution_time": 0.12,
+                },
+            )
+
+        # Given: a Luna client pointing at luna invoke endpoint
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            response = await client.invoke(
+                scorer_id=SCORER_ID,
+                input="user prompt",
+                output="model answer",
+                execution_context=GalileoExecutionContext(
+                    organization_id="org-1",
+                    user_id="user-2",
+                    project_id="project-3",
+                    run_id="run-4",
+                ),
+                config={"request_timeout_seconds": 7},
+                headers={"Galileo-API-Key": "blocked", "X-Request-ID": "safe-id"},
+            )
+        finally:
+            await client.close()
+
+        # Then: posts to luna invoke endpoint /api/v1/scorers/invoke with JWT, no Galileo-API-Key
+        assert response.score == 0.82
+        assert captured["url"] == "http://luna-invoke:8090/api/v1/scorers/invoke"
+        expected_body = {
+            "scorer_id": SCORER_ID,
+            "execution_context": {
+                "organization_id": "org-1",
+                "user_id": "user-2",
+                "project_id": "project-3",
+                "run_id": "run-4",
+            },
+            "inputs": {"query": "user prompt", "response": "model answer"},
+            "config": {"request_timeout_seconds": 7.0},
+        }
+        assert captured["body"] == expected_body
+        headers = captured["headers"]
+        assert isinstance(headers, dict)
+        assert "galileo-api-key" not in headers
+        assert headers["x-request-id"] == "safe-id"
+        auth_header = headers["authorization"]
+        assert isinstance(auth_header, str)
+        assert auth_header.startswith("Bearer ")
+        token = auth_header.removeprefix("Bearer ")
+        jwt_header = _decode_jwt_segment(token.split(".")[0])
+        payload = _decode_jwt_payload(token)
+        assert jwt_header["alg"] == "HS256"
+        assert payload["internal"] is True
+        assert payload["scope"] == "scorers.invoke"
+        assert isinstance(payload["iat"], int)
+        assert isinstance(payload["exp"], int)
+        assert payload["exp"] > payload["iat"]
+
+    @pytest.mark.asyncio
+    async def test_client_derives_server_timeout_from_custom_http_deadline(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        # Given: a custom HTTP deadline and no explicit Orbit execution timeout
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        # When: invoking the scorer with a five-second HTTP deadline
+        try:
+            await client.invoke(scorer_id=SCORER_ID, input="hello", timeout=5)
+        finally:
+            await client.close()
+
+        # Then: Orbit receives an execution deadline at 80% of the HTTP deadline
+        body = captured["body"]
+        assert isinstance(body, dict)
+        assert body["config"] == {"request_timeout_seconds": 4.0}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("server_timeout", [10, 11])
+    async def test_client_rejects_server_timeout_not_below_http_deadline(
+        self, server_timeout: float
+    ) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        request_count = 0
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        # Given: an explicit Orbit timeout equal to or above the HTTP deadline
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        # When/Then: validation fails locally before the transport is used
+        try:
+            with pytest.raises(ValueError, match="must be shorter than the HTTP timeout"):
+                await client.invoke(
+                    scorer_id=SCORER_ID,
+                    input="hello",
+                    timeout=10,
+                    config={"request_timeout_seconds": server_timeout},
+                )
+        finally:
+            await client.close()
+        assert request_count == 0
+
+    @pytest.mark.asyncio
+    async def test_client_dual_writes_legacy_inputs_and_structured_record(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+        from agent_control_evaluator_galileo.records import record_from_step
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(
+                200,
+                json={
+                    "scorer_label": "toxicity",
+                    "score": 0.9,
+                    "status": "success",
+                    "execution_time": 0.12,
+                    "error_message": None,
+                    "additive_field": "ignored",
+                },
+            )
+
+        # Given: selected legacy values and a complete structured runtime Step
+        step = Step(
+            type="llm",
+            name="answer",
+            input={"messages": [{"role": "user", "content": "question"}]},
+            output={"text": "answer"},
+            context={"metadata": {"source": "runtime"}, "request_id": "r-1"},
+            tools=[{"name": "search", "description": "Search", "input_schema": {}}],
+            ground_truth={"text": "expected"},
+        )
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        # When: invoking the rollout-compatible Runners endpoint
+        try:
+            response = await client.invoke(
+                scorer_id=SCORER_ID,
+                scorer_version_id=SCORER_VERSION_ID,
+                scorer_label="toxicity",
+                input="selected question",
+                output="selected answer",
+                step=step,
+            )
+        finally:
+            await client.close()
+
+        # Then: legacy inputs and the shared factory's canonical record are sent together
+        assert response.score == 0.9
+        assert response.scorer_label == "toxicity"
+        assert response.status == "success"
+        assert response.execution_time == 0.12
+        assert response.error_message is None
+        expected_body = {
+            "scorer_id": SCORER_ID,
+            "scorer_version_id": SCORER_VERSION_ID,
+            "scorer_label": "toxicity",
+            "inputs": {
+                "query": "selected question",
+                "response": "selected answer",
+                "ground_truth": {"text": "expected"},
+                "tools": [{"name": "search", "description": "Search", "input_schema": {}}],
+            },
+            "record": record_from_step(
+                step,
+                selected_input="selected question",
+                selected_output="selected answer",
+            ).model_dump(mode="json", exclude_none=True),
+            "config": {"request_timeout_seconds": 8.0},
+        }
+        actual_body = captured["body"]
+        assert isinstance(actual_body, dict)
+        actual_record = actual_body["record"]
+        expected_record = expected_body["record"]
+        assert isinstance(actual_record, dict)
+        assert isinstance(expected_record, dict)
+        # Each factory call assigns a fresh created_at timestamp.
+        actual_record.pop("created_at", None)
+        expected_record.pop("created_at", None)
+        assert actual_body == expected_body
+
+        # The emitted body also satisfies the exact additive Orbit #1720 shape.
+        orbit_request = _Orbit1720Request.model_validate(expected_body)
+        assert orbit_request.record is not None
+        assert orbit_request.inputs.query == "selected question"
+        assert orbit_request.inputs.response == "selected answer"
+        assert "selected question" in json.dumps(orbit_request.record.input)
+        assert "selected answer" in json.dumps(orbit_request.record.output)
+        assert orbit_request.inputs.tools == orbit_request.record.tools
+        assert json.loads(orbit_request.record.dataset_output) == {"text": "expected"}
+        assert orbit_request.inputs.ground_truth == {"text": "expected"}
+        assert orbit_request.record.user_metadata == {"source": "runtime"}
+        assert "context" not in expected_body["record"]
+        assert orbit_request.config is not None
+        assert orbit_request.config.request_timeout_seconds == 8.0
+
+        # The same request must remain consumable by released Orbit versions.
+        legacy_request = _LegacyOrbitRequest.model_validate(expected_body)
+        assert legacy_request.model_dump(mode="json", exclude_none=True) == {
+            "scorer_id": SCORER_ID,
+            "scorer_version_id": SCORER_VERSION_ID,
+            "scorer_label": "toxicity",
+            "inputs": {"query": "selected question", "response": "selected answer"},
+            "config": {"request_timeout_seconds": 8.0},
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("flag_value", [None, "disabled", "Enabled"])
+    async def test_client_uses_legacy_request_without_runtime_flag(
+        self, flag_value: str | None
+    ) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+        from agent_control_evaluator_galileo.luna.client import GalileoExecutionContext
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.8, "status": "success"})
+
+        step = Step(
+            type="llm",
+            name="answer",
+            input="step input",
+            output="step output",
+            ground_truth={"expected": "answer"},
+            tools=[{"name": "search", "input_schema": {}}],
+        )
+        env = LEGACY_LUNA_ENV.copy()
+        if flag_value is not None:
+            env["GALILEO_FEATURE_FLAG_SCORER_INVOKE_RUNTIME"] = flag_value
+        with patch.dict(os.environ, env, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            await client.invoke(
+                scorer_id=SCORER_ID,
+                scorer_version_id=SCORER_VERSION_ID,
+                input="selected input",
+                output="selected output",
+                step=step,
+                execution_context=GalileoExecutionContext(organization_id="org-1"),
+            )
+        finally:
+            await client.close()
+
+        body = captured["body"]
+        assert isinstance(body, dict)
+        assert body["scorer_id"] == SCORER_ID
+        assert body["scorer_version_id"] == SCORER_VERSION_ID
+        assert body["inputs"] == {
+            "query": "selected input",
+            "response": "selected output",
+            "ground_truth": {"expected": "answer"},
+            "tools": [{"name": "search", "input_schema": {}}],
+        }
+        assert "record" not in body
+        assert "execution_context" not in body
+
+    @pytest.mark.asyncio
+    async def test_client_omits_record_when_step_has_no_pinned_version(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        step = Step(
