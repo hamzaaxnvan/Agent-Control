@@ -60,3 +60,66 @@ export type CodeMirrorThemePreset = {
   label: string;
   extension: Extension | Extension[];
 };
+
+export const CODE_MIRROR_DARK_THEME_PRESETS: Record<
+  string,
+  CodeMirrorThemePreset
+> = {
+  [DEFAULT_DARK_THEME_ID]: {
+    label: 'VS Code Dark',
+    extension: vscodeDark,
+  },
+  'github-dark': { label: 'GitHub Dark', extension: githubDark },
+  'tokyo-night': { label: 'Tokyo Night', extension: tokyoNight },
+  'tokyo-night-storm': {
+    label: 'Tokyo Night Storm',
+    extension: tokyoNightStorm,
+  },
+  nord: { label: 'Nord', extension: nord },
+  dracula: { label: 'Dracula', extension: dracula },
+  monokai: { label: 'Monokai', extension: monokai },
+  'gruvbox-dark': { label: 'Gruvbox Dark', extension: gruvboxDark },
+  darcula: { label: 'Darcula', extension: darcula },
+  'atom-one': { label: 'Atom One', extension: atomone },
+  'solarized-dark': { label: 'Solarized Dark', extension: solarizedDark },
+};
+
+export const CODE_MIRROR_LIGHT_THEME_PRESETS: Record<
+  string,
+  CodeMirrorThemePreset
+> = {
+  [DEFAULT_LIGHT_THEME_ID]: {
+    label: 'Mantine (match app)',
+    extension: mantineLightCodeMirrorTheme,
+  },
+  'vscode-light': { label: 'VS Code Light', extension: vscodeLight },
+  'github-light': { label: 'GitHub Light', extension: githubLight },
+  'tokyo-night-day': { label: 'Tokyo Night Day', extension: tokyoNightDay },
+  'quiet-light': { label: 'Quiet Light', extension: quietlight },
+  eclipse: { label: 'Eclipse', extension: eclipse },
+  white: { label: 'White', extension: whiteLight },
+  'gruvbox-light': { label: 'Gruvbox Light', extension: gruvboxLight },
+  'solarized-light': { label: 'Solarized Light', extension: solarizedLight },
+};
+
+export type StoredCodeMirrorThemePrefs = {
+  dark: string;
+  light: string;
+};
+
+export function readStoredCodeMirrorThemePrefs(): StoredCodeMirrorThemePrefs {
+  const fallback: StoredCodeMirrorThemePrefs = {
+    dark: DEFAULT_DARK_THEME_ID,
+    light: DEFAULT_LIGHT_THEME_ID,
+  };
+  if (typeof window === 'undefined') {
+    return fallback;
+  }
+  try {
+    const raw = window.localStorage.getItem(CODE_MIRROR_THEME_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<StoredCodeMirrorThemePrefs>;
+    return {
+      dark:
+        parsed.dark &&
+        Object.prototype.hasOwnProperty.call(

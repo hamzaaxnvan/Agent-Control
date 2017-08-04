@@ -25,3 +25,17 @@ test.describe('Luna Evaluator', () => {
 
     await expect(
       mockedPage.getByText('Operator', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Threshold', { exact: true })
+    ).toBeVisible();
+  });
+
+  test('displays advanced settings', async ({ mockedPage }) => {
+    await openEvaluatorForm(mockedPage, 'Galileo Luna');
+
+    await expect(
+      mockedPage.getByText('Payload field', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Timeout (ms)', { exact: true })
