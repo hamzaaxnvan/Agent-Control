@@ -64,3 +64,36 @@ class TestParseEvaluatorRefFull:
         assert result.type == "agent"
         assert result.namespace == "my-agent"
         assert result.local_name == "vendor.eval"
+
+
+class TestIsAgentScoped:
+    """Tests for is_agent_scoped helper function."""
+
+    def test_builtin_not_agent_scoped(self) -> None:
+        """Given a built-in evaluator, when checking, then returns False."""
+        assert is_agent_scoped("regex") is False
+
+    def test_external_not_agent_scoped(self) -> None:
+        """Given an external evaluator, when checking, then returns False."""
+        assert is_agent_scoped("galileo.luna") is False
+
+    def test_agent_scoped_returns_true(self) -> None:
+        """Given an agent-scoped evaluator, when checking, then returns True."""
+        assert is_agent_scoped("my-agent:pii-detector") is True
+
+
+class TestValidateConfigAgainstSchema:
+    """Tests for validate_config_against_schema function."""
+
+    def test_empty_schema_accepts_anything(self) -> None:
+        """Given an empty schema, when validating any config, then no error is raised."""
+        # Given:
+        schema = {}
+        config = {"any": "value", "nested": {"key": 123}}
+
+        # When:/Then - no exception
+        validate_config_against_schema(config, schema)
+
+    def test_valid_config(self) -> None:
+        """Given a schema, when config matches schema, then no error is raised."""
+        # Given:

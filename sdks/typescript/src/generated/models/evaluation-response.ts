@@ -32,20 +32,3 @@ export type EvaluationResponse = {
    */
   confidence: number;
   /**
-   * List of controls that failed during evaluation (if any)
-   */
-  errors?: Array<ControlMatch> | null | undefined;
-  /**
-   * Whether content is safe
-   */
-  isSafe: boolean;
-  /**
-   * List of controls that matched/triggered (if any)
-   */
-  matches?: Array<ControlMatch> | null | undefined;
-  /**
-   * List of controls that were evaluated but did not match (if any)
-   */
-  nonMatches?: Array<ControlMatch> | null | undefined;
-  /**
-   * Explanation for the decision
