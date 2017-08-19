@@ -10,3 +10,28 @@ export class HTTPClientError extends Error {
   override readonly cause: unknown;
   override name = "HTTPClientError";
   constructor(message: string, opts?: { cause?: unknown }) {
+    let msg = message;
+    if (opts?.cause) {
+      msg += `: ${opts.cause}`;
+    }
+
+    super(msg, opts);
+    // In older runtimes, the cause field would not have been assigned through
+    // the super() call.
+    if (typeof this.cause === "undefined") {
+      this.cause = opts?.cause;
+    }
+  }
+}
+
+/**
+ * An error to capture unrecognised or unexpected errors when making HTTP calls.
+ */
+export class UnexpectedClientError extends HTTPClientError {
+  override name = "UnexpectedClientError";
+}
+
+/**
+ * An error that is raised when any inputs used to create a request are invalid.
+ */
+export class InvalidRequestError extends HTTPClientError {

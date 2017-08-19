@@ -17,3 +17,22 @@ export type CloneAndBindTargetBinding = {
    * Opaque external identifier within the target_type.
    */
   targetId: string;
+  /**
+   * Opaque attachment kind (caller-defined; e.g. 'environment', 'session').
+   */
+  targetType: string;
+};
+
+/** @internal */
+export type CloneAndBindTargetBinding$Outbound = {
+  enabled: boolean;
+  target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const CloneAndBindTargetBinding$outboundSchema: z.ZodMiniType<
+  CloneAndBindTargetBinding$Outbound,
+  CloneAndBindTargetBinding
+> = z.pipe(
+  z.object({
