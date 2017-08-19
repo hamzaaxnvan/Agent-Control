@@ -1,0 +1,21 @@
+[project]
+name = "agent-control-aidefense-example"
+version = "0.1.0"
+description = "Cisco AI Defense Chat Inspection demo"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.24.0",
+    # Use the local SDK for decorator-based example
+    "agent-control-sdk>=5.2.0",
+    # When using SDK from path/editable, engine, models, and telemetry are not vendored
+    "agent-control-engine>=5.2.0",
+    "agent-control-models>=5.2.0",
+    "agent-control-evaluators>=5.2.0",
+    "agent-control-telemetry>=5.2.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[build-system]
