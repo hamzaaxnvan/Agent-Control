@@ -32,37 +32,3 @@ galileo = ["agent-control-evaluator-galileo>=7.5.0"]
         [
             "agent-control-evaluators",
             "agent-control-models",
-            "agent-control-evaluator-galileo",
-        ],
-        "7.6.0",
-    )
-
-    # Then: only the internal minimum versions move to the release version
-    assert pyproject_path.read_text() == (
-        """
-[project]
-dependencies = [
-    "agent-control-evaluators>=7.6.0",
-    "agent-control-models>=7.6.0,<8.0.0",
-    "httpx>=0.28.0",
-]
-
-[project.optional-dependencies]
-galileo = ["agent-control-evaluator-galileo>=7.6.0"]
-""".strip()
-    )
-
-
-def test_sync_dependency_floors_tolerates_whitespace_around_lower_bounds(tmp_path: Path) -> None:
-    pyproject_path = tmp_path / "pyproject.toml"
-    pyproject_path.write_text(
-        """
-[project]
-dependencies = [
-    "agent-control-evaluators >= 7.5.0",
-    "agent-control-models >= 7.5.0,<8.0.0",
-]
-
-[project.optional-dependencies]
-galileo = ["agent-control-evaluator-galileo >= 7.5.0"]
-""".strip()
