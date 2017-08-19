@@ -155,3 +155,161 @@ class KnowledgeBase:
 
         for article in cls.ARTICLES:
             if (query_lower in article["title"].lower() or
+                query_lower in article["content"].lower() or
+                query_lower in article["category"]):
+                results.append(article)
+
+        # If no exact match, return a random article
+        if not results:
+            results = [random.choice(cls.ARTICLES)]
+
+        return results
+
+
+class TicketSystem:
+    """Simulates a ticket creation system."""
+
+    _ticket_counter = 1000
+
+    @classmethod
+    def create(cls, subject: str, description: str, priority: str = "medium") -> dict[str, Any]:
+        """Create a new support ticket."""
+        cls._ticket_counter += 1
+        return {
+            "ticket_id": f"TKT-{cls._ticket_counter}",
+            "subject": subject,
+            "description": description,
+            "priority": priority,
+            "status": "open",
+            "created_at": datetime.now().isoformat(),
+        }
+
+
+# =============================================================================
+# PROTECTED AGENT FUNCTIONS
+# =============================================================================
+# These functions are protected by the @control() decorator.
+# The server evaluates controls and blocks/allows based on agent associations.
+
+
+@control()
+async def respond_to_customer(message: str) -> str:
+    """
+    Main chat function - generates an LLM response to customer message.
+
+    The @control() decorator:
+    - Checks 'pre' controls before generating (input validation)
+    - Checks 'post' controls after generating (output validation)
+
+    If a control triggers with 'deny' action, ControlViolationError is raised.
+    """
+    # Generate response using mock LLM
+    response = MockLLM.generate(message)
+    return response
+
+
+async def _lookup_customer(query: str) -> dict[str, Any]:
+    """
+    Look up customer information - protected tool call.
+
+    The decorator protects this operation by validating:
+    - The query doesn't contain injection attempts
+    - The result doesn't leak unauthorized data
+    """
+    customer = CustomerDatabase.lookup(query)
+    if customer:
+        return {"found": True, "customer": customer}
+    return {"found": False, "message": f"No customer found for: {query}"}
+
+
+_lookup_customer.name = "lookup_customer"  # type: ignore[attr-defined]
+_lookup_customer.tool_name = "lookup_customer"  # type: ignore[attr-defined]
+lookup_customer = control()(_lookup_customer)
+
+
+async def _search_knowledge_base(query: str) -> dict[str, Any]:
+    """
+    Search the knowledge base - protected tool call.
+
+    Validates that:
+    - Search queries don't contain harmful content
+    - Results are appropriate to share
+    """
+    articles = KnowledgeBase.search(query)
+    return {
+        "query": query,
+        "results_count": len(articles),
+        "articles": articles,
+    }
+
+
+_search_knowledge_base.name = "search_knowledge_base"  # type: ignore[attr-defined]
+_search_knowledge_base.tool_name = "search_knowledge_base"  # type: ignore[attr-defined]
+search_knowledge_base = control()(_search_knowledge_base)
+
+
+async def _create_ticket(
+    subject: str, description: str, priority: str = "medium"
+) -> dict[str, Any]:
+    """
+    Create a support ticket - protected tool call.
+
+    Validates that:
+    - Ticket content is appropriate
+    - No sensitive data in public fields
+    """
+    ticket = TicketSystem.create(subject, description, priority)
+    return {"success": True, "ticket": ticket}
+
+
+_create_ticket.name = "create_ticket"  # type: ignore[attr-defined]
+_create_ticket.tool_name = "create_ticket"  # type: ignore[attr-defined]
+create_ticket = control()(_create_ticket)
+
+
+# =============================================================================
+# CUSTOMER SUPPORT AGENT CLASS
+# =============================================================================
+
+
+class CustomerSupportAgent:
+    """
+    High-level agent that orchestrates the protected functions.
+
+    This demonstrates the pattern of catching ControlViolationError
+    and providing graceful fallback responses.
+    """
+
+    def __init__(self):
+        initialize_agent_control()
+        self.conversation_history: list[dict[str, str]] = []
+
+    async def chat(self, user_message: str) -> str:
+        """
+        Process a user message and return a response.
+
+        Handles ControlViolationError gracefully by returning
+        a safe fallback message instead of exposing internal errors.
+        """
+        self.conversation_history.append({"role": "user", "content": user_message})
+
+        try:
+            # Main LLM response - protected by controls
+            response = await respond_to_customer(user_message)
+
+            self.conversation_history.append({"role": "assistant", "content": response})
+            return response
+
+        except ControlViolationError as e:
+            # Control triggered - return safe fallback
+            fallback = (
+                "I'm sorry, but I can't help with that request. "
+                "Is there something else I can assist you with?"
+            )
+            self.conversation_history.append({"role": "assistant", "content": fallback})
+            print(f"  [Control triggered: {e.control_name}]")
+            return fallback
+
+    async def lookup(self, query: str) -> str:
+        """Look up customer information with error handling."""
+        try:
