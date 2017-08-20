@@ -46,3 +46,52 @@ import { Result } from "../types/fp.js";
  * Raises:
  *     HTTPException 404: Agent not found
  *     HTTPException 422: Agent data is corrupted
+ */
+export function agentsGet(
+  client: AgentControlSDKCore,
+  request: operations.GetAgentApiV1AgentsAgentNameGetRequest,
+  options?: RequestOptions,
+): APIPromise<
+  Result<
+    models.GetAgentResponse,
+    | errors.HTTPValidationError
+    | AgentControlSDKError
+    | ResponseValidationError
+    | ConnectionError
+    | RequestAbortedError
+    | RequestTimeoutError
+    | InvalidRequestError
+    | UnexpectedClientError
+    | SDKValidationError
+  >
+> {
+  return new APIPromise($do(
+    client,
+    request,
+    options,
+  ));
+}
+
+async function $do(
+  client: AgentControlSDKCore,
+  request: operations.GetAgentApiV1AgentsAgentNameGetRequest,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      models.GetAgentResponse,
+      | errors.HTTPValidationError
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
