@@ -699,3 +699,705 @@ class TestBudgetIdSemantics:
     @pytest.mark.asyncio
     async def test_different_budget_id_isolates_store(self) -> None:
         # Given: two evaluators with different budget_id values
+        config1 = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            budget_id="pool-a",
+            pricing={"gpt-4": {"input_per_1k": 100.0, "output_per_1k": 0.0}},
+            model_path="model",
+        )
+        config2 = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            budget_id="pool-b",
+            pricing={"gpt-4": {"input_per_1k": 100.0, "output_per_1k": 0.0}},
+            model_path="model",
+        )
+        ev1 = BudgetEvaluator(config1)
+        ev2 = BudgetEvaluator(config2)
+        step = {"model": "gpt-4", "usage": {"input_tokens": 500, "output_tokens": 0}}
+
+        # When: each evaluator records a 50-cent call
+        first = await ev1.evaluate(step)
+        second = await ev2.evaluate(step)
+
+        # Then: each pool remains below the 100-cent limit independently
+        assert first.matched is False
+        assert second.matched is False
+
+
+class TestUnknownModelBehavior:
+    @pytest.mark.asyncio
+    async def test_unknown_model_block_default(self) -> None:
+        # Given: a cost rule with pricing that does not include the incoming model
+        config = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            pricing={"gpt-4": {"input_per_1k": 10.0, "output_per_1k": 20.0}},
+            model_path="model",
+        )
+        evaluator = BudgetEvaluator(config)
+
+        # When: the step uses an unknown model
+        result = await evaluator.evaluate(
+            {"model": "unknown-model", "usage": {"input_tokens": 100, "output_tokens": 50}}
+        )
+
+        # Then: the evaluator fails closed and reports the unknown model
+        assert result.matched is True
+        assert result.metadata is not None
+        assert result.metadata["unknown_model"] == "unknown-model"
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_warn(self) -> None:
+        # Given: a cost rule configured to warn on unknown models
+        config = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            pricing={"gpt-4": {"input_per_1k": 10.0, "output_per_1k": 20.0}},
+            model_path="model",
+            unknown_model_behavior="warn",
+        )
+        evaluator = BudgetEvaluator(config)
+
+        # When: the step uses an unknown model
+        result = await evaluator.evaluate(
+            {"model": "unknown-model", "usage": {"input_tokens": 100, "output_tokens": 50}}
+        )
+
+        # Then: the evaluator treats cost as 0 and does not block
+        assert result.matched is False
+        assert result.metadata is not None
+        assert result.metadata["cost"] == 0.0
+        assert result.metadata["all_snapshots"][0]["spent_tokens"] == 150
+
+    @pytest.mark.asyncio
+    async def test_unknown_model_token_only_unaffected(self) -> None:
+        # Given: a token-only rule with a pricing table that does not include
+        # the incoming model and the default block setting
+        config = BudgetEvaluatorConfig(
+            limits=[{"limit": 1000, "limit_unit": "tokens"}],
+            pricing={},
+            model_path="model",
+        )
+        evaluator = BudgetEvaluator(config)
+
+        # When: the step uses an unknown model below the token limit
+        result = await evaluator.evaluate(
+            {"model": "unknown-model", "usage": {"input_tokens": 100, "output_tokens": 50}}
+        )
+
+        # Then: unknown-model blocking is not applied without a cost rule
+        assert result.matched is False
+        assert result.metadata is not None
+        assert result.metadata["all_snapshots"][0]["spent_tokens"] == 150
+
+    @pytest.mark.asyncio
+    async def test_pricing_lookup_is_case_sensitive(self) -> None:
+        # Given: pricing for lowercase gpt-4
+        config = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            pricing={"gpt-4": {"input_per_1k": 10.0, "output_per_1k": 20.0}},
+            model_path="model",
+        )
+        evaluator = BudgetEvaluator(config)
+
+        # When: the step uses a differently cased model name
+        result = await evaluator.evaluate(
+            {"model": "GPT-4", "usage": {"input_tokens": 100, "output_tokens": 50}}
+        )
+
+        # Then: lookup is case-sensitive and the default behavior fails closed
+        assert result.matched is True
+        assert result.metadata is not None
+        assert result.metadata["unknown_model"] == "GPT-4"
+
+    @pytest.mark.asyncio
+    async def test_known_model_not_blocked(self) -> None:
+        # Given: a cost rule whose pricing includes the incoming model
+        config = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            pricing={"gpt-4": {"input_per_1k": 10.0, "output_per_1k": 20.0}},
+            model_path="model",
+        )
+        evaluator = BudgetEvaluator(config)
+
+        # When: the step uses the known model
+        result = await evaluator.evaluate(
+            {"model": "gpt-4", "usage": {"input_tokens": 100, "output_tokens": 50}}
+        )
+
+        # Then: normal budget evaluation runs
+        assert result.matched is False
+        assert result.metadata is not None
+        assert "unknown_model" not in result.metadata
+
+
+# ---------------------------------------------------------------------------
+# Store registry
+# ---------------------------------------------------------------------------
+
+
+class TestStoreRegistry:
+    def test_same_config_returns_same_store(self) -> None:
+        # Given: two configs with identical parameters
+        config = BudgetEvaluatorConfig(limits=[{"limit": 1000}], pricing={}, model_path="model")
+
+        # When: get store twice
+        store1 = get_or_create_store(config)
+        store2 = get_or_create_store(config)
+
+        # Then: same object
+        assert store1 is store2
+
+    def test_different_budget_id_returns_different_store(self) -> None:
+        # Given: two configs with different budget ids
+        config1 = BudgetEvaluatorConfig(
+            limits=[{"limit": 1000}], budget_id="a", pricing={}, model_path="model",
+        )
+        config2 = BudgetEvaluatorConfig(
+            limits=[{"limit": 1000}], budget_id="b", pricing={}, model_path="model",
+        )
+
+        # When: get stores
+        store1 = get_or_create_store(config1)
+        store2 = get_or_create_store(config2)
+
+        # Then: different objects
+        assert store1 is not store2
+
+    def test_clear_budget_stores(self) -> None:
+        # Given: a registered store
+        config = BudgetEvaluatorConfig(limits=[{"limit": 1000}], pricing={}, model_path="model")
+        store1 = get_or_create_store(config)
+
+        # When: clear all stores
+        clear_budget_stores()
+        store2 = get_or_create_store(config)
+
+        # Then: new store (old one is gone)
+        assert store1 is not store2
+
+    @pytest.mark.asyncio
+    async def test_evaluator_uses_registry(self) -> None:
+        # Given: two evaluators with same config
+        config = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            pricing={"gpt-4": {"input_per_1k": 100.0, "output_per_1k": 0.0}},
+            model_path="model",
+        )
+        ev1 = BudgetEvaluator(config)
+        ev2 = BudgetEvaluator(config)
+
+        # When: ev1 records usage, ev2 checks
+        step = {"model": "gpt-4", "usage": {"input_tokens": 500, "output_tokens": 0}}
+        await ev1.evaluate(step)
+        result = await ev2.evaluate(step)
+
+        # Then: ev2 sees ev1's accumulated spend (shared store via registry)
+        assert result.matched is True  # 50 + 50 = 100 >= 100
+
+    @pytest.mark.asyncio
+    async def test_same_budget_id_shares_buckets_but_not_rules(self) -> None:
+        # Given: two configs sharing budget_id but using different limits
+        pricing = {"gpt-4": {"input_per_1k": 100.0, "output_per_1k": 0.0}}
+        config1 = BudgetEvaluatorConfig(
+            limits=[{"limit": 100}],
+            budget_id="shared",
+            pricing=pricing,
+            model_path="model",
+        )
+        config2 = BudgetEvaluatorConfig(
+            limits=[{"limit": 1000}],
+            budget_id="shared",
+            pricing=pricing,
+            model_path="model",
+        )
+        ev1 = BudgetEvaluator(config1)
+        ev2 = BudgetEvaluator(config2)
+        step = {"model": "gpt-4", "usage": {"input_tokens": 600, "output_tokens": 0}}
+
+        # When: the first evaluator records 60 cents, then the second records
+        # another 60 cents into the same budget bucket
+        first = await ev1.evaluate(step)
+        second = await ev2.evaluate(step)
+
+        # Then: the second evaluator sees shared bucket state (120 cents) but
+        # evaluates against its own 1000-cent rule, not config1's 100-cent rule.
+        assert first.matched is False
+        assert second.matched is False
+        assert second.metadata is not None
+        assert second.metadata["all_snapshots"][0]["spent"] == 120
+        assert second.metadata["all_snapshots"][0]["limit"] == 1000
+
+
+# ---------------------------------------------------------------------------
+# Security / adversarial tests
+# ---------------------------------------------------------------------------
+
+
+class TestBudgetAdversarial:
+    def test_scope_key_injection_pipe(self) -> None:
+        # Given: malicious user_id with pipe
+        key = _build_scope_key({"ch": "slack"}, "uid", {"uid": "u1|ch=admin"})
+
+        # Then: pipe is percent-encoded, no injection
+        parts = key.split("|")
+        assert len(parts) == 2
+        assert "ch=admin" not in parts
+
+    def test_scope_key_no_collision(self) -> None:
+        key1 = _build_scope_key({}, "uid", {"uid": "a|b"})
+        key2 = _build_scope_key({}, "uid", {"uid": "a_b"})
+        assert key1 != key2
+
+    def test_extract_by_path_rejects_dunder(self) -> None:
+        from agent_control_evaluator_budget.budget.evaluator import _extract_by_path
+
+        assert _extract_by_path({"a": 1}, "__class__") is None
+
+    @pytest.mark.asyncio
+    async def test_group_by_without_metadata_skips_rule(self) -> None:
+        # Given: rule with group_by=user_id but no user_id in scope
+        rules = [BudgetLimitRule(group_by="user_id", limit=1000)]
+        store = InMemoryBudgetStore(clock=lambda: 0.0)
+
+        # When: step without user_id
+        results = await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=999.0
+        )
+
+        # Then: rule skipped
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_two_rules_same_scope_no_double_count(self) -> None:
+        # Given: two global rules with different limit types
+        rules = [
+            BudgetLimitRule(limit=1000),
+            BudgetLimitRule(limit=5000, limit_unit="tokens"),
+        ]
+        store = InMemoryBudgetStore(clock=lambda: 0.0)
+
+        # When: record once
+        results = await store.record_and_check(
+            rules=rules, scope={}, input_tokens=100, output_tokens=100, cost=100.0
+        )
+
+        # Then: both rules get snapshot, but usage recorded only once
+        assert len(results) == 2
+        assert results[0].spent == 100  # not 200
+        assert results[1].spent_tokens == 200  # not 400
+
+    @pytest.mark.asyncio
+    async def test_negative_cost_reduces_spend(self) -> None:
+        # Given: store with 1000-cent limit
+        rules = [BudgetLimitRule(limit=1000)]
+        store = InMemoryBudgetStore(clock=lambda: 0.0)
+
+        # When: record positive then negative cost
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=500.0
+        )
+        results = await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=-200.0
+        )
+
+        # Then: negative cost reduces spend (store does not clamp; validation is caller's job)
+        assert results[0].spent == 300
+
+    @pytest.mark.asyncio
+    async def test_window_seconds_boundary_alignment(self) -> None:
+        # Given: hourly window, clock at boundary-1 and boundary
+        rules = [BudgetLimitRule(limit=1000, window_seconds=3600)]
+        boundary = 3600 * 100  # exact hour boundary
+
+        # When: record just before and at boundary
+        store = InMemoryBudgetStore(clock=lambda: boundary - 1)
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=500.0
+        )
+
+        store._clock = lambda: boundary
+        results = await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=500.0
+        )
+
+        # Then: boundary crossing starts fresh period
+        assert results[0].spent == 500  # not 1000
+
+
+class TestConfigValidationEdgeCases:
+    def test_zero_token_limit_rejected(self) -> None:
+        # Given/When: zero token limit
+        with pytest.raises(ValidationError, match="positive"):
+            BudgetLimitRule(limit=0, limit_unit="tokens")
+
+
+class TestBoolGuard:
+    """bool is a subclass of int in Python -- must be rejected."""
+
+    def test_extract_tokens_rejects_bool(self) -> None:
+        # Given: data with bool tokens
+        data = {"usage": {"input_tokens": True, "output_tokens": False}}
+
+        # When/Then: bools are not accepted as token counts
+        assert _extract_tokens(data, None) == (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Store registry robustness
+# ---------------------------------------------------------------------------
+
+
+class TestStoreRegistryRobustness:
+    def test_concurrent_get_or_create_store(self) -> None:
+        # Given: 10 threads requesting the same config concurrently
+        config = BudgetEvaluatorConfig(limits=[{"limit": 1000}], pricing={}, model_path="model")
+        stores: list[Any] = []
+        lock = threading.Lock()
+
+        def get_store() -> None:
+            s = get_or_create_store(config)
+            with lock:
+                stores.append(s)
+
+        # When: 10 threads call get_or_create_store simultaneously
+        threads = [threading.Thread(target=get_store) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Then: all threads got the same store object
+        assert len(stores) == 10
+        assert all(s is stores[0] for s in stores)
+
+    @pytest.mark.asyncio
+    async def test_evaluator_cache_eviction_preserves_budget_state(self) -> None:
+        # Given: evaluator that has recorded usage
+        from agent_control_evaluators._factory import (
+            clear_evaluator_cache,
+        )
+
+        config = BudgetEvaluatorConfig(
+            limits=[{"limit": 1000}],
+            pricing={"gpt-4": {"input_per_1k": 100.0, "output_per_1k": 0.0}},
+            model_path="model",
+        )
+        ev = BudgetEvaluator(config)
+        step = {"model": "gpt-4", "usage": {"input_tokens": 500, "output_tokens": 0}}
+        await ev.evaluate(step)
+
+        # When: simulate LRU eviction by clearing the evaluator cache
+        clear_evaluator_cache()
+
+        # Then: budget state survives (stored in module-level registry, not on evaluator)
+        ev2 = BudgetEvaluator(config)
+        result = await ev2.evaluate(step)
+
+        # 500 tokens * 100 cents/1k = 50.0 cents per call.
+        # Two calls = 100.0 cents total. limit=1000, so not exceeded.
+        # Key assertion: state IS preserved across evaluator re-creation.
+        assert result.metadata is not None
+        assert result.metadata["cost"] == pytest.approx(50.0, abs=0.1)
+        # The all_snapshots should show accumulated spend from both calls
+        snaps = result.metadata["all_snapshots"]
+        assert snaps[0]["spent"] == 100  # round(50.0 + 50.0) = 100, not 50
+
+
+# ---------------------------------------------------------------------------
+# _estimate_cost edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestRoundingBoundary:
+    @pytest.mark.asyncio
+    async def test_spent_half_cent_below_limit_not_exceeded(self) -> None:
+        # Given: store with 1000-cent limit
+        rules = [BudgetLimitRule(limit=1000)]
+        store = InMemoryBudgetStore(clock=lambda: 0.0)
+
+        # When: spend 999.5 cents (just below limit)
+        results = await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=999.5
+        )
+
+        # Then: not exceeded (999.5 < 1000), spent display < limit
+        assert results[0].exceeded is False
+        assert results[0].spent < results[0].limit  # no contradiction
+
+    @pytest.mark.asyncio
+    async def test_spent_display_never_exceeds_actual(self) -> None:
+        # Given: store with 100-cent limit
+        rules = [BudgetLimitRule(limit=100)]
+        store = InMemoryBudgetStore(clock=lambda: 0.0)
+
+        # When: spend 99.9 cents
+        results = await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=99.9
+        )
+
+        # Then: floor truncation means spent=99, not rounded to 100
+        assert results[0].spent == 99
+        assert results[0].exceeded is False
+
+
+class TestConfigKeyOrdering:
+    def test_limits_order_does_not_affect_same_budget_id_store_identity(self) -> None:
+        # Given: two configs with same budget_id and rules in different order
+        rule_a = {"limit": 1000, "scope": {"agent": "a"}}
+        rule_b = {"limit": 2000, "scope": {"agent": "b"}}
+        config1 = BudgetEvaluatorConfig(
+            limits=[rule_a, rule_b], budget_id="ordered", pricing={}, model_path="model",
+        )
+        config2 = BudgetEvaluatorConfig(
+            limits=[rule_b, rule_a], budget_id="ordered", pricing={}, model_path="model",
+        )
+
+        # When: get stores for both
+        store1 = get_or_create_store(config1)
+        store2 = get_or_create_store(config2)
+
+        # Then: same store (order-independent)
+        assert store1 is store2
+
+
+class TestEstimateCostEdgeCases:
+    def test_nan_rate_returns_zero(self) -> None:
+        from agent_control_evaluator_budget.budget.evaluator import _estimate_cost
+
+        # Given: pricing table with NaN rate
+        pricing = {"gpt-4": ModelPricing(input_per_1k=float("nan"), output_per_1k=0.0)}
+
+        # When: estimate cost
+        cost = _estimate_cost("gpt-4", 1000, 0, pricing)
+
+        # Then: returns 0.0 (NaN guard)
+        assert cost == 0.0
+
+    def test_inf_rate_returns_zero(self) -> None:
+        from agent_control_evaluator_budget.budget.evaluator import _estimate_cost
+
+        # Given: pricing table with Inf rate
+        pricing = {"gpt-4": ModelPricing(input_per_1k=float("inf"), output_per_1k=0.0)}
+
+        # When: estimate cost
+        cost = _estimate_cost("gpt-4", 1000, 0, pricing)
+
+        # Then: returns 0.0 (Inf guard)
+        assert cost == 0.0
+
+    def test_negative_rate_returns_zero(self) -> None:
+        from agent_control_evaluator_budget.budget.evaluator import _estimate_cost
+
+        # Given: pricing table with negative rate
+        pricing = {"gpt-4": ModelPricing(input_per_1k=-10.0, output_per_1k=0.0)}
+
+        # When: estimate cost
+        cost = _estimate_cost("gpt-4", 1000, 0, pricing)
+
+        # Then: returns 0.0 (negative guard)
+        assert cost == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Nested model_path extraction
+# ---------------------------------------------------------------------------
+
+
+class TestNestedModelPath:
+    @pytest.mark.asyncio
+    async def test_nested_model_path(self) -> None:
+        # Given: evaluator with nested model_path
+        ev = BudgetEvaluator(
+            BudgetEvaluatorConfig(
+                limits=[{"limit": 1000}],
+                pricing={"gpt-4": {"input_per_1k": 100.0, "output_per_1k": 0.0}},
+                model_path="llm.model_name",
+            )
+        )
+
+        # When: evaluate with nested model structure
+        result = await ev.evaluate(
+            {
+                "llm": {"model_name": "gpt-4"},
+                "usage": {"input_tokens": 500, "output_tokens": 0},
+            }
+        )
+
+        # Then: model resolved correctly, cost computed
+        assert result.metadata is not None
+        assert result.metadata["cost"] == pytest.approx(50.0, abs=0.1)
+
+
+# ---------------------------------------------------------------------------
+# TTL prune tests
+# ---------------------------------------------------------------------------
+
+
+class TestTTLPrune:
+    @pytest.mark.asyncio
+    async def test_ttl_prune_drops_old_period_on_rollover(self) -> None:
+        # Given: store with daily window. Day N, N+1, N+2 timestamps.
+        day_seconds = WINDOW_DAILY
+        day_n = 1700000000.0
+        # Align to exact day boundary
+        day_n = (int(day_n) // day_seconds) * day_seconds
+        day_n1 = day_n + day_seconds
+        day_n2 = day_n + 2 * day_seconds
+
+        rules = [BudgetLimitRule(limit=10_000, window_seconds=day_seconds)]
+        store = InMemoryBudgetStore(clock=lambda: day_n)
+
+        # When: record on day N
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+        )
+        # record on day N+1
+        store._clock = lambda: day_n1
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=2.0
+        )
+        # record on day N+2 -- should prune day N
+        store._clock = lambda: day_n2
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=3.0
+        )
+
+        # Then: only buckets for day N+1 and N+2 remain for that scope
+        with store._lock:
+            period_keys = [k[1] for k in store._buckets]
+
+        day_n_key = _derive_period_key(day_seconds, day_n)
+        day_n1_key = _derive_period_key(day_seconds, day_n1)
+        day_n2_key = _derive_period_key(day_seconds, day_n2)
+
+        assert day_n_key not in period_keys, "Day N bucket should be pruned"
+        assert day_n1_key in period_keys, "Day N+1 bucket must be retained"
+        assert day_n2_key in period_keys, "Day N+2 bucket must be retained"
+
+    @pytest.mark.asyncio
+    async def test_ttl_prune_preserves_cumulative_buckets(self) -> None:
+        # Given: store with both cumulative (window=None) and daily rules
+        day_seconds = WINDOW_DAILY
+        day_n = (int(1700000000.0) // day_seconds) * day_seconds
+
+        rules = [
+            BudgetLimitRule(limit=10_000),  # cumulative (window_seconds=None)
+            BudgetLimitRule(limit=10_000, window_seconds=day_seconds),
+        ]
+        store = InMemoryBudgetStore(clock=lambda: day_n)
+
+        # When: record on 3 consecutive days
+        for i in range(3):
+            store._clock = lambda i=i: day_n + i * day_seconds
+            await store.record_and_check(
+                rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+            )
+
+        # Then: cumulative bucket (empty period key) must survive
+        with store._lock:
+            period_keys = [k[1] for k in store._buckets]
+
+        assert "" in period_keys, "Cumulative bucket (period_key='') must not be pruned"
+
+    @pytest.mark.asyncio
+    async def test_ttl_prune_preserves_other_windows(self) -> None:
+        # Given: store with hourly and daily rules
+        hour = 3600
+        day = WINDOW_DAILY
+        t0 = (int(1700000000.0) // day) * day  # align to day boundary
+
+        rules = [
+            BudgetLimitRule(limit=10_000, window_seconds=hour),
+            BudgetLimitRule(limit=100_000, window_seconds=day),
+        ]
+        store = InMemoryBudgetStore(clock=lambda: t0)
+
+        # When: roll hours many times (within same day)
+        for h in range(5):
+            store._clock = lambda h=h: t0 + h * hour
+            await store.record_and_check(
+                rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+            )
+
+        # Then: daily bucket must survive hourly rollovers
+        day_key = _derive_period_key(day, t0)
+        with store._lock:
+            period_keys = [k[1] for k in store._buckets]
+
+        assert day_key in period_keys, "Daily bucket must survive hourly rollovers"
+
+        # When: roll day (prune old hourly buckets)
+        t_day2 = t0 + day
+        store._clock = lambda: t_day2
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+        )
+
+        with store._lock:
+            period_keys_after = [k[1] for k in store._buckets]
+
+        # Then: old hour-0 through hour-3 (index < current_hour-1) should be pruned
+        # daily bucket survives (different window)
+        day_key2 = _derive_period_key(day, t_day2)
+        assert day_key2 in period_keys_after or day_key in period_keys_after, (
+            "At least one daily bucket must survive"
+        )
+        # hour 0 key should be gone (it's >1 period behind the new day's hour-0)
+        hour0_key = _derive_period_key(hour, t0)
+        # hour0 is many hours before t_day2's first hour -- must be pruned
+        assert hour0_key not in period_keys_after, "Old hourly buckets should be pruned"
+
+    @pytest.mark.asyncio
+    async def test_ttl_prune_no_rescan_within_period(self) -> None:
+        # Given: store with daily window. After a rollover, subsequent records
+        # within the same new period must NOT trigger another prune scan.
+        day_seconds = WINDOW_DAILY
+        day_n = (int(1700000000.0) // day_seconds) * day_seconds
+        day_n1 = day_n + day_seconds
+
+        rules = [BudgetLimitRule(limit=10_000, window_seconds=day_seconds)]
+        store = InMemoryBudgetStore(clock=lambda: day_n)
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+        )
+
+        # Roll over to day N+1
+        store._clock = lambda: day_n1
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+        )
+
+        # Capture _last_pruned_period state after first record of new period
+        with store._lock:
+            snapshot_index = dict(store._last_pruned_period)
+
+        # When: record many more times within the same new period
+        for _ in range(10):
+            await store.record_and_check(
+                rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+            )
+
+        # Then: _last_pruned_period unchanged (no rescan occurred)
+        with store._lock:
+            after_index = dict(store._last_pruned_period)
+
+        assert after_index == snapshot_index, "Prune scan must not repeat within same period"
+
+    @pytest.mark.asyncio
+    async def test_ttl_prune_sparse_rollover(self) -> None:
+        # Given: daily rule, first record at index 5, then jump to index 100
+        day = WINDOW_DAILY
+        day_n = (int(1700000000.0) // day) * day
+        rules = [BudgetLimitRule(limit=10_000, window_seconds=day)]
+        store = InMemoryBudgetStore(clock=lambda: day_n)
+
+        # When: record at baseline
+        await store.record_and_check(
+            rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+        )
+        # Jump forward ~95 days (any stale indices must be swept in one scan)
+        for i in range(1, 6):
+            store._clock = lambda i=i: day_n + i * day
+            await store.record_and_check(
+                rules=rules, scope={}, input_tokens=0, output_tokens=0, cost=1.0
+            )
+        # Large gap -- should prune everything older than index-1
