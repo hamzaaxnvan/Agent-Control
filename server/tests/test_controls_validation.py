@@ -117,3 +117,122 @@ def test_validation_list_values_reject_blank_strings(client: TestClient):
     response_data = resp.json()
     errors = response_data.get("errors", [])
     assert any("values" in str(e.get("field", "")) for e in errors)
+    assert any("empty or whitespace-only strings" in e.get("message", "") for e in errors)
+
+
+def test_validation_invalid_regex_pattern(client: TestClient):
+    """Test validation of regex pattern syntax."""
+    # Given: a control and regex config with invalid pattern (unclosed bracket)
+    control_id = create_control(client)
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["condition"]["evaluator"] = {
+        "name": "regex",
+        "config": {
+            "pattern": "[", # Invalid regex
+            "flags": []
+        }
+    }
+
+    # When: setting control data
+    resp = client.put(f"/api/v1/controls/{control_id}/data", json={"data": payload})
+
+    # Then: 422 Unprocessable Entity (RFC 7807 format)
+    assert resp.status_code == 422
+
+    response_data = resp.json()
+    errors = response_data.get("errors", [])
+    # Then: error message mentions regex compilation failure
+    assert any("pattern" in str(e.get("field", "")) for e in errors)
+    assert any("Invalid regex pattern" in e.get("message", "") for e in errors)
+
+
+def test_validation_empty_string_path_rejected(client: TestClient):
+    """Test that empty string path is rejected."""
+    # Given: a control and payload with empty string path
+    control_id = create_control(client)
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["condition"]["selector"] = {"path": ""}
+
+    # When: setting control data
+    resp = client.put(f"/api/v1/controls/{control_id}/data", json={"data": payload})
+
+    # Then: 422 Unprocessable Entity (RFC 7807 format)
+    assert resp.status_code == 422
+
+    # Then: error message mentions path
+    response_data = resp.json()
+    errors = response_data.get("errors", [])
+    assert any("path" in str(e.get("field", "")).lower() for e in errors)
+    assert any("empty string" in e.get("message", "") for e in errors)
+
+
+def test_validation_empty_evaluator_name_rejected(client: TestClient):
+    """Test that empty evaluator names are rejected at the request boundary."""
+    control_id = create_control(client)
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["condition"]["evaluator"] = {"name": "", "config": {"pattern": "x"}}
+
+    resp = client.put(f"/api/v1/controls/{control_id}/data", json={"data": payload})
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_code"] == "VALIDATION_ERROR"
+    assert any(
+        "evaluator.name" in str(err.get("field", ""))
+        for err in body.get("errors", [])
+    )
+    assert any(
+        "empty or whitespace-only" in err.get("message", "").lower()
+        for err in body.get("errors", [])
+    )
+
+
+def test_validate_endpoint_whitespace_evaluator_name_rejected(client: TestClient):
+    """Whitespace-only evaluator names are rejected during validate-without-save too."""
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["condition"]["evaluator"] = {"name": "   ", "config": {"pattern": "x"}}
+
+    resp = client.post("/api/v1/controls/validate", json={"data": payload})
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_code"] == "VALIDATION_ERROR"
+    assert any(
+        "evaluator.name" in str(err.get("field", ""))
+        for err in body.get("errors", [])
+    )
+    assert any(
+        "empty or whitespace-only" in err.get("message", "").lower()
+        for err in body.get("errors", [])
+    )
+
+
+def test_get_control_data_rejects_stored_blank_nested_evaluator_name(client: TestClient):
+    """Stored rows are revalidated on read using the same ControlDefinition model."""
+    control_id = create_control(client)
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["condition"] = {
+        "or": [
+            deepcopy(VALID_CONTROL_PAYLOAD["condition"]),
+            {
+                "selector": {"path": "input"},
+                "evaluator": {"name": "   ", "config": {"pattern": "x"}},
+            },
+        ]
+    }
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE controls SET data = CAST(:data AS JSONB) WHERE id = :id"),
+            {"data": json.dumps(payload), "id": control_id},
+        )
+
+    resp = client.get(f"/api/v1/controls/{control_id}/data")
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_code"] == "CORRUPTED_DATA"
+    assert any(
+        err.get("field") == "condition.or[1].evaluator.name"
+        for err in body.get("errors", [])
+    )

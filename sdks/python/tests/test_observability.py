@@ -383,3 +383,389 @@ class TestEventBatcherAddEvent:
 
     def test_add_event_drops_when_queue_full(self):
         """Test that events are dropped when queue is full."""
+        batcher = EventBatcher(batch_size=10)  # Max queue = 10 * 10 = 100
+
+        # Add more than max events
+        for i in range(105):
+            batcher.add_event(create_mock_event())
+
+        assert len(batcher._events) == 100
+        assert batcher._events_dropped == 5
+
+    def test_add_event_thread_safe(self):
+        """Test that add_event is thread-safe."""
+        import threading
+
+        batcher = EventBatcher(batch_size=100)
+        results = []
+
+        def add_events():
+            for _ in range(50):
+                result = batcher.add_event(create_mock_event())
+                results.append(result)
+
+        threads = [threading.Thread(target=add_events) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # All 200 events should be added (batch_size=100 means max=1000)
+        assert len(batcher._events) == 200
+        assert all(results)
+
+
+class TestEventBatcherStats:
+    """Tests for EventBatcher statistics."""
+
+    def test_get_stats_initial(self):
+        """Test getting stats from new batcher."""
+        batcher = EventBatcher()
+        stats = batcher.get_stats()
+
+        assert stats["events_sent"] == 0
+        assert stats["events_dropped"] == 0
+        assert stats["events_pending"] == 0
+        assert stats["flush_count"] == 0
+        assert stats["running"] is False
+
+    def test_get_stats_with_events(self):
+        """Test getting stats after adding events."""
+        batcher = EventBatcher()
+        for _ in range(5):
+            batcher.add_event(create_mock_event())
+
+        stats = batcher.get_stats()
+        assert stats["events_pending"] == 5
+
+    def test_get_stats_after_start(self):
+        """Test getting stats after starting batcher."""
+        batcher = EventBatcher()
+        batcher.start()
+
+        stats = batcher.get_stats()
+        assert stats["running"] is True
+
+        batcher.stop()
+
+
+class TestEventBatcherFlush:
+    """Tests for EventBatcher flush operations."""
+
+    @pytest.mark.asyncio
+    async def test_flush_empty_queue(self):
+        """Test flushing an empty queue does nothing."""
+        batcher = EventBatcher()
+        await batcher._flush()
+        assert batcher._flush_count == 0
+
+    @pytest.mark.asyncio
+    async def test_flush_sends_events(self):
+        """Test that flush sends events to server."""
+        batcher = EventBatcher()
+        for _ in range(3):
+            batcher.add_event(create_mock_event())
+
+        # Mock the _send_batch method
+        batcher._send_batch = AsyncMock(return_value=True)
+
+        await batcher._flush()
+
+        assert batcher._send_batch.called
+        assert batcher._events_sent == 3
+        assert len(batcher._events) == 0
+
+    @pytest.mark.asyncio
+    async def test_flush_requeues_on_failure(self):
+        """Test that flush requeues events on send failure."""
+        batcher = EventBatcher()
+        for _ in range(3):
+            batcher.add_event(create_mock_event())
+
+        # Mock the _send_batch method to fail
+        batcher._send_batch = AsyncMock(return_value=False)
+
+        await batcher._flush()
+
+        # Events should be requeued
+        assert len(batcher._events) == 3
+        assert batcher._events_sent == 0
+
+    @pytest.mark.asyncio
+    async def test_flush_all_empties_queue(self):
+        """Test that flush_all empties the entire queue."""
+        batcher = EventBatcher(batch_size=2)
+        for _ in range(5):
+            batcher.add_event(create_mock_event())
+
+        batcher._send_batch = AsyncMock(return_value=True)
+
+        await batcher.flush_all()
+
+        assert len(batcher._events) == 0
+        assert batcher._events_sent == 5
+
+    @pytest.mark.asyncio
+    async def test_flush_all_stops_after_failed_flush_limit(self):
+        """Test that flush_all exits after configured consecutive flush failures."""
+        batcher = EventBatcher(batch_size=2)
+        for _ in range(3):
+            batcher.add_event(create_mock_event())
+
+        batcher._send_batch = AsyncMock(return_value=False)
+
+        await batcher.flush_all(max_failed_flushes=2)
+
+        assert batcher._send_batch.await_count == 2
+        assert len(batcher._events) == 3
+
+    @pytest.mark.asyncio
+    async def test_flush_all_rejects_invalid_failed_flush_limit(self):
+        """Test that flush_all validates max_failed_flushes."""
+        batcher = EventBatcher()
+        with pytest.raises(ValueError, match="max_failed_flushes must be >= 1"):
+            await batcher.flush_all(max_failed_flushes=0)
+
+
+class TestEventBatcherSendBatch:
+    """Tests for EventBatcher HTTP batch sending."""
+
+    @pytest.mark.asyncio
+    async def test_send_batch_without_httpx(self):
+        """Test that send_batch handles missing httpx gracefully."""
+        batcher = EventBatcher()
+        events = [create_mock_event()]
+
+        with patch.dict("sys.modules", {"httpx": None}):
+            # This should not raise, just return False
+            result = await batcher._send_batch(events)
+            # Can't easily test this without breaking httpx import
+            # Just verify the method exists and runs
+            assert isinstance(result, bool)
+
+
+class TestEventBatcherSendBatchSync:
+    """Tests for sync HTTP sending used during shutdown fallback."""
+
+    def test_send_batch_sync_returns_true_on_202(self):
+        batcher = EventBatcher(server_url="http://test:8000", api_key="test-key")
+        response = MagicMock(status_code=202, text="accepted")
+        client = MagicMock()
+        client.post.return_value = response
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+
+        with patch(
+            "agent_control.observability.httpx.Client",
+            return_value=client_context,
+        ) as client_ctor:
+            result = batcher._send_batch_sync([create_mock_event()])
+
+        assert result is True
+        client_ctor.assert_called_once_with(timeout=30.0)
+        client.post.assert_called_once()
+        assert client.post.call_args.kwargs["headers"]["X-API-Key"] == "test-key"
+
+    def test_send_batch_sync_uses_configured_api_key_header(self):
+        batcher = EventBatcher(
+            server_url="http://test:8000",
+            api_key="test-key",
+            api_key_header="X-Custom-API-Key",
+        )
+        response = MagicMock(status_code=202, text="accepted")
+        client = MagicMock()
+        client.post.return_value = response
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+
+        with patch(
+            "agent_control.observability.httpx.Client",
+            return_value=client_context,
+        ):
+            result = batcher._send_batch_sync([create_mock_event()])
+
+        assert result is True
+        headers = client.post.call_args.kwargs["headers"]
+        assert headers["X-Custom-API-Key"] == "test-key"
+        assert "X-API-Key" not in headers
+
+    def test_build_batch_request_uses_settings_api_key_header(self):
+        original_settings = get_settings().model_dump()
+        try:
+            configure_settings(
+                api_key="settings-key",
+                api_key_header="X-Custom-API-Key",
+            )
+            batcher = EventBatcher()
+
+            _, headers, _ = batcher._build_batch_request([create_mock_event()])
+
+            assert headers["X-Custom-API-Key"] == "settings-key"
+            assert "X-API-Key" not in headers
+        finally:
+            configure_settings(**original_settings)
+
+    def test_send_batch_sync_returns_false_on_401_without_retry(self):
+        batcher = EventBatcher()
+        response = MagicMock(status_code=401, text="unauthorized")
+        client = MagicMock()
+        client.post.return_value = response
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+
+        with patch(
+            "agent_control.observability.httpx.Client",
+            return_value=client_context,
+        ) as client_ctor:
+            result = batcher._send_batch_sync([create_mock_event()])
+
+        assert result is False
+        assert client_ctor.call_count == 1
+        client.post.assert_called_once()
+
+    def test_send_batch_sync_retries_after_server_error_then_succeeds(self):
+        from agent_control.settings import configure_settings
+
+        original = get_settings().model_dump()
+        configure_settings(max_retries=2, retry_delay=0.25)
+        batcher = EventBatcher()
+
+        first = MagicMock(status_code=500, text="server error")
+        second = MagicMock(status_code=202, text="accepted")
+        client = MagicMock()
+        client.post.side_effect = [first, second]
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+
+        try:
+            with (
+                patch(
+                    "agent_control.observability.httpx.Client",
+                    return_value=client_context,
+                ) as client_ctor,
+                patch("agent_control.observability.time.sleep") as sleep_mock,
+            ):
+                result = batcher._send_batch_sync([create_mock_event()])
+
+            assert result is True
+            assert client_ctor.call_count == 2
+            sleep_mock.assert_called_once_with(0.25)
+        finally:
+            configure_settings(**original)
+
+    def test_send_batch_sync_returns_false_when_deadline_already_expired(self):
+        batcher = EventBatcher()
+
+        with (
+            patch("agent_control.observability.httpx.Client") as client_ctor,
+            patch("agent_control.observability.time.monotonic", return_value=2.0),
+        ):
+            result = batcher._send_batch_sync([create_mock_event()], deadline=1.0)
+
+        assert result is False
+        client_ctor.assert_not_called()
+
+    def test_send_batch_sync_returns_false_when_retry_backoff_exceeds_deadline(self):
+        from agent_control.settings import configure_settings
+
+        original = get_settings().model_dump()
+        configure_settings(max_retries=3, retry_delay=0.25)
+        batcher = EventBatcher()
+
+        client = MagicMock()
+        client.post.side_effect = httpx.ConnectError("boom")
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+
+        try:
+            with (
+                patch(
+                    "agent_control.observability.httpx.Client",
+                    return_value=client_context,
+                ) as client_ctor,
+                patch(
+                    "agent_control.observability.time.monotonic",
+                    side_effect=[0.0, 1.1],
+                ),
+                patch("agent_control.observability.time.sleep") as sleep_mock,
+            ):
+                result = batcher._send_batch_sync([create_mock_event()], deadline=1.0)
+
+            assert result is False
+            assert client_ctor.call_count == 1
+            sleep_mock.assert_not_called()
+        finally:
+            configure_settings(**original)
+
+    def test_send_batch_sync_handles_timeout_exception(self):
+        from agent_control.settings import configure_settings
+
+        original = get_settings().model_dump()
+        configure_settings(max_retries=1)
+        batcher = EventBatcher()
+
+        client = MagicMock()
+        client.post.side_effect = httpx.TimeoutException("boom")
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+
+        try:
+            with patch("agent_control.observability.httpx.Client", return_value=client_context):
+                result = batcher._send_batch_sync([create_mock_event()])
+
+            assert result is False
+        finally:
+            configure_settings(**original)
+
+    def test_send_batch_sync_handles_unexpected_exception(self):
+        from agent_control.settings import configure_settings
+
+        original = get_settings().model_dump()
+        configure_settings(max_retries=1)
+        batcher = EventBatcher()
+
+        client = MagicMock()
+        client.post.side_effect = RuntimeError("boom")
+        client_context = MagicMock()
+        client_context.__enter__.return_value = client
+
+        try:
+            with patch("agent_control.observability.httpx.Client", return_value=client_context):
+                result = batcher._send_batch_sync([create_mock_event()])
+
+            assert result is False
+        finally:
+            configure_settings(**original)
+
+
+class TestGlobalBatcher:
+    """Tests for global batcher functions."""
+
+    def test_get_event_batcher_not_initialized(self):
+        """Test get_event_batcher returns None when not initialized."""
+        import agent_control.observability as obs
+
+        old_batcher = obs._batcher
+        old_sink = obs._event_sink
+        old_external_sinks = obs.get_registered_control_event_sinks()
+        reset_observability_state()
+
+        try:
+            assert get_event_batcher() is None
+        finally:
+            obs._batcher = old_batcher
+            obs._event_sink = old_sink
+            for sink in old_external_sinks:
+                register_control_event_sink(sink)
+
+    def test_get_event_sink_not_initialized(self):
+        """Test get_event_sink returns None when not initialized."""
+        import agent_control.observability as obs
+        old_batcher = obs._batcher
+        old_sink = obs._event_sink
+        old_external_sinks = obs.get_registered_control_event_sinks()
+        reset_observability_state()
+
+        try:
+            assert get_event_sink() is None
+        finally:

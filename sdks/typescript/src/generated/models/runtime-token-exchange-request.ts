@@ -8,35 +8,3 @@ import { remap as remap$ } from "../lib/primitives.js";
 /**
  * Body for the runtime token exchange endpoint.
  */
-export type RuntimeTokenExchangeRequest = {
-  /**
-   * Opaque target identifier.
-   */
-  targetId: string;
-  /**
-   * Opaque target kind (e.g., ``session``).
-   */
-  targetType: string;
-};
-
-/** @internal */
-export type RuntimeTokenExchangeRequest$Outbound = {
-  target_id: string;
-  target_type: string;
-};
-
-/** @internal */
-export const RuntimeTokenExchangeRequest$outboundSchema: z.ZodMiniType<
-  RuntimeTokenExchangeRequest$Outbound,
-  RuntimeTokenExchangeRequest
-> = z.pipe(
-  z.object({
-    targetId: z.string(),
-    targetType: z.string(),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
-      targetId: "target_id",
-      targetType: "target_type",
-    });
-  }),
