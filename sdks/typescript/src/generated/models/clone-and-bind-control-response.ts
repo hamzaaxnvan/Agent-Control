@@ -28,3 +28,18 @@ export type CloneAndBindControlResponse = {
   /**
    * Name of the cloned control.
    */
+  name: string;
+};
+
+/** @internal */
+export const CloneAndBindControlResponse$inboundSchema: z.ZodMiniType<
+  CloneAndBindControlResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    binding_id: types.number(),
+    cloned_from_control_id: types.number(),
+    id: types.number(),
+    name: types.string(),
+  }),
+  z.transform((v) => {
