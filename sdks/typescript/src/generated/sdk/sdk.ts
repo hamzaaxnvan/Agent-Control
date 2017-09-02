@@ -34,15 +34,3 @@ export class AgentControlSDK extends ClientSDK {
     return (this._controlBindings ??= new ControlBindings(this._options));
   }
 
-  private _controls?: Controls;
-  get controls(): Controls {
-    return (this._controls ??= new Controls(this._options));
-  }
-
-  private _evaluation?: Evaluation;
-  get evaluation(): Evaluation {
-    return (this._evaluation ??= new Evaluation(this._options));
-  }
-
-  private _evaluators?: Evaluators;
-  get evaluators(): Evaluators {
