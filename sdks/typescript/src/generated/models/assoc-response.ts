@@ -11,3 +11,17 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 export type AssocResponse = {
   /**
    * Whether the association change succeeded
+   */
+  success: boolean;
+};
+
+/** @internal */
+export const AssocResponse$inboundSchema: z.ZodMiniType<
+  AssocResponse,
+  unknown
+> = z.object({
+  success: types.boolean(),
+});
+
+export function assocResponseFromJSON(
+  jsonString: string,
