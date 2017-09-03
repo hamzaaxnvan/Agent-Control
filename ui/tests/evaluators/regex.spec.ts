@@ -23,11 +23,3 @@ test.describe('Regex Evaluator', () => {
 
     // Default pattern should be ^.*$
     const patternInput = mockedPage.getByPlaceholder(
-      'Enter regex pattern (e.g., ^.*$)'
-    );
-    await expect(patternInput).toHaveValue('^.*$');
-  });
-
-  test('can edit pattern field', async ({ mockedPage }) => {
-    await openEvaluatorForm(mockedPage, 'Regex');
-
