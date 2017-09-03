@@ -416,3 +416,421 @@ def refresh_controls() -> list[dict[str, Any]] | None:
         List of control dicts or None if fetch failed.
 
     Example:
+        # After updating a control in the UI
+        controls = agent_control.refresh_controls()
+        print(f"Refreshed {len(controls)} controls")
+    """
+    try:
+        asyncio.get_running_loop()
+        # We're in an async context - run in thread
+        result_container: list[list[dict[str, Any]] | None] = [None]
+        exception_container: list[Exception | None] = [None]
+
+        def run_in_thread() -> None:
+            try:
+                result_container[0] = _run_coro_in_new_loop(refresh_controls_async())
+            except Exception as e:
+                exception_container[0] = e
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        thread.start()
+        thread.join(timeout=10)
+
+        if exception_container[0]:
+            raise exception_container[0]
+        return result_container[0]
+
+    except RuntimeError:
+        # No running event loop - we're in a sync context
+        return _run_coro_in_new_loop(refresh_controls_async())
+
+
+# ============================================================================
+# Public API Functions
+# ============================================================================
+
+def init(
+    agent_name: str,
+    agent_description: str | None = None,
+    agent_version: str | None = None,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+    controls_file: str | None = None,
+    steps: list[StepSchemaDict] | None = None,
+    conflict_mode: Literal["strict", "overwrite"] = "overwrite",
+    observability_enabled: bool | None = None,
+    observability_sink_name: str | None = None,
+    observability_sink_config: JSONObject | None = None,
+    log_config: dict[str, Any] | None = None,
+    policy_refresh_interval_seconds: int = 60,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    runtime_token_header: str | None = None,
+    otel_tracer_provider: TracerProvider | None = None,
+    **kwargs: object
+) -> Agent:
+    """
+    Initialize Agent Control with your agent's information.
+
+    This function should be called once at the base of your agent file.
+    It will:
+    1. Create an Agent instance with your metadata
+    2. Register with the Agent Control server via /initAgent endpoint
+    3. Fetch controls from the server
+    4. Auto-discover and load local controls.yaml as fallback
+    5. Enable the @control decorator
+
+    Target context (``target_type`` and ``target_id``) is fixed for the
+    lifetime of the SDK session: it is sent on the registration call and
+    on every subsequent refresh of ``GET /agents/{name}/controls``. The
+    server returns the merged effective set (direct attachments,
+    policy-derived controls, and bindings for the supplied target). The
+    SDK does not support switching target context per-request; re-init to
+    change it.
+
+    Args:
+        agent_name: Unique identifier for your agent (will be normalized to lowercase)
+        agent_description: Optional description of what your agent does
+        agent_version: Optional version string (e.g., "1.0.0")
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var
+                   or http://localhost:8000)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+        api_key_header: Optional HTTP header name for API key authentication
+            (defaults to AGENT_CONTROL_API_KEY_HEADER env var or X-API-Key)
+        controls_file: Optional explicit path to controls.yaml (auto-discovered if not provided)
+        steps: Optional list of step schemas for registration:
+               [{"type": "tool", "name": "search", "input_schema": {...}, "output_schema": {...}}]
+        conflict_mode: Conflict handling mode for initAgent registration.
+            Defaults to "overwrite" in SDK flows.
+        observability_enabled: Optional bool to enable/disable observability (defaults to env var)
+        observability_sink_name: Optional sink selection name. Use "default" to preserve
+            SDK -> server delivery or "registered" / a named sink factory for custom sinks.
+        observability_sink_config: Optional JSON config payload for the selected sink.
+        log_config: Optional logging configuration dict:
+               {"enabled": True, "span_start": True, "span_end": True, "control_eval": True}
+        policy_refresh_interval_seconds: Interval for background policy refresh loop.
+            Defaults to 60 seconds. Set to 0 to disable background refresh.
+        target_type: Optional opaque target kind. Required iff target_id is
+            also supplied. The server merges target-bound controls into the
+            returned set when both are present.
+        target_id: Optional opaque target identifier. Required iff target_type
+            is also supplied.
+        runtime_token_header: Optional HTTP header the runtime token is sent on
+            for evaluation requests (defaults to AGENT_CONTROL_RUNTIME_TOKEN_HEADER
+            env var or Authorization). Point this at a dedicated header (e.g.
+            X-Agent-Control-Runtime-Token) when the server runs behind a gateway
+            that reserves Authorization for its own identity JWT. The server must
+            be configured to read the same header.
+        otel_tracer_provider: Optional application-owned OpenTelemetry SDK provider.
+            Used only when observability_sink_name is ``"otel"``. If omitted,
+            the OTEL sink reuses a globally registered SDK provider when available,
+            otherwise it creates and owns a provider as before.
+        **kwargs: Additional metadata to store with the agent
+
+    Returns:
+        Agent instance with all metadata
+
+    Example:
+        import agent_control
+
+        agent_control.init(
+            agent_name="customer-service-bot",
+            agent_description="Handles customer inquiries and support tickets",
+            agent_version="2.1.0",
+            steps=[
+                {
+                    "type": "tool",
+                    "name": "search_knowledge_base",
+                    "input_schema": {"query": {"type": "string"}},
+                    "output_schema": {"results": {"type": "array"}}
+                }
+            ]
+        )
+
+        # Now use @control decorator to apply the agent's policy
+        from agent_control import control
+
+        @control()  # Applies agent's assigned policy
+        async def handle(message: str):
+            return message
+
+    Environment Variables:
+        AGENT_CONTROL_URL: Server URL (default: http://localhost:8000)
+    """
+    if not agent_name:
+        raise ValueError(
+            "The 'agent_name' argument is required for initialization.\n"
+            "Please provide a valid agent identifier, e.g.:\n"
+            '    agent_control.init(agent_name="customer-service-bot")'
+        )
+
+    # Validate and normalize agent_name
+    _agent_name = ensure_agent_name(agent_name)
+
+    if policy_refresh_interval_seconds < 0:
+        raise ValueError("policy_refresh_interval_seconds must be >= 0")
+
+    if (target_type is None) != (target_id is None):
+        raise ValueError(
+            "target_type and target_id must be supplied together."
+        )
+    # Validate the runtime-token header up front, before stopping the refresh
+    # loop or mutating shared session state. An explicit blank or a
+    # syntactically-invalid header must fail here rather than on the first
+    # later evaluation. (A None/unset value is fine; AgentControlClient resolves
+    # the env-var fallback and default when the eval client is built.)
+    if runtime_token_header is not None:
+        if not runtime_token_header.strip():
+            raise ValueError("runtime_token_header must not be blank.")
+        validate_http_field_name(runtime_token_header.strip())
+
+    resolved_api_key_header = (
+        api_key_header
+        or os.getenv(AgentControlClient.API_KEY_HEADER_ENV_VAR)
+        or AgentControlClient.DEFAULT_API_KEY_HEADER
+    )
+
+    # Re-init behavior: always stop the existing refresh loop before mutating
+    # shared agent/session globals.
+    _stop_policy_refresh_loop()
+
+    # Configure logging if provided (do this early before any logging happens)
+    if log_config:
+        configure_logging(log_config)
+
+    # Create agent instance with metadata and store in state
+    next_agent = Agent(
+        agent_name=_agent_name,
+        agent_description=agent_description,
+        agent_created_at=datetime.now(UTC).isoformat(),
+        agent_updated_at=None,
+        agent_version=agent_version,
+        agent_metadata=kwargs
+    )
+
+    # Bump the session generation before mutating connection state so any
+    # in-flight manual refresh from a previous session is discarded on return.
+    global _session_generation
+    with _session_lock:
+        _session_generation += 1
+        state.current_agent = next_agent
+        state.server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+        state.api_key = api_key
+        state.api_key_header = resolved_api_key_header
+        # Stored raw (may be None); AgentControlClient resolves the env-var
+        # fallback and blank-handling so the rule stays in one place.
+        state.runtime_token_header = runtime_token_header
+        state.runtime_token_cache.clear()
+        state.target_type = target_type
+        state.target_id = target_id
+
+    # Merge auto-discovered steps from @control() decorators with explicit steps.
+    # Explicit steps take precedence when (type, name) collides.
+    auto_steps = get_registered_steps()
+    merge_result = merge_explicit_and_auto_steps(steps, auto_steps)
+    registration_steps: list[dict[str, Any]] = [dict(step) for step in merge_result.steps]
+
+    if auto_steps:
+        if merge_result.overridden_keys:
+            formatted = ", ".join(
+                f"{step_type}:{step_name}" for step_type, step_name in merge_result.overridden_keys
+            )
+            logger.warning(
+                "Skipping %d auto-discovered step(s) overridden by explicit steps: %s",
+                len(merge_result.overridden_keys),
+                formatted,
+            )
+
+        logger.debug(
+            "Auto-discovered %d step(s) from @control() decorators (%d after merge)",
+            len(auto_steps),
+            len(registration_steps),
+        )
+
+    # Register with server and fetch controls
+    server_controls = None
+    try:
+        async def register() -> list[dict[str, Any]] | None:
+            # Type assertions for mypy - these values are guaranteed to be set above
+            assert state.server_url is not None
+            assert state.current_agent is not None
+
+            async with AgentControlClient(
+                base_url=state.server_url,
+                api_key=state.api_key,
+                api_key_header=state.api_key_header,
+            ) as client:
+                # Check server health first
+                try:
+                    health = await client.health_check()
+                    logger.info("Connected to Agent Control server: %s", state.server_url)
+                    logger.debug("Server status: %s", health.get('status', 'unknown'))
+                except Exception as e:
+                    logger.error("Server not available: %s", e, exc_info=True)
+                    return None
+
+                # Register agent with steps
+                try:
+                    response = await agents.register_agent(
+                        client,
+                        state.current_agent,
+                        steps=registration_steps,
+                        conflict_mode=conflict_mode,
+                        target_type=state.target_type,
+                        target_id=state.target_id,
+                    )
+                    created = response.get('created', False)
+                    controls: list[dict[str, Any]] = response.get('controls', [])
+
+                    if created:
+                        logger.info("Agent registered: %s", _agent_name)
+                    else:
+                        logger.info("Agent updated: %s", _agent_name)
+
+                    if registration_steps:
+                        logger.debug("Registered %d step(s)", len(registration_steps))
+
+                    return controls
+                except httpx.HTTPStatusError:
+                    # Surface API errors like name conflicts
+                    raise
+                except Exception as e:
+                    logger.error("Failed to register agent: %s", e, exc_info=True)
+                    return None
+
+        # Run registration - handle both sync and async contexts
+        try:
+            # Check if we're already in an event loop
+            asyncio.get_running_loop()
+            # We're in an async context - schedule the coroutine
+            result_container: list[list[dict[str, Any]] | None] = [None]
+            exception_container: list[Exception | None] = [None]
+
+            def run_in_thread() -> None:
+                try:
+                    result_container[0] = _run_coro_in_new_loop(register())
+                except Exception as e:
+                    exception_container[0] = e
+
+            thread = threading.Thread(target=run_in_thread, daemon=True)
+            thread.start()
+            thread.join(timeout=10)  # 10 second timeout
+
+            if exception_container[0]:
+                raise exception_container[0]
+            server_controls = result_container[0]
+
+        except RuntimeError:
+            # No running event loop - we're in a sync context
+            server_controls = _run_coro_in_new_loop(register())
+
+    except httpx.HTTPStatusError:
+        # Surface server-side errors (e.g., 409 conflicts)
+        raise
+    except Exception as e:
+        logger.error("Could not connect to server: %s", e, exc_info=True)
+        logger.info("Will use local controls if available")
+
+    # Store server controls globally for later use by @control decorator.
+    published_controls = _publish_server_controls(server_controls)
+    if published_controls:
+        logger.info("Loaded %d control(s) from server", len(published_controls))
+    else:
+        logger.debug(
+            "No controls returned from server "
+            "(use local controls.yaml or @control decorator)"
+        )
+
+    # Initialize observability if enabled
+    batcher = init_observability(
+        server_url=state.server_url,
+        api_key=state.api_key,
+        api_key_header=state.api_key_header,
+        enabled=observability_enabled,
+        sink_name=observability_sink_name,
+        sink_config=observability_sink_config,
+        otel_tracer_provider=otel_tracer_provider,
+    )
+    if batcher:
+        logger.info("Observability enabled")
+
+    if policy_refresh_interval_seconds > 0:
+        _start_policy_refresh_loop(policy_refresh_interval_seconds)
+    else:
+        logger.debug("Policy refresh loop disabled (policy_refresh_interval_seconds=0)")
+
+    return state.current_agent
+
+
+# ============================================================================
+# Shutdown
+# ============================================================================
+
+
+def _reset_state() -> None:
+    """Clear all global SDK state."""
+    global _session_generation
+
+    with _session_lock:
+        _session_generation += 1
+        state.current_agent = None
+        state.control_engine = None
+        state.server_controls = None
+        state.server_url = None
+        state.api_key = None
+        state.api_key_header = None
+        state.runtime_token_header = None
+        state.runtime_token_cache.clear()
+        state.target_type = None
+        state.target_id = None
+
+
+async def ashutdown() -> None:
+    """Shut down the SDK and release all background resources.
+
+    Flushes pending observability events, stops the policy refresh loop,
+    and resets global state.  Idempotent - safe to call multiple times.
+
+    Use this from async code.  For sync code use :func:`shutdown`.
+    """
+    await asyncio.to_thread(_stop_policy_refresh_loop)
+    await shutdown_observability()
+    _reset_state()
+    logger.info("Agent Control SDK shut down")
+
+
+def shutdown() -> None:
+    """Shut down the SDK and release all background resources.
+
+    Flushes pending observability events, stops the policy refresh loop,
+    and resets global state.  Idempotent - safe to call multiple times.
+
+    Use this from sync code.  For async code use :func:`ashutdown`.
+    """
+    _stop_policy_refresh_loop()
+    sync_shutdown_observability()
+    _reset_state()
+    logger.info("Agent Control SDK shut down")
+
+
+async def get_agent(
+    agent_name: str,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Get agent details from the server by name.
+
+    Args:
+        agent_name: Agent identifier
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - agent: Agent metadata
+            - steps: List of steps registered with the agent
+
+    Raises:
+        httpx.HTTPError: If request fails or agent not found

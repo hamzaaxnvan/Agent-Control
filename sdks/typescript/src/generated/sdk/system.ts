@@ -50,20 +50,3 @@ export class System extends ClientSDK {
     ));
   }
 
-  /**
-   * Logout (clear session cookie)
-   *
-   * @remarks
-   * Clear the session cookie.
-   */
-  async logoutApi(
-    options?: RequestOptions,
-  ): Promise<void> {
-    return unwrapAsync(systemLogoutApi(
-      this,
-      options,
-    ));
-  }
-
-  /**
-   * Health check
