@@ -440,3 +440,224 @@ class TestAsFloatOrNone:
     def test_returns_float_for_string_number(self):
         from agent_control_evaluator_galileo.llm.client import _as_float_or_none
 
+        assert _as_float_or_none("0.42") == 0.42
+
+    def test_returns_none_for_unparseable_string(self):
+        from agent_control_evaluator_galileo.llm.client import _as_float_or_none
+
+        assert _as_float_or_none("not-a-number") is None
+
+    def test_returns_none_for_other_types(self):
+        from agent_control_evaluator_galileo.llm.client import _as_float_or_none
+
+        assert _as_float_or_none([1, 2]) is None
+
+
+class TestHasValue:
+    """``_has_value`` is the "is this scorable" predicate."""
+
+    def test_none_is_empty(self):
+        from agent_control_evaluator_galileo.llm.client import _has_value
+
+        assert _has_value(None) is False
+
+    def test_empty_string_is_empty(self):
+        from agent_control_evaluator_galileo.llm.client import _has_value
+
+        assert _has_value("") is False
+        assert _has_value("   ") is False
+
+    def test_non_empty_string_has_value(self):
+        from agent_control_evaluator_galileo.llm.client import _has_value
+
+        assert _has_value("hi") is True
+
+    def test_empty_list_or_dict_is_empty(self):
+        from agent_control_evaluator_galileo.llm.client import _has_value
+
+        assert _has_value([]) is False
+        assert _has_value({}) is False
+
+    def test_non_empty_list_or_dict_has_value(self):
+        from agent_control_evaluator_galileo.llm.client import _has_value
+
+        assert _has_value([1]) is True
+        assert _has_value({"k": "v"}) is True
+
+    def test_scalar_other_types_have_value(self):
+        from agent_control_evaluator_galileo.llm.client import _has_value
+
+        assert _has_value(42) is True
+        assert _has_value(0) is True
+        assert _has_value(True) is True
+
+
+class TestEffectiveScorerTimeout:
+    """``_effective_scorer_timeout`` applies 80% server timeout by default."""
+
+    def test_defaults_to_80_percent_of_http_timeout(self):
+        from agent_control_evaluator_galileo.llm.client import (
+            ScorerInvokeConfig,
+            _effective_scorer_timeout,
+        )
+
+        config = _effective_scorer_timeout(ScorerInvokeConfig(), http_timeout_seconds=10.0)
+        assert config.request_timeout_seconds == pytest.approx(8.0)
+
+    def test_explicit_server_timeout_preserved_when_shorter(self):
+        from agent_control_evaluator_galileo.llm.client import (
+            ScorerInvokeConfig,
+            _effective_scorer_timeout,
+        )
+
+        config = _effective_scorer_timeout(
+            ScorerInvokeConfig(request_timeout_seconds=5.0), http_timeout_seconds=10.0
+        )
+        assert config.request_timeout_seconds == 5.0
+
+    def test_explicit_server_timeout_equal_to_http_raises(self):
+        from agent_control_evaluator_galileo.llm.client import (
+            ScorerInvokeConfig,
+            _effective_scorer_timeout,
+        )
+
+        with pytest.raises(ValueError, match="shorter than the HTTP timeout"):
+            _effective_scorer_timeout(
+                ScorerInvokeConfig(request_timeout_seconds=10.0), http_timeout_seconds=10.0
+            )
+
+    def test_zero_http_timeout_raises(self):
+        from agent_control_evaluator_galileo.llm.client import (
+            ScorerInvokeConfig,
+            _effective_scorer_timeout,
+        )
+
+        with pytest.raises(ValueError, match="greater than 0"):
+            _effective_scorer_timeout(ScorerInvokeConfig(), http_timeout_seconds=0.0)
+
+
+class TestLoadFloatEnv:
+    """``_load_float_env`` reads float env vars with a default."""
+
+    def test_returns_default_when_unset(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_float_env
+
+        monkeypatch.delenv("TEST_FLOAT_ENV", raising=False)
+        assert _load_float_env("TEST_FLOAT_ENV", 3.14) == 3.14
+
+    def test_returns_default_when_blank(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_float_env
+
+        monkeypatch.setenv("TEST_FLOAT_ENV", "  ")
+        assert _load_float_env("TEST_FLOAT_ENV", 3.14) == 3.14
+
+    def test_parses_valid_float(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_float_env
+
+        monkeypatch.setenv("TEST_FLOAT_ENV", "2.5")
+        assert _load_float_env("TEST_FLOAT_ENV", 1.0) == 2.5
+
+    def test_raises_on_invalid(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_float_env
+
+        monkeypatch.setenv("TEST_FLOAT_ENV", "not-a-float")
+        with pytest.raises(ValueError, match="not a number"):
+            _load_float_env("TEST_FLOAT_ENV", 1.0)
+
+
+class TestLoadIntEnv:
+    """``_load_int_env`` reads integer env vars with a default."""
+
+    def test_returns_default_when_unset(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_int_env
+
+        monkeypatch.delenv("TEST_INT_ENV", raising=False)
+        assert _load_int_env("TEST_INT_ENV", 42) == 42
+
+    def test_returns_default_when_blank(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_int_env
+
+        monkeypatch.setenv("TEST_INT_ENV", "  ")
+        assert _load_int_env("TEST_INT_ENV", 42) == 42
+
+    def test_parses_valid_int(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_int_env
+
+        monkeypatch.setenv("TEST_INT_ENV", "10")
+        assert _load_int_env("TEST_INT_ENV", 1) == 10
+
+    def test_raises_on_invalid(self, monkeypatch):
+        from agent_control_evaluator_galileo.llm.client import _load_int_env
+
+        monkeypatch.setenv("TEST_INT_ENV", "not-an-int")
+        with pytest.raises(ValueError, match="not an integer"):
+            _load_int_env("TEST_INT_ENV", 1)
+
+
+class TestValidateConnectionConfig:
+    """``_validate_connection_config`` rejects invalid tuning parameters."""
+
+    def _valid(self):
+        return {
+            "keepalive_expiry_seconds": 1.0,
+            "max_connections": 100,
+            "max_keepalive_connections": 20,
+            "client_pool_size": 1,
+        }
+
+    def test_negative_keepalive_raises(self):
+        from agent_control_evaluator_galileo.llm.client import _validate_connection_config
+
+        cfg = {**self._valid(), "keepalive_expiry_seconds": -1.0}
+        with pytest.raises(ValueError, match="greater than or equal to 0"):
+            _validate_connection_config(**cfg)
+
+    def test_zero_max_connections_raises(self):
+        from agent_control_evaluator_galileo.llm.client import _validate_connection_config
+
+        cfg = {**self._valid(), "max_connections": 0}
+        with pytest.raises(ValueError, match="greater than 0"):
+            _validate_connection_config(**cfg)
+
+    def test_negative_max_keepalive_raises(self):
+        from agent_control_evaluator_galileo.llm.client import _validate_connection_config
+
+        cfg = {**self._valid(), "max_keepalive_connections": -1}
+        with pytest.raises(ValueError, match="greater than or equal to 0"):
+            _validate_connection_config(**cfg)
+
+    def test_keepalive_exceeds_connections_raises(self):
+        from agent_control_evaluator_galileo.llm.client import _validate_connection_config
+
+        cfg = {**self._valid(), "max_connections": 5, "max_keepalive_connections": 10}
+        with pytest.raises(ValueError, match="less than or equal to"):
+            _validate_connection_config(**cfg)
+
+    def test_zero_pool_size_raises(self):
+        from agent_control_evaluator_galileo.llm.client import _validate_connection_config
+
+        cfg = {**self._valid(), "client_pool_size": 0}
+        with pytest.raises(ValueError, match="greater than 0"):
+            _validate_connection_config(**cfg)
+
+
+class TestScorerInvokeRequestValidation:
+    """``ScorerInvokeRequest`` rejects malformed input combos."""
+
+    def test_missing_scorer_id_raises(self):
+        from agent_control_evaluator_galileo.llm.client import (
+            GalileoExecutionContext,
+            ScorerInvokeRequest,
+        )
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="scorer_id"):
+            ScorerInvokeRequest(
+                execution_context=GalileoExecutionContext(organization_id="org-1")
+            )
+
+
+def test_client_raises_when_no_api_secret(monkeypatch):
+    """The client requires GALILEO_API_SECRET_KEY or GALILEO_API_SECRET."""
+    for name in ("GALILEO_API_SECRET_KEY", "GALILEO_API_SECRET"):
+        monkeypatch.delenv(name, raising=False)

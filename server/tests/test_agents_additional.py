@@ -279,3 +279,285 @@ def test_patch_agent_remove_evaluator_in_use_conflict(client: TestClient) -> Non
         "name": f"{agent_name}:custom",
         "config": {"pattern": "x"},
     }
+    control_id = _create_control_with_data(client, control_payload)
+
+    policy_id = _create_policy(client)
+    assoc = client.post(f"/api/v1/policies/{policy_id}/controls/{control_id}")
+    assert assoc.status_code == 200
+    assign = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+    assert assign.status_code == 200
+
+    # When: attempting to remove evaluator in use
+    resp = client.patch(
+        f"/api/v1/agents/{agent_name}",
+        json={"remove_evaluators": ["custom"]},
+    )
+
+    # Then: conflict
+    assert resp.status_code == 409
+    assert resp.json()["error_code"] == "EVALUATOR_IN_USE"
+
+
+def test_set_agent_policy_incompatible_controls(client: TestClient) -> None:
+    # Given: a policy with a control referencing an evaluator from Agent A
+    evaluators = [
+        {
+            "name": "custom",
+            "description": "custom",
+            "config_schema": {"type": "object", "properties": {}, "additionalProperties": True},
+        }
+    ]
+    agent_a_id, agent_a_name = _init_agent(client, evaluators=evaluators)
+
+    control_payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    control_payload["condition"]["evaluator"] = {
+        "name": f"{agent_a_name}:custom",
+        "config": {},
+    }
+    control_id = _create_control_with_data(client, control_payload)
+
+    policy_id = _create_policy(client)
+    assoc = client.post(f"/api/v1/policies/{policy_id}/controls/{control_id}")
+    assert assoc.status_code == 200
+
+    # Given: a different agent B without that evaluator
+    agent_b_id, _ = _init_agent(client)
+
+    # When: assigning policy to agent B
+    resp = client.post(f"/api/v1/agents/{agent_b_id}/policy/{policy_id}")
+
+    # Then: incompatible controls error
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "POLICY_CONTROL_INCOMPATIBLE"
+
+
+def test_init_agent_rejects_builtin_evaluator_name(client: TestClient) -> None:
+    # Given: a payload that registers an evaluator matching a built-in name
+    payload = {
+        "agent": {
+            "agent_name": str(uuid.uuid4()),
+            "agent_name": f"agent-{uuid.uuid4().hex[:12]}",
+            "agent_description": "desc",
+            "agent_version": "1.0",
+        },
+        "steps": [],
+        "evaluators": [
+            {"name": "regex", "description": "conflict", "config_schema": {}},
+        ],
+    }
+
+    # When: initializing the agent
+    resp = client.post("/api/v1/agents/initAgent", json=payload)
+
+    # Then: conflict is returned
+    assert resp.status_code == 409
+    assert resp.json()["error_code"] == "EVALUATOR_NAME_CONFLICT"
+
+
+def test_init_agent_same_name_is_idempotent(client: TestClient) -> None:
+    # Given: an existing agent with a specific name
+    name = f"agent-{uuid.uuid4().hex[:12]}"
+    _init_agent(client, agent_name=name)
+
+    # When: re-registering with the same name
+    payload = {
+        "agent": {
+            "agent_name": name,
+            "agent_description": "desc",
+            "agent_version": "1.0",
+        },
+        "steps": [],
+    }
+    resp = client.post("/api/v1/agents/initAgent", json=payload)
+
+    # Then: request is idempotent
+    assert resp.status_code == 200
+    assert resp.json()["created"] is False
+
+
+def test_init_agent_different_name_creates_new_agent(client: TestClient) -> None:
+    # Given: an existing agent
+    original_name = f"agent-{uuid.uuid4().hex[:12]}"
+    _init_agent(client, agent_name=original_name)
+
+    # When: registering another agent with a different name
+    payload = {
+        "agent": {
+            "agent_name": f"{original_name}-renamed",
+            "agent_description": "desc",
+            "agent_version": "1.0",
+        },
+        "steps": [],
+    }
+    resp = client.post("/api/v1/agents/initAgent", json=payload)
+
+    # Then: a new agent is created
+    assert resp.status_code == 200
+    assert resp.json()["created"] is True
+
+
+def test_list_agent_controls_corrupted_control_data_returns_422(
+    client: TestClient,
+) -> None:
+    # Given: an agent with a policy that includes a control
+    agent_name, _ = _init_agent(client)
+    control_payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    control_payload["condition"]["evaluator"] = {"name": "regex", "config": {"pattern": "x"}}
+    control_id = _create_control_with_data(client, control_payload)
+    policy_id = _create_policy(client)
+    assoc = client.post(f"/api/v1/policies/{policy_id}/controls/{control_id}")
+    assert assoc.status_code == 200
+    assign = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+    assert assign.status_code == 200
+
+    # And: the control data is corrupted in the DB
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE controls SET data = CAST(:data AS JSONB) WHERE id = :id"),
+            {"data": "{\"bad\": \"data\"}", "id": control_id},
+        )
+
+    # When: listing agent controls
+    resp = client.get(f"/api/v1/agents/{agent_name}/controls")
+
+    # Then: corrupted data error is returned
+    assert resp.status_code == 422
+    assert resp.json()["error_code"] == "CORRUPTED_DATA"
+
+
+def test_list_agent_controls_corrupted_unrendered_control_data_returns_422(
+    client: TestClient,
+) -> None:
+    # Given: an agent with a directly associated unrendered template control
+    agent_name, _ = _init_agent(client)
+    control_id = _create_template_control_with_data(client, _unrendered_template_payload())
+    assign = client.post(f"/api/v1/agents/{agent_name}/controls/{control_id}")
+    assert assign.status_code == 200
+
+    # And: the unrendered template data becomes corrupted in the DB
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE controls SET data = CAST(:data AS JSONB) WHERE id = :id"),
+            {"data": "{\"template\": {\"description\": \"bad\"}}", "id": control_id},
+        )
+
+    # When: listing agent controls with the default active-only view
+    resp = client.get(f"/api/v1/agents/{agent_name}/controls")
+
+    # Then: the excluded-by-default corrupted row still fails fast
+    assert resp.status_code == 422
+    assert resp.json()["error_code"] == "CORRUPTED_DATA"
+
+
+def test_list_agents_invalid_cursor_returns_first_page(client: TestClient) -> None:
+    # Given: two agents
+    _init_agent(client, agent_name=f"agent-{uuid.uuid4().hex[:12]}")
+    _init_agent(client, agent_name=f"agent-{uuid.uuid4().hex[:12]}")
+
+    # When: listing agents without cursor
+    resp = client.get("/api/v1/agents")
+    assert resp.status_code == 200
+    base = resp.json()
+
+    # When: listing agents with an invalid cursor
+    resp2 = client.get("/api/v1/agents", params={"cursor": "not-a-uuid"})
+    assert resp2.status_code == 200
+    with_cursor = resp2.json()
+
+    # Then: results match the first page
+    assert with_cursor["agents"] == base["agents"]
+    assert with_cursor["pagination"]["total"] == base["pagination"]["total"]
+
+
+def test_list_agent_evaluators_corrupted_data_returns_empty(client: TestClient) -> None:
+    # Given: an agent with corrupted stored data
+    agent_name, _ = _init_agent(client, evaluators=[{"name": "eval-a", "config_schema": {}}])
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE agents SET data = CAST(:data AS JSONB) WHERE name = :id"),
+            {"data": "{\"bad\": \"data\"}", "id": agent_name},
+        )
+
+    # When: listing evaluator schemas
+    resp = client.get(f"/api/v1/agents/{agent_name}/evaluators")
+
+    # Then: empty list is returned
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["evaluators"] == []
+    assert body["pagination"]["total"] == 0
+
+
+def test_set_agent_policy_rejects_corrupted_agent_data(client: TestClient) -> None:
+    # Given: an agent with corrupted stored data and a policy with a control
+    agent_name, _ = _init_agent(client)
+    policy_id = _create_policy(client)
+    control_id = _create_control_with_data(client, VALID_CONTROL_PAYLOAD)
+    assoc = client.post(f"/api/v1/policies/{policy_id}/controls/{control_id}")
+    assert assoc.status_code == 200
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE agents SET data = CAST(:data AS JSONB) WHERE name = :id"),
+            {"data": json.dumps({"bad": "data"}), "id": agent_name},
+        )
+
+    # When: assigning policy to the agent
+    resp = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+
+    # Then: incompatible controls error is returned
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["error_code"] == "POLICY_CONTROL_INCOMPATIBLE"
+    assert any("corrupted data" in err.get("message", "").lower() for err in body.get("errors", []))
+
+
+def test_set_agent_policy_rejects_missing_agent_evaluator(client: TestClient) -> None:
+    # Given: an agent with no evaluators and a control referencing a missing evaluator
+    agent_name, agent_name = _init_agent(client)
+    policy_id = _create_policy(client)
+    control_id = _create_control_with_data(client, VALID_CONTROL_PAYLOAD)
+    assoc = client.post(f"/api/v1/policies/{policy_id}/controls/{control_id}")
+    assert assoc.status_code == 200
+
+    with engine.begin() as conn:
+        corrupted_payload = deepcopy(VALID_CONTROL_PAYLOAD)
+        corrupted_payload["condition"]["evaluator"] = {
+            "name": f"{agent_name}:missing",
+            "config": {},
+        }
+        conn.execute(
+            text("UPDATE controls SET data = CAST(:data AS JSONB) WHERE id = :id"),
+            {
+                "data": json.dumps(corrupted_payload),
+                "id": control_id,
+            },
+        )
+
+    # When: assigning policy to the agent
+    resp = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+
+    # Then: incompatible controls error is returned
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["error_code"] == "POLICY_CONTROL_INCOMPATIBLE"
+    assert any("not registered" in err.get("message", "").lower() for err in body.get("errors", []))
+
+
+def test_set_agent_policy_rejects_invalid_agent_evaluator_config(client: TestClient) -> None:
+    # Given: an agent with an evaluator schema requiring \"pattern\"
+    agent_name, agent_name = _init_agent(
+        client,
+        evaluators=[
+            {
+                "name": "custom",
+                "description": "custom",
+                "config_schema": {
+                    "type": "object",
+                    "properties": {"pattern": {"type": "string"}},
+                    "required": ["pattern"],
+                },
+            }
+        ],
+    )
+    policy_id = _create_policy(client)

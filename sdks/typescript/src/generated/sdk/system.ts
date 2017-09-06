@@ -32,21 +32,3 @@ export class System extends ClientSDK {
 
   /**
    * Login with API key
-   *
-   * @remarks
-   * Validate an API key and issue a signed JWT session cookie.
-   *
-   * The raw API key is transmitted only in this single request and is never
-   * stored in the cookie.  Subsequent requests authenticate via the JWT.
-   */
-  async loginApi(
-    request: models.LoginRequest,
-    options?: RequestOptions,
-  ): Promise<models.LoginResponse> {
-    return unwrapAsync(systemLoginApi(
-      this,
-      request,
-      options,
-    ));
-  }
-
