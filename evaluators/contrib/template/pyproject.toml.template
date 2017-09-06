@@ -1,0 +1,19 @@
+[project]
+name = "agent-control-evaluator-{{NAME}}"
+version = "0.1.0"
+description = "{{NAME}} evaluators for agent-control"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "{{AUTHOR}}" }]
+dependencies = [
+    "agent-control-evaluators>=<minimum-compatible-version>",
+    "agent-control-models>=<minimum-compatible-version>",
+    # Add your package-specific dependencies here
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
