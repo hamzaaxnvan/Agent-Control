@@ -58,3 +58,64 @@ def get_event_ingestor(request: Request) -> EventIngestor:
     return cast(EventIngestor, ingestor)
 
 
+def get_event_store(request: Request) -> EventStore:
+    """Get the event store from app.state."""
+    store = getattr(request.app.state, "event_store", None)
+    if store is None:
+        raise RuntimeError("EventStore not initialized - check server startup")
+    return cast(EventStore, store)
+
+
+# =============================================================================
+# Event Ingestion
+# =============================================================================
+
+
+@router.post(
+    "/events",
+    status_code=202,
+    response_model=BatchEventsResponse,
+)
+async def ingest_events(
+    request: BatchEventsRequest,
+    ingestor: EventIngestor = Depends(get_event_ingestor),
+    principal: Principal = Depends(require_operation(Operation.OBSERVABILITY_WRITE)),
+) -> BatchEventsResponse:
+    """
+    Ingest batched control execution events.
+
+    Events are stored directly to the database with ~5-20ms latency.
+
+    Args:
+        request: Batch of events to ingest
+        ingestor: Event ingestor (injected)
+
+    Returns:
+        BatchEventsResponse with counts of received/processed/dropped
+    """
+    start_time = time.perf_counter()
+
+    result = await ingestor.ingest(
+        request.events,
+        namespace_key=principal.namespace_key,
+    )
+
+    duration_ms = (time.perf_counter() - start_time) * 1000
+    logger.debug(
+        f"Ingested {result.received} events "
+        f"(processed={result.processed}, dropped={result.dropped}) in {duration_ms:.2f}ms"
+    )
+
+    # Determine status
+    status: Literal["queued", "partial", "failed"]
+    if result.dropped == 0:
+        status = "queued"  # Keep "queued" for API compatibility
+    elif result.processed > 0:
+        status = "partial"
+    else:
+        status = "failed"
+
+    return BatchEventsResponse(
+        received=result.received,
+        enqueued=result.processed,  # Map to "enqueued" for API compatibility
+        dropped=result.dropped,

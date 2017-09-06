@@ -14,3 +14,19 @@ export type JsonEditorCodeMirrorContext = {
   activeEvaluatorId?: string | null;
   steps?: StepSchema[];
 };
+
+export type JsonEditorTextEdit = {
+  offset: number;
+  length: number;
+  newText: string;
+};
+
+export type SchemaCursor = {
+  schema: JsonSchema | null;
+  rootSchema: JsonSchema | null;
+};
+
+export const ROOT_SELECTOR_PATHS = [
+  '*',
+  'input',
+  'output',

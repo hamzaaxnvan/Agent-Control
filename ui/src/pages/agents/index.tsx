@@ -22,11 +22,3 @@ const AgentPage: NextPageWithLayout = () => {
         <Center h={400}>
           <Stack align="center" gap="md">
             <Loader size="lg" />
-            <Text c="dimmed">Loading...</Text>
-          </Stack>
-        </Center>
-      </Box>
-    );
-  }
-
-  const defaultTab = tab === 'controls' || tab === 'monitor' ? tab : undefined;
