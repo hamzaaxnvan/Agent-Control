@@ -25,31 +25,3 @@ def create_analysis_tool():
         are present or absent.
         """
         dataset = request.get("dataset", "")
-        date_range = request.get("date_range", "")
-        max_rows = request.get("max_rows", 1000)
-        purpose = request.get("purpose", "")
-
-        prompt = f"""Summarize this data analysis in 2-3 sentences:
-- Dataset: {dataset}
-- Date range: {date_range}
-- Max rows: {max_rows}
-- Purpose: {purpose}
-
-Provide a brief, professional analysis summary."""
-
-        return llm.call([{"role": "user", "content": prompt}])
-
-    _analyze_data.name = "analyze_data"  # type: ignore[attr-defined]
-    _analyze_data.tool_name = "analyze_data"  # type: ignore[attr-defined]
-    controlled_fn = control()(_analyze_data)
-
-    @tool("analyze_data")
-    def analyze_data_tool(request: str) -> str:
-        """Analyze a dataset with validation controls.
-
-        Args:
-            request: JSON string with fields: dataset (required), date_range (required),
-                max_rows (optional, 1-10000), purpose (recommended for audit compliance)
-        """
-        if isinstance(request, dict):
-            params = request

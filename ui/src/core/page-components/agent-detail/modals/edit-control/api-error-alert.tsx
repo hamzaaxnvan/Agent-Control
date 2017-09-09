@@ -13,3 +13,18 @@ function formatFieldForDisplay(apiField: string | null): string {
     .join(' ');
 }
 
+export type ApiErrorAlertProps = {
+  /** The API error to display */
+  error: ProblemDetail | null;
+  /** Unmapped field errors to show in the list */
+  unmappedErrors?: Array<{ field: string | null; message: string }>;
+  /** Callback when the alert is dismissed */
+  onClose?: () => void;
+};
+
+/**
+ * Alert component for displaying API errors with field-level details.
+ * Renders error.errors from the API when available, or unmappedErrors from form mapping.
+ */
+export const ApiErrorAlert = ({
+  error,
