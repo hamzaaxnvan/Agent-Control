@@ -32,20 +32,3 @@ export class APIPromise<T> implements Promise<T> {
         ? this.#promise.then(([value]) => value)
         : Promise.resolve(p[0]);
   }
-
-  then<TResult1 = T, TResult2 = never>(
-    onfulfilled?:
-      | ((value: T) => TResult1 | PromiseLike<TResult1>)
-      | null
-      | undefined,
-    onrejected?:
-      | ((reason: any) => TResult2 | PromiseLike<TResult2>)
-      | null
-      | undefined,
-  ): Promise<TResult1 | TResult2> {
-    return this.#promise.then(
-      onfulfilled ? ([value]) => onfulfilled(value) : void 0,
-      onrejected,
-    );
-  }
-
