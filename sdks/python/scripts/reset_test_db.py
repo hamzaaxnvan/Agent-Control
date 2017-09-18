@@ -14,3 +14,19 @@ def _ensure_postgres_database_exists() -> None:
     )
     admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
 
+    with admin_engine.connect() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM pg_database WHERE datname = :name"),
+            {"name": db_config.database},
+        ).scalar()
+        if not exists:
+            database_name = db_config.database.replace('"', '""')
+            conn.execute(text(f'CREATE DATABASE "{database_name}"'))
+
+    admin_engine.dispose()
+
+
+def reset_database() -> None:
+    if db_config.url is None:
+        _ensure_postgres_database_exists()
+
