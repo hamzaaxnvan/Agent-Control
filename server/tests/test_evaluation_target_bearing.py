@@ -83,3 +83,46 @@ def _evaluate(
     }
     if target_type is not None:
         body["target_type"] = target_type
+    if target_id is not None:
+        body["target_id"] = target_id
+    resp = client.post("/api/v1/evaluation", json=body)
+    return {"status": resp.status_code, "body": resp.json()}
+
+
+def test_target_binding_runs_through_evaluation(client: TestClient) -> None:
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    _register_agent(client, agent_name)
+    control_id = _create_control(client)
+    _create_binding(client, control_id=control_id)
+
+    result = _evaluate(client, agent_name=agent_name, target_type="env", target_id="prod")
+    assert result["status"] == 200
+    body = result["body"]
+    # The control denies on regex 'x' which appears in the default input.
+    assert body["is_safe"] is False
+    assert body["matches"] and body["matches"][0]["control_id"] == control_id
+
+
+def test_unmatched_target_returns_safe(client: TestClient) -> None:
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    _register_agent(client, agent_name)
+
+    # No binding exists for this target.
+    result = _evaluate(client, agent_name=agent_name, target_type="env", target_id="dev")
+    assert result["status"] == 200
+    assert result["body"]["is_safe"] is True
+
+
+def test_disabled_binding_excludes_control_at_runtime(client: TestClient) -> None:
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    _register_agent(client, agent_name)
+    control_id = _create_control(client)
+    _create_binding(client, control_id=control_id, enabled=False)
+
+    result = _evaluate(client, agent_name=agent_name, target_type="env", target_id="prod")
+    assert result["status"] == 200
+    assert result["body"]["is_safe"] is True
+
+
+def test_partial_target_pair_rejected(client: TestClient) -> None:
+    body = {
