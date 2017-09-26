@@ -877,3 +877,296 @@ def test_normalizer_preserves_message_content_and_reports_invalid_trace_inputs()
     with pytest.raises(TypeError, match="Trace input must be"):
         GalileoRecordNormalizer.trace_input([1])
     with pytest.raises(TypeError, match="does not support int"):
+        GalileoRecordNormalizer.trace_input(1)
+
+
+def test_retriever_and_session_normalizers_accept_public_models() -> None:
+    class DocumentModel(BaseModel):
+        content: str
+        metadata: dict[str, str] = Field(default_factory=dict)
+
+    pydantic_document = DocumentModel(content="model document")
+    document = Document(content="canonical document")
+    part = TextContentPart(text="content part")
+    message = Message(role="user", content="question")
+
+    assert GalileoRecordNormalizer.retriever_output(pydantic_document) == [
+        Document(content="model document", metadata={})
+    ]
+    assert GalileoRecordNormalizer.retriever_output([pydantic_document]) == [
+        Document(content="model document", metadata={})
+    ]
+    assert GalileoRecordNormalizer.retriever_output([document]) == [document]
+    assert GalileoRecordNormalizer.session_input(part) == [part]
+    assert GalileoRecordNormalizer.session_input(document) == '{"content": "canonical document"}'
+    assert GalileoRecordNormalizer.session_input(pydantic_document) is pydantic_document
+    assert GalileoRecordNormalizer.session_input({"role": "user", "content": "question"}) == {
+        "role": "user",
+        "content": "question",
+    }
+    assert GalileoRecordNormalizer.session_input({"type": "text", "text": "hello"}) == [
+        {"type": "text", "text": "hello"}
+    ]
+    assert GalileoRecordNormalizer.session_input([message]) == [message]
+    assert GalileoRecordNormalizer.session_input([{"role": "user", "content": "question"}]) == [
+        {"role": "user", "content": "question"}
+    ]
+    assert json.loads(GalileoRecordNormalizer.session_input([pydantic_document]))[0][
+        "content"
+    ] == "model document"
+    assert GalileoRecordNormalizer.session_output(document) == [document]
+    assert GalileoRecordNormalizer.session_output(part) == [part]
+    assert GalileoRecordNormalizer.session_output(pydantic_document) is pydantic_document
+    assert GalileoRecordNormalizer.session_output({"role": "assistant", "content": "answer"}) == {
+        "role": "assistant",
+        "content": "answer",
+    }
+    assert GalileoRecordNormalizer.session_output({"page_content": "page"}).content == "page"
+    assert GalileoRecordNormalizer.session_output({"type": "text", "text": "hello"}) == [
+        {"type": "text", "text": "hello"}
+    ]
+    assert GalileoRecordNormalizer.session_output([document]) == [document]
+    assert GalileoRecordNormalizer.session_output([{"role": "assistant", "content": "answer"}]) == [
+        {"type": "text", "text": "answer"}
+    ]
+
+
+def test_llm_tool_definitions_normalize_nested_pydantic_uuid_and_datetime_values() -> None:
+    identifier = uuid4()
+    timestamp = datetime(2025, 1, 2, tzinfo=UTC)
+    normalized_tools = GalileoRecordNormalizer.llm_tools(
+        [{"id": identifier, "created_at": timestamp}]
+    )
+    record = LlmSpan.model_validate({"input": "question", "tools": normalized_tools})
+
+    assert isinstance(record, LlmSpan)
+    assert record.tools == [
+        {"id": str(identifier), "created_at": timestamp.isoformat().replace("+00:00", "Z")}
+    ]
+
+
+def test_retriever_dictionaries_become_canonical_documents() -> None:
+    documents = GalileoRecordNormalizer.retriever_output(
+        [{"content": "document", "metadata": {"source": "kb"}}]
+    )
+
+    assert len(documents) == 1
+    assert isinstance(documents[0], Document)
+    assert documents[0].content == "document"
+    assert documents[0].metadata == {"source": "kb"}
+
+
+def test_retriever_input_mapping_extracts_query_and_round_trips_documents() -> None:
+    record = record_from_step(
+        Step(
+            type="retriever",
+            name="policy_search",
+            input={"query": "wire policy", "partition": "banking"},
+            output=[{"content": "Policy text", "metadata": {"source": "kb"}}],
+        )
+    )
+
+    assert isinstance(record, RetrieverSpan)
+    assert record.input == "wire policy"
+    assert len(record.output) == 1
+    assert isinstance(record.output[0], Document)
+    restored = RetrieverSpan.model_validate(record.model_dump(mode="json", exclude_none=True))
+    assert restored.input == "wire policy"
+    assert isinstance(restored.output[0], Document)
+    assert restored.output[0].content == "Policy text"
+
+
+def test_retriever_input_mapping_without_query_uses_json_fallback() -> None:
+    record = record_from_step(
+        Step(type="retriever", name="search", input={"partition": "banking"})
+    )
+
+    assert isinstance(record, RetrieverSpan)
+    assert record.input == '{"partition": "banking"}'
+    assert GalileoRecordNormalizer.retriever_input({"query": {"phrase": "wire"}}) == (
+        '{"phrase": "wire"}'
+    )
+
+
+def test_trace_and_session_use_children_and_selectors_only_change_the_root() -> None:
+    trace = record_from_step(
+        Step(
+            type="trace",
+            name="outer",
+            input="base question",
+            children=[
+                Step(
+                    type="tool",
+                    name="child",
+                    input={"query": "child query"},
+                    output="child result",
+                    context={"metadata": {"owner": "child"}},
+                ),
+                Step(
+                    type="llm",
+                    name="child llm",
+                    input="child prompt",
+                    output="child response",
+                    tools=[{"name": "lookup"}],
+                )
+            ],
+        ),
+        selected_data={"input": "selected question", "output": "selected answer"},
+    )
+    session = record_from_step(
+        Step(
+            type="session",
+            name="conversation",
+            input="base session",
+            children=[
+                Step(
+                    type="trace",
+                    name="child trace",
+                    input="child question",
+                    children=[Step(type="llm", name="child llm", input="child input")],
+                )
+            ],
+        )
+    )
+
+    assert isinstance(trace, Trace)
+    assert trace.input == "selected question"
+    assert trace.output == "selected answer"
+    assert isinstance(trace.spans[0], ToolSpan)
+    assert json.loads(trace.spans[0].input) == {"query": "child query"}
+    assert trace.spans[0].output == "child result"
+    assert trace.spans[0].user_metadata == {"owner": "child"}
+    assert isinstance(trace.spans[1], LlmSpan)
+    assert trace.spans[1].tools == [{"name": "lookup"}]
+    assert trace.spans[1].output.content == "child response"
+    assert isinstance(session, Session)
+    assert session.traces[0].name == "child trace"
+    assert session.traces[0].input == "child question"
+    assert isinstance(session.traces[0].spans[0], LlmSpan)
+
+
+def test_children_must_be_valid_for_parent() -> None:
+    with pytest.raises(RecordFactoryError, match="cannot contain 'session'"):
+        record_from_step(
+            Step(type="trace", name="trace", input="q", children=[
+                Step(type="session", name="session", input="q", children=[])
+            ])
+        )
+    with pytest.raises(RecordFactoryError, match="cannot contain 'tool'"):
+        record_from_step(
+            Step(type="session", name="session", input="q", children=[
+                Step(type="tool", name="tool", input={})
+            ])
+        )
+
+
+def test_trace_and_session_without_children_have_empty_child_collections() -> None:
+    trace = record_from_step(Step(type="trace", name="request", input="question"))
+    session = record_from_step(Step(type="session", name="conversation", input="question"))
+
+    assert isinstance(trace, Trace)
+    assert trace.spans == []
+    assert isinstance(session, Session)
+    assert session.traces == []
+
+
+def test_nested_tool_and_retriever_children_are_recursively_converted() -> None:
+    record = record_from_step(
+        Step(
+            type="tool",
+            name="outer",
+            input={},
+            children=[
+                Step(
+                    type="retriever",
+                    name="inner retriever",
+                    input="query",
+                    output=["document"],
+                    children=[Step(type="tool", name="leaf tool", input={"x": 1})],
+                )
+            ],
+        )
+    )
+
+    assert isinstance(record, ToolSpan)
+    retriever = record.spans[0]
+    assert isinstance(retriever, RetrieverSpan)
+    assert retriever.output[0].content == "document"
+    assert isinstance(retriever.spans[0], ToolSpan)
+    assert json.loads(retriever.spans[0].input) == {"x": 1}
+
+
+def test_trace_missing_output_stays_none() -> None:
+    record = record_from_step(
+        Step(type="trace", name="request", input="question", children=[])
+    )
+
+    assert isinstance(record, Trace)
+    assert record.output is None
+
+
+def test_optional_fields_and_aliases_are_translated() -> None:
+    llm = record_from_step(
+        Step(
+            type="llm",
+            name="answer",
+            input="question",
+            tools=[{"name": "search"}],
+        )
+    )
+    tool = ToolSpan.model_validate({"tool_call_id": "123"})
+    alias = build_galileo_record("question", Step(type="llm", name="answer", input="base"))
+
+    assert isinstance(llm, LlmSpan)
+    assert llm.tools == [{"name": "search"}]
+    assert isinstance(tool, ToolSpan)
+    assert tool.tool_call_id == "123"
+    assert isinstance(alias, LlmSpan)
+
+
+def test_session_message_and_document_sequences_use_public_validators() -> None:
+    messages = [{"role": "user", "content": "question"}]
+    documents = [{"content": "answer", "metadata": {"source": "kb"}}]
+
+    record = record_from_step(
+        Step(
+            type="session",
+            name="conversation",
+            input=messages,
+            output=documents,
+            children=[Step(type="trace", name="request", input="question", children=[])],
+        )
+    )
+
+    assert isinstance(record, Session)
+    assert [message.content for message in record.input] == ["question"]
+    assert [document.model_dump() for document in record.output] == [
+        {"content": "answer", "metadata": {"source": "kb"}}
+    ]
+    assert [trace.name for trace in record.traces] == ["request"]
+    expected = Session(
+        input=messages,
+        output=documents,
+        traces=[Trace(name="request", input="question", spans=[])],
+    )
+    assert type(record) is type(expected)
+    assert [message.content for message in record.input] == [
+        message.content for message in expected.input
+    ]
+    assert [document.model_dump() for document in record.output] == [
+        document.model_dump() for document in expected.output
+    ]
+
+
+def test_trace_and_session_selector_values_must_be_structured() -> None:
+    with pytest.raises(RecordFactoryError, match="untyped scalar"):
+        build_record(
+            "question",
+            Step(type="trace", name="request", input="question", children=[]),
+        )
+
+
+def test_unsupported_step_type_is_explicit() -> None:
+    with pytest.raises(UnsupportedStepTypeError, match="custom"):
+        record_from_step(Step(type="custom", name="custom", input="value"))
+
