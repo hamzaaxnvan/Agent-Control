@@ -17,3 +17,10 @@ sync:
 test:
 	uv run pytest --cov=src --cov-report=xml:../../coverage-evaluators.xml -q
 
+lint:
+	uv run ruff check --config ../../pyproject.toml src/
+
+lint-fix:
+	uv run ruff check --config ../../pyproject.toml --fix src/
+
+typecheck:
