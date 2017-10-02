@@ -71,28 +71,3 @@ def test_base_control_event_sink_single_event_delegates_to_batch_writer() -> Non
             return SinkResult(accepted=len(events))
 
     sink = RecordingSink()
-    event = _make_event(control_id=7)
-
-    # When: the caller uses the single-event contract
-    result = sink.write_event(event)
-
-    # Then: the base helper delegates through the batch implementation
-    assert sink.batch_sizes == [1]
-    assert result == SinkResult(accepted=1, dropped=0)
-
-
-def test_base_async_control_event_sink_batches_single_event_writers() -> None:
-    # Given: an async sink that only implements single-event writes
-    class RecordingAsyncSink(BaseAsyncControlEventSink):
-        def __init__(self) -> None:
-            self.seen_control_ids: list[int] = []
-
-        async def write_event(self, event: ControlExecutionEvent) -> SinkResult:
-            self.seen_control_ids.append(event.control_id)
-            return SinkResult(accepted=1, dropped=event.control_id % 2)
-
-    sink = RecordingAsyncSink()
-    events = [_make_event(control_id=1), _make_event(control_id=2)]
-
-    # When: the caller uses the async batch contract
-    result = asyncio.run(sink.write_events(events))
