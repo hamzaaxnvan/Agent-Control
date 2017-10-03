@@ -33,3 +33,20 @@ export type StatsResponse = {
    * Per-control breakdown
    */
   controls: Array<ControlStats>;
+  /**
+   * Time range used
+   */
+  timeRange: string;
+  /**
+   * Agent-level aggregate statistics.
+   *
+   * @remarks
+   *
+   * Invariant: execution_count = match_count + non_match_count + error_count
+   *
+   * Matches have actions (deny, steer, observe) tracked in action_counts.
+   * sum(action_counts.values()) == match_count
+   *
+   * Attributes:
+   *     execution_count: Total executions across all controls
+   *     match_count: Total matches across all controls (evaluator matched)

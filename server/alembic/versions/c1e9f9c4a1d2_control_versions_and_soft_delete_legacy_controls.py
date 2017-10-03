@@ -54,3 +54,60 @@ def _classify_control_payload(data: Any) -> tuple[bool, str | None]:
 
 
 def _snapshot_payload(
+    *,
+    name: str,
+    data: Any,
+    deleted_at: dt.datetime | None,
+) -> dict[str, Any]:
+    """Build the JSON snapshot persisted in control_versions."""
+    return {
+        "name": name,
+        "data": data,
+        "deleted_at": deleted_at.isoformat() if deleted_at is not None else None,
+        "cloned_control_id": None,
+    }
+
+
+def upgrade() -> None:
+    op.add_column("controls", sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True))
+    op.drop_constraint("controls_name_key", "controls", type_="unique")
+    op.create_index(
+        "idx_controls_name_active",
+        "controls",
+        ["name"],
+        unique=True,
+        postgresql_where=sa.text("deleted_at IS NULL"),
+    )
+
+    op.create_table(
+        "control_versions",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column("control_id", sa.Integer(), nullable=False),
+        sa.Column("version_num", sa.Integer(), nullable=False),
+        sa.Column("event_type", sa.String(length=255), nullable=False),
+        sa.Column("snapshot", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("note", sa.Text(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(["control_id"], ["controls.id"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "control_id",
+            "version_num",
+            name="uq_control_versions_control_version",
+        ),
+    )
+    op.create_index(
+        "idx_control_versions_control_created",
+        "control_versions",
+        ["control_id", sa.literal_column("created_at DESC")],
+        unique=False,
+    )
+
+    bind = op.get_bind()
+    db_inspector = inspect(bind)
+
