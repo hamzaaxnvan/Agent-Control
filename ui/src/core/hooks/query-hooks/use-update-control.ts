@@ -13,19 +13,3 @@ type UpdateControlParams = {
 /**
  * Mutation hook to update an existing control's definition
  */
-export function useUpdateControl() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ controlId, definition }: UpdateControlParams) => {
-      const { data, error, response } = await api.controls.setData(controlId, {
-        data: definition,
-      });
-
-      if (error) {
-        throw parseApiError(
-          error,
-          'Failed to update control',
-          response?.status
-        );
-      }
