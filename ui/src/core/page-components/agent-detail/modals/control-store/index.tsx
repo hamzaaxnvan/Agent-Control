@@ -280,3 +280,97 @@ export function ControlStoreModal({
         }
 
         const controlName = row.original.name;
+
+        return (
+          <Anchor
+            component={Link}
+            href={getAgentRoute(usedByAgent.agent_name, {
+              tab: 'controls',
+              query: { q: controlName },
+            })}
+            size="sm"
+            underline="hover"
+          >
+            {usedByAgent.agent_name}
+          </Anchor>
+        );
+      },
+    },
+    {
+      id: 'actions',
+      header: '',
+      size: 100,
+      cell: ({ row }) => (
+        <Group gap="md" justify="flex-end" wrap="nowrap">
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="copy-control-button"
+            loading={loadingControlId === row.original.id}
+            onClick={() => handleCopyControl(row.original)}
+          >
+            Copy
+          </Button>
+        </Group>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <Modal
+        opened={opened}
+        onClose={onClose}
+        size="xxl"
+        padding={0}
+        withCloseButton={false}
+        closeOnEscape={false}
+        styles={{
+          body: {
+            padding: 0,
+            width: '900px',
+            height: '600px',
+          },
+        }}
+      >
+        <Box h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+          {/* Header */}
+          <Box p="md">
+            <Group justify="space-between" mb="xs">
+              <Title order={3} fw={600}>
+                Control store
+              </Title>
+              <Button
+                size="sm"
+                onClick={onClose}
+                data-testid="close-control-store-modal-button"
+              >
+                <IconX size={16} />
+              </Button>
+            </Group>
+            <Text size="sm" c="dimmed">
+              Browse existing controls or create a new one
+            </Text>
+          </Box>
+          <Divider />
+
+          {/* Search Bar + Create Control */}
+          <Box px="md" pt="md" pb="sm">
+            <Group justify="space-between" align="flex-end">
+              <SearchInput
+                queryKey="store_q"
+                placeholder="Search controls..."
+                w={250}
+              />
+              <Button
+                variant="filled"
+                size="sm"
+                onClick={() =>
+                  openModal(MODAL_NAMES.CONTROL_STORE, {
+                    submodal: SUBMODAL_NAMES.ADD_NEW,
+                  })
+                }
+                data-testid="footer-new-control-button"
+              >
+                Create Control
+              </Button>

@@ -16,12 +16,3 @@ export type DeletePolicyResponse = {
    * Whether the request succeeded
    */
   success: boolean;
-};
-
-/** @internal */
-export const DeletePolicyResponse$inboundSchema: z.ZodMiniType<
-  DeletePolicyResponse,
-  unknown
-> = z.object({
-  success: types.boolean(),
-});
