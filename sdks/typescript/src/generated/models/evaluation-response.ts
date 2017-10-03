@@ -15,20 +15,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  *
  * @remarks
  *
- * This is what the server returns. The SDK may transform this
- * into an EvaluationResult for client convenience.
- *
- * Attributes:
- *     is_safe: Whether the content is considered safe
- *     confidence: Confidence score between 0.0 and 1.0
- *     reason: Optional explanation for the decision
- *     matches: List of controls that matched/triggered (if any)
- *     errors: List of controls that failed during evaluation (if any)
- *     non_matches: List of controls that were evaluated but did not match (if any)
- */
-export type EvaluationResponse = {
-  /**
-   * Confidence score (0.0 to 1.0)
-   */
-  confidence: number;
-  /**

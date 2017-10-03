@@ -24,3 +24,29 @@ export type PatchControlBindingByKeyRequest = {
   /**
    * Opaque attachment kind.
    */
+  targetType: string;
+};
+
+/** @internal */
+export type PatchControlBindingByKeyRequest$Outbound = {
+  control_id: number;
+  enabled: boolean;
+  target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const PatchControlBindingByKeyRequest$outboundSchema: z.ZodMiniType<
+  PatchControlBindingByKeyRequest$Outbound,
+  PatchControlBindingByKeyRequest
+> = z.pipe(
+  z.object({
+    controlId: z.int(),
+    enabled: z.boolean(),
+    targetId: z.string(),
+    targetType: z.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      controlId: "control_id",
+      targetId: "target_id",
