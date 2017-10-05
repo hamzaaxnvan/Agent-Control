@@ -31,36 +31,3 @@ def _write_text(path: Path, contents: str) -> None:
     """Write a text file, creating parent directories first."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(dedent(contents).strip() + "\n")
-
-
-def _write_fake_repo(
-    root: Path,
-    *,
-    include_version_entry: bool = True,
-    include_builtin_extra: bool = True,
-    include_builtin_source: bool = True,
-) -> None:
-    """Create a minimal repo layout that exercises contrib package wiring."""
-
-    version_entry = (
-        '"evaluators/contrib/example/pyproject.toml:project.version"'
-        if include_version_entry
-        else ""
-    )
-    extra_entry = (
-        'example = ["agent-control-evaluator-example>=1.0.0"]'
-        if include_builtin_extra
-        else ""
-    )
-    source_entry = (
-        'agent-control-evaluator-example = { path = "../contrib/example", editable = true }'
-        if include_builtin_source
-        else ""
-    )
-
-    _write_text(
-        root / "pyproject.toml",
-        f"""
-        [project]
-        name = "agent-control"

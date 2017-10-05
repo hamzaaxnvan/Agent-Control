@@ -18,10 +18,3 @@ export type AssocResponse = {
 /** @internal */
 export const AssocResponse$inboundSchema: z.ZodMiniType<
   AssocResponse,
-  unknown
-> = z.object({
-  success: types.boolean(),
-});
-
-export function assocResponseFromJSON(
-  jsonString: string,
