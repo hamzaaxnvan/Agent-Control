@@ -74,3 +74,29 @@ export const jsonEvaluator: EvaluatorDefinition<JsonFormValues> = {
       }
       return null;
     },
+    field_patterns: (value) => {
+      if (value && (value as string).trim() !== '') {
+        try {
+          JSON.parse(value as string);
+          return null;
+        } catch {
+          return 'Invalid JSON for field patterns';
+        }
+      }
+      return null;
+    },
+  },
+
+  toConfig: (values) => {
+    // Convert comma-separated string to array, parse JSON fields
+    const requiredFields = values.required_fields
+      .split(',')
+      .map((f) => f.trim())
+      .filter((f) => f !== '');
+    return {
+      json_schema: parseJsonOrNull(values.json_schema),
+      required_fields: requiredFields.length > 0 ? requiredFields : null,
+      field_types: parseJsonOrNull(values.field_types),
+      field_constraints: parseJsonOrNull(values.field_constraints),
+      field_patterns: parseJsonOrNull(values.field_patterns),
+      allow_extra_fields: values.allow_extra_fields,
