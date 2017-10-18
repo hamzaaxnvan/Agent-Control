@@ -44,3 +44,50 @@ export function TemplatePreview({
   const [renderError, setRenderError] = useState<ProblemDetail | null>(null);
   const renderTemplate = useRenderTemplate();
 
+  const doRender = useCallback(async () => {
+    setRenderError(null);
+    try {
+      const result = await renderTemplate.mutateAsync({
+        template,
+        template_values: values,
+      });
+      if (result?.control) {
+        // Strip template authoring metadata — show only what the engine sees.
+        const {
+          template: _t,
+          template_values: _tv,
+          ...rendered
+        } = result.control as Record<string, unknown>;
+        setRenderedJson(JSON.stringify(rendered, null, 2));
+        onErrors?.({});
+      }
+    } catch (error) {
+      if (isApiError(error)) {
+        setRenderError(error.problemDetail);
+        const paramErrors: Record<string, string> = {};
+        for (const item of error.problemDetail.errors ?? []) {
+          if (item.field?.startsWith('template_values.')) {
+            const paramName = item.field.replace('template_values.', '');
+            paramErrors[paramName] = item.message;
+          }
+        }
+        if (Object.keys(paramErrors).length > 0) {
+          onErrors?.(paramErrors);
+        }
+      }
+      setRenderedJson('');
+    }
+  }, [template, values, renderTemplate, onErrors]);
+
+  const debouncedRender = useDebouncedCallback(doRender, debounceMs);
+
+  useEffect(() => {
+    debouncedRender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template, values]);
+
+  return (
+    <Box>
+      <UnstyledButton onClick={() => setOpened((o) => !o)} w="100%">
+        <Group gap="xs" mb={opened ? 'xs' : 0}>
+          {opened ? (

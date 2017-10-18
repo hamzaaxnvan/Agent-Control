@@ -14,3 +14,11 @@ export type CreatePolicyRequest = {
 /** @internal */
 export type CreatePolicyRequest$Outbound = {
   name: string;
+};
+
+/** @internal */
+export const CreatePolicyRequest$outboundSchema: z.ZodMiniType<
+  CreatePolicyRequest$Outbound,
+  CreatePolicyRequest
+> = z.object({
+  name: z.string(),
