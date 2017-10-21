@@ -28,3 +28,96 @@ import { Result } from "../types/fp.js";
  *
  * @remarks
  * List all available evaluators.
+ *
+ * Returns metadata and JSON Schema for each built-in evaluator.
+ *
+ * Built-in evaluators:
+ * - **regex**: Regular expression pattern matching
+ * - **list**: List-based value matching with flexible logic
+ * - **json**: JSON validation with schema, types, constraints
+ * - **sql**: SQL query validation
+ *
+ * Custom evaluators are registered per-agent via initAgent.
+ * Use GET /agents/{agent_name}/evaluators to list agent-specific schemas.
+ */
+export function evaluatorsList(
+  client: AgentControlSDKCore,
+  options?: RequestOptions,
+): APIPromise<
+  Result<
+    { [k: string]: models.EvaluatorInfo },
+    | AgentControlSDKError
+    | ResponseValidationError
+    | ConnectionError
+    | RequestAbortedError
+    | RequestTimeoutError
+    | InvalidRequestError
+    | UnexpectedClientError
+    | SDKValidationError
+  >
+> {
+  return new APIPromise($do(
+    client,
+    options,
+  ));
+}
+
+async function $do(
+  client: AgentControlSDKCore,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      { [k: string]: models.EvaluatorInfo },
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const path = pathToFunc("/api/v1/evaluators")();
+
+  const headers = new Headers(compactMap({
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID: "get_evaluators_api_v1_evaluators_get",
+    oAuth2Scopes: null,
+
+    resolvedSecurity: requestSecurity,
+
+    securitySource: client._options.apiKeyHeader,
+    retryConfig: options?.retries
+      || client._options.retryConfig
+      || { strategy: "none" },
+    retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
+  };
+
+  const requestRes = client._createRequest(context, {
+    security: requestSecurity,
+    method: "GET",
+    baseURL: options?.serverURL,
+    path: path,
+    headers: headers,
+    userAgent: client._options.userAgent,
+    timeoutMs: options?.timeoutMs || client._options.timeoutMs || -1,
+  }, options);
+  if (!requestRes.ok) {
+    return [requestRes, { status: "invalid" }];
+  }
+  const req = requestRes.value;
+
+  const doResult = await client._do(req, {
