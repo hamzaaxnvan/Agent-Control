@@ -16,3 +16,22 @@
  *
  * @example
  * ```typescript
+ * // evaluators/my-evaluator/index.ts
+ * import type { EvaluatorDefinition } from "../types";
+ * import { MyForm } from "./form";
+ * import type { MyFormValues } from "./types";
+ *
+ * export const myEvaluator: EvaluatorDefinition<MyFormValues> = {
+ *   id: "my-evaluator",
+ *   displayName: "My Evaluator",
+ *   initialValues: { ... },
+ *   validate: { ... },
+ *   toConfig: (values) => ({ ... }),
+ *   fromConfig: (config) => ({ ... }),
+ *   FormComponent: MyForm,
+ * };
+ * ```
+ */
+
+import {
+  defenseClawOpaPolicyEvaluator,

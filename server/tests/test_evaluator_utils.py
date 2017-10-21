@@ -97,3 +97,36 @@ class TestValidateConfigAgainstSchema:
     def test_valid_config(self) -> None:
         """Given a schema, when config matches schema, then no error is raised."""
         # Given:
+        schema = {
+            "type": "object",
+            "properties": {"threshold": {"type": "number"}},
+            "required": ["threshold"],
+        }
+        config = {"threshold": 0.5}
+
+        # When:/Then - no exception
+        validate_config_against_schema(config, schema)
+
+    def test_invalid_config_missing_required(self) -> None:
+        """Given a schema with required field, when config missing it, then raises error."""
+        # Given:
+        schema = {
+            "type": "object",
+            "properties": {"threshold": {"type": "number"}},
+            "required": ["threshold"],
+        }
+        config = {}
+
+        # When:/Then
+        with pytest.raises(Exception) as exc_info:
+            validate_config_against_schema(config, schema)
+        assert "threshold" in str(exc_info.value)
+
+    def test_invalid_config_wrong_type(self) -> None:
+        """Given a schema expecting number, when config has string, then raises error."""
+        # Given:
+        schema = {
+            "type": "object",
+            "properties": {"value": {"type": "number"}},
+        }
+        config = {"value": "not-a-number"}
