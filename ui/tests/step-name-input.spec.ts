@@ -28,3 +28,34 @@ test.describe('Step Name Input', () => {
     mockedPage,
   }) => {
     await openEvaluatorForm(mockedPage, 'Regex');
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Create Control' });
+    await expect(
+      modal.getByPlaceholder('No steps registered via SDK')
+    ).toBeVisible();
+
+    // Click the visible "Regex" label (switch is in ScrollArea and can be out of viewport)
+    await modal.getByText('Regex', { exact: true }).click();
+
+    await expect(modal.getByPlaceholder('^db_.*')).toBeVisible();
+    await expect(
+      modal.getByPlaceholder('No steps registered via SDK')
+    ).not.toBeVisible();
+  });
+
+  test('can type in regex field and value persists when toggling', async ({
+    mockedPage,
+  }) => {
+    await openEvaluatorForm(mockedPage, 'Regex');
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Create Control' });
+    await modal.getByText('Regex', { exact: true }).click();
+
+    const regexInput = modal.getByPlaceholder('^db_.*');
+    await regexInput.fill('^db_.*');
+
+    await expect(regexInput).toHaveValue('^db_.*');
+
+    // Toggle off to names mode
+    await modal.getByText('Regex', { exact: true }).click();
+    await expect(
