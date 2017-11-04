@@ -76,3 +76,29 @@ class LunaEvaluatorConfig(EvaluatorConfig):
 
     scorer_id: str = Field(
         min_length=1,
+        description="Required scorer identifier for Luna scorer invocation.",
+    )
+    scorer_version_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional for legacy requests and required when contextual evaluation "
+            "sends a structured record."
+        ),
+    )
+    scorer_label: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional display/metadata label.",
+    )
+    threshold: JSONValue = Field(
+        default=0.5,
+        description="Local threshold used to decide whether the control matches.",
+    )
+    operator: LunaOperator = Field(
+        default="gte",
+        description="Local comparison operator applied to the raw Luna score.",
+    )
+    scorer_config: ScorerInvokeConfig | None = Field(
+        default=None,
+        alias="config",

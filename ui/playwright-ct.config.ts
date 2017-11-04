@@ -15,12 +15,3 @@ export default defineConfig({
   reporter: [['html', { open: 'never' }], ['list']],
 
   use: {
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    ctViteConfig: {
-      resolve: {
-        alias: {
-          '@': path.resolve(__dirname, './src'),
-        },
-      },
-    },
