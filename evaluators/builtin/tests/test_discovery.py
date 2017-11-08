@@ -91,3 +91,50 @@ def test_discover_evaluators_skips_already_registered(isolated_discovery):
     """Already-registered names are skipped without raising."""
     cls = _make_class(name="disc-existing")
     register_evaluator(cls)
+
+    fake_ep = _make_fake_entry_point("disc-existing", cls)
+    with patch.object(discovery_module, "entry_points", return_value=[fake_ep]):
+        count = discover_evaluators()
+
+    assert count == 0
+
+
+def test_discover_evaluators_only_runs_once(isolated_discovery):
+    """Repeat calls short-circuit on the _DISCOVERY_COMPLETE flag."""
+    cls = _make_class(name="disc-once")
+    fake_ep = _make_fake_entry_point("disc-once", cls)
+
+    with patch.object(
+        discovery_module, "entry_points", return_value=[fake_ep]
+    ) as patched:
+        first = discover_evaluators()
+        second = discover_evaluators()
+
+    # First call discovers, second returns 0 without consulting entry_points.
+    assert first == 1
+    assert second == 0
+    assert patched.call_count == 1
+
+
+def test_discover_evaluators_swallows_load_failures(isolated_discovery):
+    """A broken entry point is logged and skipped, not propagated."""
+    bad_ep = MagicMock()
+    bad_ep.name = "broken"
+    bad_ep.load.side_effect = RuntimeError("boom")
+
+    good_cls = _make_class(name="disc-good")
+    good_ep = _make_fake_entry_point("disc-good", good_cls)
+
+    with patch.object(discovery_module, "entry_points", return_value=[bad_ep, good_ep]):
+        count = discover_evaluators()
+
+    assert count == 1
+    assert get_all_evaluators().get("disc-good") is good_cls
+
+
+def test_discover_evaluators_handles_entry_points_failure(isolated_discovery):
+    """If entry_points() itself raises, discovery completes with zero results."""
+    with patch.object(
+        discovery_module,
+        "entry_points",
+        side_effect=RuntimeError("entry-point system unavailable"),
