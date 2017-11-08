@@ -16,3 +16,21 @@ export type CreateControlBindingResponse = {
   /**
    * Identifier of the created binding.
    */
+  bindingId: number;
+};
+
+/** @internal */
+export const CreateControlBindingResponse$inboundSchema: z.ZodMiniType<
+  CreateControlBindingResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    binding_id: types.number(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "binding_id": "bindingId",
+    });
+  }),
+);
+
