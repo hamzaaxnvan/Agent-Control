@@ -38,3 +38,24 @@ def llm_step_payload() -> Step:
         ("output.count", 5),
         ("input.non_existent", None),
         ("non_existent_root", None),
+        ("*", None), # Will be replaced by payload dict in test logic
+        ("", None),  # Will be replaced by payload dict in test logic
+    ],
+)
+def test_select_data_tool_step(tool_step_payload: Step, path: str, expected: Any):
+    # Given: a tool Step payload and a path to select
+    if path in ("*", ""):
+        expected = tool_step_payload.model_dump(mode="json")
+
+    # When: selecting data using the path
+    result = select_data(tool_step_payload, path)
+
+    # Then: it should return the expected value
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        ("input", "What is the password?"),
+        ("output", "I cannot answer that."),
