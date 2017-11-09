@@ -9,8 +9,3 @@ echo "==================================="
 echo "Running database migrations..."
 if [ -f "/app/alembic.ini" ]; then
     alembic upgrade head
-    echo "✓ Database migrations complete"
-else
-    echo "⚠ alembic.ini not found, skipping migrations"
-fi
-
