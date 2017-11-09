@@ -37,16 +37,3 @@ export type PatchControlBindingByKeyRequest$Outbound = {
 
 /** @internal */
 export const PatchControlBindingByKeyRequest$outboundSchema: z.ZodMiniType<
-  PatchControlBindingByKeyRequest$Outbound,
-  PatchControlBindingByKeyRequest
-> = z.pipe(
-  z.object({
-    controlId: z.int(),
-    enabled: z.boolean(),
-    targetId: z.string(),
-    targetType: z.string(),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
-      controlId: "control_id",
-      targetId: "target_id",
