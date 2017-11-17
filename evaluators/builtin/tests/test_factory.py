@@ -41,3 +41,89 @@ def isolated_factory():
     register_evaluator(_FactoryEvaluator)
     yield
     clear_evaluator_cache()
+    clear_evaluators()
+    for cls in snapshot.values():
+        register_evaluator(cls)
+
+
+def test_get_evaluator_instance_returns_evaluator(isolated_factory):
+    spec = EvaluatorSpec(name="factory-dummy", config={"payload": "p1"})
+
+    instance = get_evaluator_instance(spec)
+
+    assert isinstance(instance, _FactoryEvaluator)
+    assert instance.config.payload == "p1"
+
+
+def test_get_evaluator_instance_caches_by_config(isolated_factory):
+    spec_a = EvaluatorSpec(name="factory-dummy", config={"payload": "same"})
+    spec_b = EvaluatorSpec(name="factory-dummy", config={"payload": "same"})
+
+    first = get_evaluator_instance(spec_a)
+    second = get_evaluator_instance(spec_b)
+
+    # Same config = same cached instance.
+    assert first is second
+
+
+def test_get_evaluator_instance_treats_different_configs_separately(isolated_factory):
+    spec_a = EvaluatorSpec(name="factory-dummy", config={"payload": "a"})
+    spec_b = EvaluatorSpec(name="factory-dummy", config={"payload": "b"})
+
+    instance_a = get_evaluator_instance(spec_a)
+    instance_b = get_evaluator_instance(spec_b)
+
+    assert instance_a is not instance_b
+    assert instance_a.config.payload == "a"
+    assert instance_b.config.payload == "b"
+
+
+def test_get_evaluator_instance_raises_for_unknown_evaluator(isolated_factory):
+    with pytest.raises(ValueError, match="not found"):
+        get_evaluator_instance(EvaluatorSpec(name="no-such-evaluator", config={}))
+
+
+def test_clear_evaluator_cache_forces_recreation(isolated_factory):
+    spec = EvaluatorSpec(name="factory-dummy", config={"payload": "p"})
+
+    first = get_evaluator_instance(spec)
+    clear_evaluator_cache()
+    second = get_evaluator_instance(spec)
+
+    assert first is not second
+
+
+def test_get_evaluator_instance_evicts_oldest_when_full(isolated_factory, monkeypatch):
+    """LRU eviction: when cache is full, the least-recently-used entry is dropped."""
+    # Force a tiny cache so we can observe eviction without overhead.
+    monkeypatch.setattr(factory_module, "EVALUATOR_CACHE_SIZE", 2)
+
+    spec_a = EvaluatorSpec(name="factory-dummy", config={"payload": "a"})
+    spec_b = EvaluatorSpec(name="factory-dummy", config={"payload": "b"})
+    spec_c = EvaluatorSpec(name="factory-dummy", config={"payload": "c"})
+
+    first_a = get_evaluator_instance(spec_a)
+    get_evaluator_instance(spec_b)
+    # Insert third → "a" is the LRU and must be evicted.
+    get_evaluator_instance(spec_c)
+
+    re_a = get_evaluator_instance(spec_a)
+    # "a" was evicted: new instance must NOT be the original.
+    assert re_a is not first_a
+
+
+def test_get_evaluator_instance_moves_hit_to_most_recent(
+    isolated_factory, monkeypatch
+):
+    """Cache hit must refresh LRU recency so the touched entry isn't evicted next."""
+    monkeypatch.setattr(factory_module, "EVALUATOR_CACHE_SIZE", 2)
+
+    spec_a = EvaluatorSpec(name="factory-dummy", config={"payload": "a"})
+    spec_b = EvaluatorSpec(name="factory-dummy", config={"payload": "b"})
+    spec_c = EvaluatorSpec(name="factory-dummy", config={"payload": "c"})
+
+    first_a = get_evaluator_instance(spec_a)
+    get_evaluator_instance(spec_b)
+    # Touch "a" so "b" becomes the LRU.
+    re_a = get_evaluator_instance(spec_a)
+    assert re_a is first_a

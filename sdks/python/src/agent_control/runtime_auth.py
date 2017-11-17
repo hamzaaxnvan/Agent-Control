@@ -80,3 +80,85 @@ class RuntimeToken:
         return self.expires_at > refresh_at
 
 
+class RuntimeTokenCache:
+    """Thread-safe runtime token cache keyed by server and target."""
+
+    def __init__(
+        self,
+        *,
+        max_entries: int = _DEFAULT_MAX_CACHE_ENTRIES,
+        jwt_unavailable_ttl_seconds: int = _DEFAULT_JWT_UNAVAILABLE_TTL_SECONDS,
+    ) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be >= 1.")
+        if jwt_unavailable_ttl_seconds < 0:
+            raise ValueError("jwt_unavailable_ttl_seconds must be >= 0.")
+        self._max_entries = max_entries
+        self._jwt_unavailable_ttl_seconds = jwt_unavailable_ttl_seconds
+        self._tokens: dict[_TokenKey, RuntimeToken] = {}
+        self._jwt_unavailable_until: datetime | None = None
+        self._jwt_unavailable_servers: dict[str, datetime] = {}
+        self._jwt_unavailable_targets: dict[_TokenKey, datetime] = {}
+        self._exchange_locks: dict[_LockKey, asyncio.Lock] = {}
+        self._lock = threading.Lock()
+
+    def get(
+        self,
+        server_url: str,
+        target_type: str,
+        target_id: str,
+        *,
+        cache_identity: str = "",
+        refresh_margin_seconds: int,
+    ) -> RuntimeToken | None:
+        """Return a fresh cached token for the target, if present."""
+        key = (server_url, cache_identity, target_type, target_id)
+        with self._lock:
+            token = self._tokens.get(key)
+            if token is None:
+                return None
+            if token.is_fresh(refresh_margin_seconds=refresh_margin_seconds):
+                return token
+            self._tokens.pop(key, None)
+            return None
+
+    def set(self, token: RuntimeToken, *, cache_identity: str = "") -> None:
+        """Store a token and clear any fallback marker for its target."""
+        key = (token.server_url, cache_identity, token.target_type, token.target_id)
+        with self._lock:
+            if key not in self._tokens and len(self._tokens) >= self._max_entries:
+                oldest_key = next(iter(self._tokens))
+                self._tokens.pop(oldest_key, None)
+                self._jwt_unavailable_targets.pop(oldest_key, None)
+            self._tokens[key] = token
+            self._jwt_unavailable_servers.pop(token.server_url, None)
+            self._jwt_unavailable_targets.pop(key, None)
+
+    def remove(
+        self,
+        server_url: str,
+        target_type: str,
+        target_id: str,
+        *,
+        cache_identity: str = "",
+    ) -> None:
+        """Drop the cached token for one target."""
+        with self._lock:
+            self._tokens.pop((server_url, cache_identity, target_type, target_id), None)
+
+    def mark_jwt_unavailable(
+        self,
+        *,
+        server_url: str | None = None,
+        target_type: str | None = None,
+        target_id: str | None = None,
+        cache_identity: str = "",
+        globally: bool = False,
+        ttl_seconds: int | None = None,
+    ) -> None:
+        """Record that JWT runtime auth should not be attempted."""
+        ttl = self._jwt_unavailable_ttl_seconds if ttl_seconds is None else ttl_seconds
+        if ttl < 0:
+            raise ValueError("ttl_seconds must be >= 0.")
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
+        with self._lock:

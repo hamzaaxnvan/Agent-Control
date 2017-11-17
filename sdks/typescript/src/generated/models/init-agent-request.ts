@@ -24,3 +24,55 @@ export type InitAgentRequest = {
   /**
    * Agent metadata for registration and tracking.
    *
+   * @remarks
+   *
+   * An agent represents an AI system that can be protected and monitored.
+   * Each agent has a unique immutable name and can have multiple steps registered with it.
+   */
+  agent: Agent;
+  /**
+   * Conflict handling mode for initAgent registration updates.
+   *
+   * @remarks
+   *
+   * STRICT preserves compatibility checks and raises conflicts on incompatible changes.
+   * OVERWRITE applies latest-init-wins replacement for steps and evaluators.
+   */
+  conflictMode?: ConflictMode | undefined;
+  /**
+   * Custom evaluator schemas for config validation
+   */
+  evaluators?: Array<EvaluatorSchema> | undefined;
+  /**
+   * If true, replace corrupted agent data instead of failing. Use only when agent data is corrupted and cannot be parsed.
+   */
+  forceReplace?: boolean | undefined;
+  /**
+   * List of steps available to the agent
+   */
+  steps?: Array<StepSchema> | undefined;
+  /**
+   * Optional opaque target identifier. Required when target_type is supplied.
+   */
+  targetId?: string | null | undefined;
+  /**
+   * Optional opaque target kind. When supplied with target_id, the returned controls include controls bound to that target via control bindings, in addition to the agent's direct and policy-derived controls.
+   */
+  targetType?: string | null | undefined;
+};
+
+/** @internal */
+export type InitAgentRequest$Outbound = {
+  agent: Agent$Outbound;
+  conflict_mode?: string | undefined;
+  evaluators?: Array<EvaluatorSchema$Outbound> | undefined;
+  force_replace: boolean;
+  steps?: Array<StepSchema$Outbound> | undefined;
+  target_id?: string | null | undefined;
+  target_type?: string | null | undefined;
+};
+
+/** @internal */
+export const InitAgentRequest$outboundSchema: z.ZodMiniType<
+  InitAgentRequest$Outbound,
+  InitAgentRequest
