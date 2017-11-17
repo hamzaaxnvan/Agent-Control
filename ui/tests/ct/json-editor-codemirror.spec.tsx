@@ -47,3 +47,102 @@ test.describe('JsonEditorCodeMirror (component)', () => {
     const parsed = JSON.parse(raw) as {
       execution: string;
       condition: unknown;
+      action: { decision: string };
+    };
+    expect(parsed.execution).toBe('server');
+    expect(parsed.condition).toEqual({});
+    expect(parsed.action).toEqual({ decision: 'allow' });
+  });
+
+  test('setJsonEditorValue updates document', async ({ mount, page }) => {
+    await mount(<JsonEditorCodeMirrorCtHost mode="evaluator-config" />);
+    const next = JSON.stringify({ threshold: 0.5, enabled: true });
+    await setJsonEditorValue(page, EDITOR, next);
+    expect(JSON.parse(await getJsonEditorValue(page, EDITOR))).toEqual({
+      threshold: 0.5,
+      enabled: true,
+    });
+  });
+
+  test('keyboard typing inserts text at cursor', async ({ mount, page }) => {
+    await mount(<JsonEditorCodeMirrorCtHost mode="evaluator-config" />);
+    expect(JSON.parse(await getJsonEditorValue(page, EDITOR))).toEqual({});
+
+    await focusJsonEditorAt(page, EDITOR, 1, 2);
+    await page.keyboard.type('"typedKey": 42', { delay: 15 });
+
+    expect(JSON.parse(await getJsonEditorValue(page, EDITOR))).toEqual({
+      typedKey: 42,
+    });
+  });
+
+  test('replace sample sets minified control JSON', async ({ mount, page }) => {
+    await mount(<JsonEditorCodeMirrorCtHost mode="control" />);
+    await page.getByTestId('ct-replace-sample').click();
+    expect(JSON.parse(await getJsonEditorValue(page, EDITOR))).toEqual({
+      execution: 'sdk',
+      condition: { selector: { path: '*' } },
+      action: { decision: 'deny' },
+    });
+  });
+
+  test('format pretty-prints without changing parsed data', async ({
+    mount,
+    page,
+  }) => {
+    await mount(<JsonEditorCodeMirrorCtHost mode="control" />);
+    await page.getByTestId('ct-replace-sample').click();
+    const before = await getJsonEditorValue(page, EDITOR);
+    expect(before.includes('\n')).toBe(false);
+
+    await page.getByRole('button', { name: 'Format document' }).click();
+
+    const after = await getJsonEditorValue(page, EDITOR);
+    expect(after.includes('\n')).toBe(true);
+    expect(JSON.parse(after)).toEqual(JSON.parse(before));
+  });
+
+  test('format preserves commas that are part of string values', async ({
+    mount,
+    page,
+  }) => {
+    await mount(<JsonEditorCodeMirrorCtHost mode="control" />);
+    const before = JSON.stringify(
+      {
+        execution: 'server',
+        condition: {
+          selector: { path: 'output' },
+          evaluator: {
+            name: 'regex',
+            config: { pattern: 'a,}' },
+          },
+        },
+        action: { decision: 'deny' },
+      },
+      null,
+      2
+    );
+
+    await setJsonEditorValue(page, EDITOR, before);
+    await page.getByRole('button', { name: 'Format document' }).click();
+
+    const after = JSON.parse(await getJsonEditorValue(page, EDITOR)) as {
+      condition: { evaluator: { config: { pattern: string } } };
+    };
+    expect(after.condition.evaluator.config.pattern).toBe('a,}');
+  });
+
+  test('toggle jsonError shows parent message', async ({ mount, page }) => {
+    await mount(<JsonEditorCodeMirrorCtHost mode="evaluator-config" />);
+    await page.getByTestId('ct-toggle-json-error').click();
+    await expect(
+      page.getByText('Simulated invalid JSON message from parent')
+    ).toBeVisible();
+    await page.getByTestId('ct-toggle-json-error').click();
+    await expect(
+      page.getByText('Simulated invalid JSON message from parent')
+    ).toHaveCount(0);
+  });
+
+  test('helperText is visible', async ({ mount, page }) => {
+    await mount(<JsonEditorCodeMirrorCtHost mode="evaluator-config" />);
