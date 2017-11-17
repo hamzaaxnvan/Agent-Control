@@ -68,39 +68,3 @@ export const JsonForm = ({ form }: EvaluatorFormProps<JsonFormValues>) => {
         styles={{ input: { fontFamily: 'monospace' } }}
         {...form.getInputProps('field_types')}
       />
-
-      <Textarea
-        label={
-          <LabelWithTooltip
-            label="Field constraints"
-            tooltip="JSON mapping of field paths to constraints (min/max for numbers, enum for allowed values, min_length/max_length for strings)"
-          />
-        }
-        labelProps={labelPropsInline}
-        placeholder='{"price": {"min": 0, "max": 10000}, "status": {"enum": ["active", "inactive"]}}'
-        minRows={3}
-        maxRows={8}
-        autosize
-        size="sm"
-        styles={{ input: { fontFamily: 'monospace' } }}
-        {...form.getInputProps('field_constraints')}
-      />
-
-      <Textarea
-        label={
-          <LabelWithTooltip
-            label="Field patterns"
-            tooltip="JSON mapping of field paths to regex patterns (RE2 syntax). Can be string or object with pattern and flags"
-          />
-        }
-        labelProps={labelPropsInline}
-        placeholder='{"email": "^[a-z]+@[a-z]+\\.[a-z]+$", "phone": {"pattern": "^\\d{10}$", "flags": ["IGNORECASE"]}}'
-        minRows={3}
-        maxRows={8}
-        autosize
-        size="sm"
-        styles={{ input: { fontFamily: 'monospace' } }}
-        {...form.getInputProps('field_patterns')}
-      />
-
-      <Divider label="Validation Behavior" labelPosition="left" />

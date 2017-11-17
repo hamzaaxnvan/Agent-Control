@@ -12,10 +12,3 @@ export class Evaluators extends ClientSDK {
    * List available evaluators
    *
    * @remarks
-   * List all available evaluators.
-   *
-   * Returns metadata and JSON Schema for each built-in evaluator.
-   *
-   * Built-in evaluators:
-   * - **regex**: Regular expression pattern matching
-   * - **list**: List-based value matching with flexible logic
