@@ -24,29 +24,3 @@ export type InitAgentRequest = {
   /**
    * Agent metadata for registration and tracking.
    *
-   * @remarks
-   *
-   * An agent represents an AI system that can be protected and monitored.
-   * Each agent has a unique immutable name and can have multiple steps registered with it.
-   */
-  agent: Agent;
-  /**
-   * Conflict handling mode for initAgent registration updates.
-   *
-   * @remarks
-   *
-   * STRICT preserves compatibility checks and raises conflicts on incompatible changes.
-   * OVERWRITE applies latest-init-wins replacement for steps and evaluators.
-   */
-  conflictMode?: ConflictMode | undefined;
-  /**
-   * Custom evaluator schemas for config validation
-   */
-  evaluators?: Array<EvaluatorSchema> | undefined;
-  /**
-   * If true, replace corrupted agent data instead of failing. Use only when agent data is corrupted and cannot be parsed.
-   */
-  forceReplace?: boolean | undefined;
-  /**
-   * List of steps available to the agent
-   */

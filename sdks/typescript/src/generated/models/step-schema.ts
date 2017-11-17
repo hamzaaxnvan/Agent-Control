@@ -38,3 +38,24 @@ export type StepSchema = {
    */
   type: string;
 };
+
+/** @internal */
+export const StepSchema$inboundSchema: z.ZodMiniType<StepSchema, unknown> = z
+  .pipe(
+    z.object({
+      description: z.optional(z.nullable(types.string())),
+      input_schema: z.optional(z.nullable(z.record(z.string(), z.any()))),
+      metadata: z.optional(z.nullable(z.record(z.string(), z.any()))),
+      name: types.string(),
+      output_schema: z.optional(z.nullable(z.record(z.string(), z.any()))),
+      type: types.string(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        "input_schema": "inputSchema",
+        "output_schema": "outputSchema",
+      });
+    }),
+  );
+/** @internal */
+export type StepSchema$Outbound = {
