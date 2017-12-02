@@ -59,3 +59,65 @@ def get_or_create_store(config: BudgetEvaluatorConfig) -> BudgetStore:
     """Get or create a store for the given config, thread-safe."""
     key = f"budget:{config.budget_id}"
     with _STORE_REGISTRY_LOCK:
+        store = _STORE_REGISTRY.get(key)
+        if store is None:
+            store = InMemoryBudgetStore()
+            _STORE_REGISTRY[key] = store
+        return store
+
+
+def clear_budget_stores() -> None:
+    """Clear all budget stores. Useful for testing."""
+    with _STORE_REGISTRY_LOCK:
+        _STORE_REGISTRY.clear()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_by_path(data: Any, path: str) -> Any:
+    """Extract a value from nested data using dot-notation path."""
+    current = data
+    for part in path.split("."):
+        if part.startswith("__"):
+            return None
+        if isinstance(current, dict):
+            current = current.get(part)
+        elif hasattr(current, part):
+            current = getattr(current, part)
+        else:
+            return None
+        if current is None:
+            return None
+    return current
+
+
+def _extract_tokens(data: Any, token_path: str | None) -> tuple[int, int]:
+    """Extract (input_tokens, output_tokens) from step data.
+
+    Tries token_path first, then standard field names.
+    Returns (0, 0) if no token information found.
+    """
+    if data is None:
+        return 0, 0
+
+    if token_path:
+        val = _extract_by_path(data, token_path)
+        if isinstance(val, int) and not isinstance(val, bool) and val >= 0:
+            # When token_path resolves to a single int we cannot distinguish
+            # input vs output. Attribute the whole count to output because
+            # output rates are typically higher than input rates in pricing
+            # tables, so this over-estimates cost rather than under-estimates.
+            return 0, val
+        if isinstance(val, dict):
+            data = val
+
+    if isinstance(data, dict):
+        usage = data.get("usage", data)
+        if isinstance(usage, dict):
+            inp = usage.get("input_tokens")
+            if inp is None:
+                inp = usage.get("prompt_tokens")
+            out = usage.get("output_tokens")
