@@ -15,21 +15,3 @@ const eslintConfig = defineConfig([
     'next-env.d.ts',
     // Auto-generated files
     'src/core/api/generated/**',
-  ]),
-  {
-    plugins: {
-      'simple-import-sort': simpleImportSort,
-      'unused-imports': unusedImports,
-      '@typescript-eslint': tseslint.plugin,
-    },
-    rules: {
-      // Import sorting
-      'simple-import-sort/imports': 'error',
-      'simple-import-sort/exports': 'error',
-
-      // Unused imports
-      'unused-imports/no-unused-imports': 'error',
-      'unused-imports/no-unused-vars': [
-        'warn',
-        {
-          vars: 'all',
