@@ -60,3 +60,66 @@ export function controlsCloneAndBindControl(
 }
 
 async function $do(
+  client: AgentControlSDKCore,
+  request:
+    operations.CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      models.CloneAndBindControlResponse,
+      | errors.HTTPValidationError
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) =>
+      z.parse(
+        operations
+          .CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest$outboundSchema,
+        value,
+      ),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = encodeJSON("body", payload.body, { explode: true });
+
+  const pathParams = {
+    control_id: encodeSimple("control_id", payload.control_id, {
+      explode: false,
+      charEncoding: "percent",
+    }),
+  };
+
+  const path = pathToFunc("/api/v1/controls/{control_id}/clone-and-bind")(
+    pathParams,
+  );
+
+  const headers = new Headers(compactMap({
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID:
+      "clone_and_bind_control_api_v1_controls__control_id__clone_and_bind_post",
+    oAuth2Scopes: null,
