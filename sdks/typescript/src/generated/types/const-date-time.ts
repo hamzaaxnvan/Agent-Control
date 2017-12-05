@@ -3,8 +3,3 @@
  */
 
 import * as z from "zod/v4-mini";
-
-export function constDateTime(
-  val: string,
-): z.ZodMiniType<string, unknown> {
-  return z.custom<string>((v) => {

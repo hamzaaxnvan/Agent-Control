@@ -25,3 +25,57 @@ export class ErrorBoundary extends Component<
     super(props);
     this.state = { hasError: false, error: null };
   }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    // Log error to console (can be extended to send to monitoring service)
+    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    this.props.onError?.(error, errorInfo);
+  }
+
+  handleReset = (): void => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  handleRefresh = (): void => {
+    window.location.reload();
+  };
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      // Custom fallback
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+
+      // Default fallback based on variant
+      const { variant = 'content' } = this.props;
+
+      if (variant === 'page') {
+        return <FullPageError onRefresh={this.handleRefresh} />;
+      }
+
+      if (variant === 'modal') {
+        return <ModalError onRetry={this.handleReset} />;
+      }
+
+      // Default: content variant
+      return <ContentError onRetry={this.handleReset} />;
+    }
+
+    return this.props.children;
+  }
+}
+
+// Full page error - used at top level
+function FullPageError({ onRefresh }: { onRefresh: () => void }) {
+  return (
+    <Stack
+      align="center"
+      justify="center"
+      h="100vh"
+      gap="lg"
+      p="xl"
