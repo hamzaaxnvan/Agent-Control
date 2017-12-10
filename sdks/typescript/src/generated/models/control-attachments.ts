@@ -26,18 +26,3 @@ export type ControlAttachments = {
   /**
    * Policy associations for this control
    */
-  policies?: Array<PolicyRef> | undefined;
-  /**
-   * Target bindings for this control
-   */
-  targets?: Array<TargetAttachmentRef> | undefined;
-  /**
-   * Total target bindings matching the attachment filters
-   */
-  targetsTotal: number;
-  /**
-   * Whether the target bindings list was capped
-   */
-  targetsTruncated: boolean;
-};
-
