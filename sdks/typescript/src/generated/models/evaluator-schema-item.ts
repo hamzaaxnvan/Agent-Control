@@ -25,12 +25,3 @@ export const EvaluatorSchemaItem$inboundSchema: z.ZodMiniType<
 > = z.pipe(
   z.object({
     config_schema: z.record(z.string(), z.any()),
-    description: types.nullable(types.string()),
-    name: types.string(),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
-      "config_schema": "configSchema",
-    });
-  }),
-);
