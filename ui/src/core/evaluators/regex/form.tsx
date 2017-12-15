@@ -12,3 +12,10 @@ export const RegexForm = ({ form }: EvaluatorFormProps<RegexFormValues>) => {
   return (
     <Stack gap="md">
       <TextInput
+        label={
+          <LabelWithTooltip
+            label="Pattern"
+            tooltip="Regular expression pattern to match against"
+          />
+        }
+        labelProps={labelPropsInline}
