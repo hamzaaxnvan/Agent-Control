@@ -6,19 +6,3 @@ import * as z from "zod/v4-mini";
 
 export type CreatePolicyRequest = {
   /**
-   * Unique policy name (letters, numbers, hyphens, underscores)
-   */
-  name: string;
-};
-
-/** @internal */
-export type CreatePolicyRequest$Outbound = {
-  name: string;
-};
-
-/** @internal */
-export const CreatePolicyRequest$outboundSchema: z.ZodMiniType<
-  CreatePolicyRequest$Outbound,
-  CreatePolicyRequest
-> = z.object({
-  name: z.string(),
