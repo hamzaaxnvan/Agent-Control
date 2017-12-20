@@ -36,3 +36,41 @@ def simulate_query(query: str) -> str:
     if "employee" in q or "staff" in q:
         rows = SIMULATED_DB["employees"]
     elif "project" in q:
+        rows = SIMULATED_DB["projects"]
+    elif "metric" in q or "revenue" in q or "quarterly" in q:
+        rows = SIMULATED_DB["quarterly_metrics"]
+    else:
+        rows = SIMULATED_DB["quarterly_metrics"]  # default
+
+    # Respect LIMIT if present
+    limit_match = re.search(r"limit\s+(\d+)", q)
+    if limit_match:
+        limit = int(limit_match.group(1))
+        rows = rows[:limit]
+
+    return json.dumps(rows, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Async inner function + @control() decorator
+# ---------------------------------------------------------------------------
+
+async def _query_database(query: str) -> str:
+    """Execute a database query (simulated). Protected by Agent Control."""
+    return simulate_query(query)
+
+
+# Mark as tool for step detection
+_query_database.name = "query_database"           # type: ignore[attr-defined]
+_query_database.tool_name = "query_database"       # type: ignore[attr-defined]
+
+# Apply @control() decorator
+_controlled_query_database = control()(_query_database)
+
+
+# ---------------------------------------------------------------------------
+# CrewAI @tool wrapper
+# ---------------------------------------------------------------------------
+
+@tool("query_database")
+def query_database(query: str) -> str:
