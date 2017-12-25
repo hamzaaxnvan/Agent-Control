@@ -11,17 +11,3 @@ class TraceContext(TypedDict):
     span_id: str
 
 
-TraceContextProvider = Callable[[], TraceContext | None]
-
-_trace_context_provider: TraceContextProvider | None = None
-
-
-def set_trace_context_provider(provider: TraceContextProvider | None) -> None:
-    """Register a provider that returns the current trace context."""
-    global _trace_context_provider
-    _trace_context_provider = provider
-
-
-def get_trace_context_from_provider() -> TraceContext | None:
-    """Return trace context from the registered provider, if any."""
-    if _trace_context_provider is None:

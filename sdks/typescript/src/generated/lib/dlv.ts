@@ -19,3 +19,24 @@ copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+
+/**
+ * @param obj The object to walk
+ * @param key The key path to walk the object with
+ * @param def A default value to return if the result is undefined
+ *
+ * @example
+ * dlv(obj, "a.b.c.d")
+ * @example
+ * dlv(object, ["a", "b", "c", "d"])
+ * @example
+ * dlv(object, "foo.bar.baz", "Hello, default value!")
+ */
+export function dlv<T = any>(
+  obj: any,
+  key: string | string[],
