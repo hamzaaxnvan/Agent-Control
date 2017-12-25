@@ -69,3 +69,38 @@ def test_module_loads_when_galileo_luna_is_unavailable():
     """Hiding ``agent_control_evaluator_galileo.luna`` exercises its except branch."""
     reloaded = _reload_evaluators_with_blocked("agent_control_evaluator_galileo.luna")
 
+    # Core names are always present.
+    assert "Evaluator" in reloaded.__all__
+    # Luna names are NOT present because the import failed.
+    assert "LunaEvaluator" not in reloaded.__all__
+    assert "GalileoLunaClient" not in reloaded.__all__
+
+
+def test_module_loads_when_galileo_llm_is_unavailable():
+    """Hiding ``agent_control_evaluator_galileo.llm`` exercises its except branch."""
+    reloaded = _reload_evaluators_with_blocked("agent_control_evaluator_galileo.llm")
+
+    # Core names are always present.
+    assert "Evaluator" in reloaded.__all__
+    # LLM names are NOT present because the import failed.
+    assert "LlmEvaluator" not in reloaded.__all__
+    assert "GalileoLLMClient" not in reloaded.__all__
+
+
+def test_module_loads_when_galileo_package_is_unavailable():
+    """Hiding the whole package exercises the ImportError fallback."""
+    reloaded = _reload_evaluators_with_blocked("agent_control_evaluator_galileo")
+
+    assert "Evaluator" in reloaded.__all__
+    # The optional luna and llm names are absent.
+    for absent in (
+        "LunaEvaluator",
+        "GalileoLunaClient",
+        "LUNA_AVAILABLE",
+        "LlmEvaluator",
+        "GalileoLLMClient",
+        "LLM_AVAILABLE",
+    ):
+        assert absent not in reloaded.__all__
+
+

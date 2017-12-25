@@ -20,3 +20,25 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 export type EvaluatorSchema = {
   /**
    * JSON Schema for evaluator config validation
+   */
+  configSchema?: { [k: string]: any } | undefined;
+  /**
+   * Optional description
+   */
+  description?: string | null | undefined;
+  /**
+   * Unique evaluator name
+   */
+  name: string;
+};
+
+/** @internal */
+export const EvaluatorSchema$inboundSchema: z.ZodMiniType<
+  EvaluatorSchema,
+  unknown
+> = z.pipe(
+  z.object({
+    config_schema: types.optional(z.record(z.string(), z.any())),
+    description: z.optional(z.nullable(types.string())),
+    name: types.string(),
+  }),
