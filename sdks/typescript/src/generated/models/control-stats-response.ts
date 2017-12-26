@@ -36,3 +36,22 @@ export type ControlStatsResponse = {
   /**
    * Control name
    */
+  controlName: string;
+  /**
+   * Agent-level aggregate statistics.
+   *
+   * @remarks
+   *
+   * Invariant: execution_count = match_count + non_match_count + error_count
+   *
+   * Matches have actions (deny, steer, observe) tracked in action_counts.
+   * sum(action_counts.values()) == match_count
+   *
+   * Attributes:
+   *     execution_count: Total executions across all controls
+   *     match_count: Total matches across all controls (evaluator matched)
+   *     non_match_count: Total non-matches across all controls (evaluator didn't match)
+   *     error_count: Total errors across all controls (evaluation failed)
+   *     action_counts: Breakdown of actions for matched executions
+   *     timeseries: Time-series data points (only when include_timeseries=true)
+   */
