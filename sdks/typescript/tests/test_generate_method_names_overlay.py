@@ -32,38 +32,3 @@ def test_controls_patch_uses_update_metadata_exception(overlay_gen):
             "/api/v1/controls/{control_id}": {
                 "patch": {
                     "operationId": "patch_control_api_v1_controls__control_id__patch",
-                },
-                "get": {
-                    "operationId": "get_control_api_v1_controls__control_id__get",
-                },
-            },
-            "/api/v1/controls/{control_id}/data": {
-                "put": {
-                    "operationId": "set_control_data_api_v1_controls__control_id__data_put",
-                },
-            },
-        },
-    }
-    operations = overlay_gen.iter_operations(schema)
-    names = overlay_gen.resolve_names(operations)
-
-    assert names[("/api/v1/controls/{control_id}", "patch")] == (
-        "controls",
-        "updateMetadata",
-    )
-    assert names[("/api/v1/controls/{control_id}", "get")] == ("controls", "get")
-    assert names[("/api/v1/controls/{control_id}/data", "put")] == (
-        "controls",
-        "updateData",
-    )
-
-
-def test_plural_collection_get_is_list_but_singular_get_is_get(overlay_gen):
-    schema = {
-        "paths": {
-            "/api/v1/agents": {
-                "get": {
-                    "operationId": "list_agents_api_v1_agents_get",
-                },
-            },
-            "/api/v1/agents/{agent_name}": {

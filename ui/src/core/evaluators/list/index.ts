@@ -20,25 +20,3 @@ export const listEvaluator: EvaluatorDefinition<ListFormValues> = {
   },
 
   validate: {
-    values: (value) => {
-      const trimmedValues = (value as string)
-        .split('\n')
-        .filter((v) => v.trim() !== '');
-      if (trimmedValues.length === 0) {
-        return 'At least one value is required';
-      }
-      return null;
-    },
-  },
-
-  toConfig: (values) => {
-    // Convert newline-separated string to array, pass rest through directly
-    const rawValues = typeof values.values === 'string' ? values.values : '';
-    const valuesList = rawValues.split('\n').filter((v) => v.trim() !== '');
-    return {
-      ...values,
-      values: valuesList,
-    };
-  },
-
-  fromConfig: (config) => ({
