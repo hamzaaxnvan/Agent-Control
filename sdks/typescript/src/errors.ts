@@ -1,0 +1,21 @@
+export type ControlAction = "deny" | "steer" | "observe";
+
+export interface EvaluationResult {
+  isSafe: boolean;
+  reason?: string;
+}
+
+export class ControlViolationError extends Error {
+  readonly controlName: string;
+  readonly controlId: string;
+  readonly action: ControlAction;
+  readonly evaluationResult: EvaluationResult;
+
+  constructor(params: {
+    controlName: string;
+    controlId: string;
+    action: ControlAction;
+    evaluationResult: EvaluationResult;
+    message?: string;
+  }) {
+    super(params.message ?? `Control violation: ${params.controlName}`);

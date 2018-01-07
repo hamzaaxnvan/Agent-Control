@@ -17,23 +17,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  *   meaning the entire Step object.
  */
 export type ControlSelector = {
-  /**
-   * Path to data using dot notation. Examples: 'input', 'output', 'context.user_id', 'name', 'type', '*'
-   */
-  path?: string | null | undefined;
-};
-
-/** @internal */
-export const ControlSelector$inboundSchema: z.ZodMiniType<
-  ControlSelector,
-  unknown
-> = z.object({
-  path: z.optional(z.nullable(types.string())),
-});
-/** @internal */
-export type ControlSelector$Outbound = {
-  path?: string | null | undefined;
-};
-
-/** @internal */
-export const ControlSelector$outboundSchema: z.ZodMiniType<
