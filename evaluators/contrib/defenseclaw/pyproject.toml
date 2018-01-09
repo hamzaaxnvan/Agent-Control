@@ -1,0 +1,14 @@
+[project]
+name = "agent-control-evaluator-defenseclaw"
+version = "8.15.0"
+description = "DefenseClaw evaluators for agent-control"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Agent Control Team" }]
+dependencies = [
+    "agent-control-evaluators>=8.2.0",
+    "agent-control-models>=8.2.0",
+]
+
+[project.optional-dependencies]

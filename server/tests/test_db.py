@@ -47,3 +47,52 @@ def _checked_out_connections_sample() -> float | None:
         "agent_control_server_sqlalchemy_checked_out_connections",
         {"pool_name": "default"},
     )
+
+
+def test_build_async_engine_kwargs_applies_postgres_pool_config() -> None:
+    # Given: custom PostgreSQL connection pool and timeout settings
+    config = AgentControlServerDatabaseConfig(
+        pool_size=7,
+        max_overflow=2,
+        pool_timeout_seconds=3.5,
+        connect_timeout_seconds=4,
+        statement_timeout_seconds=2.5,
+    )
+
+    # When: building async engine kwargs for Postgres
+    kwargs = _build_async_engine_kwargs(
+        "postgresql+psycopg://user:password@localhost:5432/agent_control",
+        config,
+    )
+
+    # Then: the engine is configured with a bounded, health-checked pool and timeouts
+    assert kwargs == {
+        "echo": False,
+        "pool_pre_ping": True,
+        "pool_size": 7,
+        "max_overflow": 2,
+        "pool_timeout": 3.5,
+        "pool_reset_on_return": "rollback",
+        "connect_args": {
+            "connect_timeout": 4,
+            "options": "-c statement_timeout=2500",
+        },
+    }
+
+
+def test_build_async_engine_kwargs_uses_asyncpg_connect_args() -> None:
+    # Given: timeout settings with an asyncpg driver URL
+    config = AgentControlServerDatabaseConfig(
+        connect_timeout_seconds=4,
+        statement_timeout_seconds=2.5,
+    )
+
+    # When: building async engine kwargs for asyncpg
+    kwargs = _build_async_engine_kwargs(
+        "postgresql+asyncpg://user:password@localhost:5432/agent_control",
+        config,
+    )
+
+    # Then: the timeouts are expressed as asyncpg connect args
+    assert kwargs["connect_args"] == {
+        "timeout": 4.0,
