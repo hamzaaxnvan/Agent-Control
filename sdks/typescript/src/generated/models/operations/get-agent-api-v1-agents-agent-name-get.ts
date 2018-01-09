@@ -12,3 +12,17 @@ export type GetAgentApiV1AgentsAgentNameGetRequest = {
 /** @internal */
 export type GetAgentApiV1AgentsAgentNameGetRequest$Outbound = {
   agent_name: string;
+};
+
+/** @internal */
+export const GetAgentApiV1AgentsAgentNameGetRequest$outboundSchema:
+  z.ZodMiniType<
+    GetAgentApiV1AgentsAgentNameGetRequest$Outbound,
+    GetAgentApiV1AgentsAgentNameGetRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",

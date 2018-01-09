@@ -7,3 +7,23 @@ import { remap as remap$ } from "../../lib/primitives.js";
 
 export type RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest =
   {
+    agentName: string;
+    controlId: number;
+  };
+
+/** @internal */
+export type RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest$Outbound =
+  {
+    agent_name: string;
+    control_id: number;
+  };
+
+/** @internal */
+export const RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest$outboundSchema:
+  z.ZodMiniType<
+    RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest$Outbound,
+    RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+      controlId: z.int(),
