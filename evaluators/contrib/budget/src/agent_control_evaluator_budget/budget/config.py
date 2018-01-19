@@ -28,3 +28,33 @@ class BudgetLimitRule(EvaluatorConfig):
     """A single budget limit rule.
 
     Each rule defines a ceiling for a combination of scope dimensions
+    and time window. Multiple rules can apply to the same step -- the
+    evaluator checks all of them and triggers on the first breach.
+
+    Attributes:
+        scope: Static scope dimensions that must match for this rule
+            to apply. Empty dict = global rule.
+            Examples:
+                {"agent": "summarizer"} -- per-agent limit
+                {"agent": "summarizer", "channel": "slack"} -- agent+channel limit
+        group_by: If set, the limit is applied independently for each
+            unique value of this dimension. e.g. group_by="user_id" means
+            each user gets their own budget. None = shared/global limit.
+        window_seconds: Time window for accumulation in seconds.
+            None = cumulative (no reset). See WINDOW_* constants.
+        limit: Maximum usage in the window. Interpreted by limit_unit.
+        limit_unit: Unit for limit. usd_cents checks spend; tokens checks
+            input + output tokens.
+    """
+
+    scope: dict[str, str] = Field(default_factory=dict)
+    group_by: str | None = None
+    window_seconds: int | None = None
+    limit: int
+    limit_unit: Literal["usd_cents", "tokens"] = "usd_cents"
+
+    @field_validator("limit")
+    @classmethod
+    def validate_limit(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("limit must be a positive integer")

@@ -27,3 +27,32 @@ members = [
 [tool.uv]
 # Require resolution to be compatible with the following environments so that CI and local dev
 # pick versions with wheels available across platforms (fixes ruff wheel mismatch on Linux x86_64).
+required-environments = [
+  "sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.uv.sources]
+agent-control-models = { workspace = true }
+agent-control-engine = { workspace = true }
+agent-control-evaluators = { workspace = true }
+agent-control-telemetry = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# Allow late imports in examples (after sys.path manipulation)
+"examples/**/*.py" = ["E402"]
+# Allow late imports in tests (for test fixtures)
+"**/tests/**/*.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
