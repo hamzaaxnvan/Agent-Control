@@ -66,3 +66,72 @@ export function observabilityGetControlStats(
 > {
   return new APIPromise($do(
     client,
+    request,
+    options,
+  ));
+}
+
+async function $do(
+  client: AgentControlSDKCore,
+  request:
+    operations.GetControlStatsApiV1ObservabilityStatsControlsControlIdGetRequest,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      models.ControlStatsResponse,
+      | errors.HTTPValidationError
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) =>
+      z.parse(
+        operations
+          .GetControlStatsApiV1ObservabilityStatsControlsControlIdGetRequest$outboundSchema,
+        value,
+      ),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = null;
+
+  const pathParams = {
+    control_id: encodeSimple("control_id", payload.control_id, {
+      explode: false,
+      charEncoding: "percent",
+    }),
+  };
+
+  const path = pathToFunc("/api/v1/observability/stats/controls/{control_id}")(
+    pathParams,
+  );
+
+  const query = encodeFormQuery({
+    "agent_name": payload.agent_name,
+    "include_timeseries": payload.include_timeseries,
+    "time_range": payload.time_range,
+  });
+
+  const headers = new Headers(compactMap({
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {

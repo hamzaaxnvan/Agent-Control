@@ -16,3 +16,12 @@ export type SetControlDataApiV1ControlsControlIdDataPutRequest$Outbound = {
   control_id: number;
   body: models.SetControlDataRequest$Outbound;
 };
+
+/** @internal */
+export const SetControlDataApiV1ControlsControlIdDataPutRequest$outboundSchema:
+  z.ZodMiniType<
+    SetControlDataApiV1ControlsControlIdDataPutRequest$Outbound,
+    SetControlDataApiV1ControlsControlIdDataPutRequest
+  > = z.pipe(
+    z.object({
+      controlId: z.int(),
