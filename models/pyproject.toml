@@ -1,0 +1,15 @@
+[project]
+name = "agent-control-models"
+version = "8.15.0"
+description = "Shared data models for Agent Control server and SDK"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.12.4",
+    "jsonschema>=4.0.0",
+    "google-re2>=1.1",
+]
+authors = [
+    {name = "Agent Control Team"}
+]
+readme = "README.md"
+license = {text = "Apache-2.0"}
