@@ -194,3 +194,200 @@ async def test_postgres_event_store_idempotency_is_scoped_by_namespace() -> None
         action="observe",
         matched=True,
         timestamp=now,
+        trace_id="a" * 32,
+    )
+    event_b = _event(
+        control_execution_id=shared_execution_id,
+        agent_name=agent_name,
+        control_id=2,
+        action="deny",
+        matched=True,
+        timestamp=now,
+        trace_id="b" * 32,
+    )
+
+    await store.store([event_a], namespace_key="tenant-a")
+    await store.store([event_b], namespace_key="tenant-b")
+
+    query = EventQueryRequest(agent_name=agent_name, limit=10, offset=0)
+    events_a = await store.query_events(query, namespace_key="tenant-a")
+    events_b = await store.query_events(query, namespace_key="tenant-b")
+
+    assert [event.control_id for event in events_a.events] == [1]
+    assert [event.control_id for event in events_b.events] == [2]
+
+
+@pytest.mark.asyncio
+async def test_postgres_event_store_store_empty_returns_zero() -> None:
+    # Given: a Postgres-backed store
+    session_maker = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    store = PostgresEventStore(session_maker)
+
+    # When: storing an empty event list
+    stored = await store.store([], namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: zero events are reported as stored
+    assert stored == 0
+
+
+@pytest.mark.asyncio
+async def test_postgres_event_store_query_events_all_filters() -> None:
+    # Given: a Postgres-backed store with events across fields
+    session_maker = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    store = PostgresEventStore(session_maker)
+
+    agent_name = f"agent-{uuid4().hex[:12]}"
+    other_agent = f"agent-{uuid4().hex[:12]}"
+    now = datetime.now(UTC)
+
+    target_exec_id = "exec-1"
+    target_span_id = "span-1"
+    target_trace_id = "a" * 32
+
+    events = [
+        _event(
+            agent_name=agent_name,
+            control_id=1,
+            action="observe",
+            matched=True,
+            timestamp=now - timedelta(seconds=1),
+            trace_id=target_trace_id,
+            span_id=target_span_id,
+            control_execution_id=target_exec_id,
+            check_stage="pre",
+            applies_to="llm_call",
+        ),
+        _event(
+            agent_name=other_agent,
+            control_id=2,
+            action="deny",
+            matched=False,
+            timestamp=now,
+            trace_id="b" * 32,
+            span_id="span-2",
+            control_execution_id="exec-2",
+            check_stage="post",
+            applies_to="tool_call",
+        ),
+    ]
+
+    await store.store(events, namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # When: querying with all supported filters
+    query = EventQueryRequest(
+        control_execution_id=target_exec_id,
+        agent_name=agent_name,
+        start_time=now - timedelta(seconds=2),
+        end_time=now,
+        trace_id=target_trace_id,
+        span_id=target_span_id,
+        control_ids=[1],
+        actions=["observe"],
+        matched=True,
+        check_stages=["pre"],
+        applies_to=["llm_call"],
+        limit=10,
+        offset=0,
+    )
+    resp = await store.query_events(query, namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: only the matching event is returned
+    assert resp.total == 1
+    assert resp.events[0].control_execution_id == target_exec_id
+
+
+@pytest.mark.asyncio
+async def test_postgres_event_store_normalizes_legacy_advisory_rows() -> None:
+    # Given: a historical event row stored with a legacy advisory action name
+    session_maker = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    store = PostgresEventStore(session_maker)
+
+    agent_name = f"agent-{uuid4().hex[:12]}"
+    now = datetime.now(UTC)
+    event = _event(
+        agent_name=agent_name,
+        control_id=7,
+        action="observe",
+        matched=True,
+        timestamp=now,
+        trace_id="d" * 32,
+    )
+    legacy_payload = event.model_dump(mode="json")
+    legacy_payload["action"] = "warn"
+
+    async with session_maker() as session:
+        await session.execute(
+            text("""
+                INSERT INTO control_execution_events (
+                    control_execution_id, timestamp, agent_name, data
+                ) VALUES (
+                    :control_execution_id, :timestamp, :agent_name, CAST(:data AS JSONB)
+                )
+            """),
+            {
+                "control_execution_id": event.control_execution_id,
+                "timestamp": event.timestamp,
+                "agent_name": event.agent_name,
+                "data": json.dumps(legacy_payload),
+            },
+        )
+        await session.commit()
+
+    # When: querying with the canonical observe filter
+    resp = await store.query_events(
+        EventQueryRequest(agent_name=agent_name, actions=["observe"], limit=10, offset=0),
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+    )
+    stats = await store.query_stats(
+        agent_name, timedelta(hours=1), namespace_key=DEFAULT_NAMESPACE_KEY
+    )
+
+    # Then: the legacy row is returned and normalized to observe
+    assert resp.total == 1
+    assert resp.events[0].action == "observe"
+    assert stats.action_counts == {"observe": 1}
+
+
+@pytest.mark.asyncio
+async def test_postgres_event_store_timeseries_includes_steer_and_observe_counts() -> None:
+    # Given: a Postgres-backed store with steer and advisory events
+    session_maker = async_sessionmaker(
+        bind=async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    store = PostgresEventStore(session_maker)
+
+    agent_name = f"agent-{uuid4().hex[:12]}"
+    now = datetime.now(UTC)
+
+    events = [
+        _event(
+            agent_name=agent_name,
+            control_id=1,
+            action="steer",
+            matched=True,
+            timestamp=now - timedelta(seconds=10),
+            trace_id="a" * 32,
+        ),
+        _event(
+            agent_name=agent_name,
+            control_id=2,
+            action="observe",
+            matched=True,
+            timestamp=now - timedelta(seconds=5),
+            trace_id="b" * 32,
+        ),
+        _event(
