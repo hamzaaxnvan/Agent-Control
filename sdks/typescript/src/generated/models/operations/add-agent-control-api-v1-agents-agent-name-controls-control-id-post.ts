@@ -21,3 +21,14 @@ export type AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest$Outb
 export const AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest$outboundSchema:
   z.ZodMiniType<
     AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest$Outbound,
+    AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+      controlId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+        controlId: "control_id",
+      });
