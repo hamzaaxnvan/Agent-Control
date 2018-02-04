@@ -19,13 +19,3 @@ export type PatchControlBindingResponse = {
   /**
    * Whether the update succeeded.
    */
-  success: boolean;
-};
-
-/** @internal */
-export const PatchControlBindingResponse$inboundSchema: z.ZodMiniType<
-  PatchControlBindingResponse,
-  unknown
-> = z.object({
-  enabled: types.boolean(),
-  success: types.boolean(),
