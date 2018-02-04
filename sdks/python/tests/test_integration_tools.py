@@ -16,3 +16,13 @@ from agent_control.integrations._tools import normalize_strands_tool_specs
 )
 def test_normalizer_rejects_incomplete_strands_registries(specs: object) -> None:
     # Given/When: the purported complete registry has an invalid shape
+    normalized = normalize_strands_tool_specs(specs)
+
+    # Then: the integration leaves tools absent rather than guessing
+    assert normalized is None
+
+
+@pytest.mark.parametrize(
+    ("input_schema", "expected"),
+    [
+        ({"type": "object", "properties": {}}, {"type": "object", "properties": {}}),
