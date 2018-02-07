@@ -12,3 +12,33 @@ export const QueryParamTimeRange = {
   Fifteenm: "15m",
   Oneh: "1h",
   TwentyFourh: "24h",
+  Sevend: "7d",
+  Thirtyd: "30d",
+  OneHundredAndEightyd: "180d",
+  ThreeHundredAndSixtyFived: "365d",
+} as const;
+export type QueryParamTimeRange = ClosedEnum<typeof QueryParamTimeRange>;
+
+export type GetControlStatsApiV1ObservabilityStatsControlsControlIdGetRequest =
+  {
+    controlId: number;
+    agentName: string;
+    timeRange?: QueryParamTimeRange | undefined;
+    includeTimeseries?: boolean | undefined;
+  };
+
+/** @internal */
+export const QueryParamTimeRange$outboundSchema: z.ZodMiniEnum<
+  typeof QueryParamTimeRange
+> = z.enum(QueryParamTimeRange);
+
+/** @internal */
+export type GetControlStatsApiV1ObservabilityStatsControlsControlIdGetRequest$Outbound =
+  {
+    control_id: number;
+    agent_name: string;
+    time_range: string;
+    include_timeseries: boolean;
+  };
+
+/** @internal */
