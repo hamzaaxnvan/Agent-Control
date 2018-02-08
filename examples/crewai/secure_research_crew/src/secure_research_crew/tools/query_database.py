@@ -55,22 +55,3 @@ def simulate_query(query: str) -> str:
 # Async inner function + @control() decorator
 # ---------------------------------------------------------------------------
 
-async def _query_database(query: str) -> str:
-    """Execute a database query (simulated). Protected by Agent Control."""
-    return simulate_query(query)
-
-
-# Mark as tool for step detection
-_query_database.name = "query_database"           # type: ignore[attr-defined]
-_query_database.tool_name = "query_database"       # type: ignore[attr-defined]
-
-# Apply @control() decorator
-_controlled_query_database = control()(_query_database)
-
-
-# ---------------------------------------------------------------------------
-# CrewAI @tool wrapper
-# ---------------------------------------------------------------------------
-
-@tool("query_database")
-def query_database(query: str) -> str:

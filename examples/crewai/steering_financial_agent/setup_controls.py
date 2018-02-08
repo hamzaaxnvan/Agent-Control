@@ -137,3 +137,73 @@ async def setup():
                                             "properties": {
                                                 "amount": {
                                                     "type": "number",
+                                                    "exclusiveMaximum": 10000,
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "properties": {
+                                                "amount": {
+                                                    "type": "number",
+                                                    "minimum": 10000,
+                                                },
+                                                "verified_2fa": {"const": True},
+                                            }
+                                        },
+                                    ]
+                                }
+                            },
+                        },
+                    },
+                    "action": {
+                        "decision": "steer",
+                        "steering_context": {
+                            "message": (
+                                '{"required_actions": ["verify_2fa"],'
+                                ' "reason": "Transfers >= $10,000 require identity verification.'
+                                " Please verify the customer's 2FA code before proceeding.\","
+                                ' "retry_with": {"verified_2fa": true}}'
+                            )
+                        },
+                    },
+                },
+            ),
+            # ┌─────────────────────────────────────────────────────────┐
+            # │  STEER: Very Large Transfer → Manager Approval         │
+            # │  Uses JSON evaluator with oneOf schema.                │
+            # │  Either amount < $50k OR amount >= $50k with approval. │
+            # │  Multi-step: collect justification, then get approval. │
+            # └─────────────────────────────────────────────────────────┘
+            (
+                "steer-require-manager-approval",
+                {
+                    "description": "Require manager approval for transfers >= $50,000",
+                    "enabled": True,
+                    "execution": "server",
+                    "scope": {
+                        "step_types": ["tool"],
+                        "step_names": ["process_transfer"],
+                        "stages": ["pre"],
+                    },
+                    "condition": {
+                        "selector": {"path": "input"},
+                        "evaluator": {
+                            "name": "json",
+                            "config": {
+                                "json_schema": {
+                                    "type": "object",
+                                    "oneOf": [
+                                        {
+                                            "properties": {
+                                                "amount": {
+                                                    "type": "number",
+                                                    "exclusiveMaximum": 50000,
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "properties": {
+                                                "amount": {
+                                                    "type": "number",
+                                                    "minimum": 50000,
+                                                },
