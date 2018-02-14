@@ -17,13 +17,3 @@ export type RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest
     agent_name: string;
     control_id: number;
   };
-
-/** @internal */
-export const RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest$outboundSchema:
-  z.ZodMiniType<
-    RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest$Outbound,
-    RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest
-  > = z.pipe(
-    z.object({
-      agentName: z.string(),
-      controlId: z.int(),
