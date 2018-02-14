@@ -40,3 +40,87 @@ function EmptyAgentsState() {
         </Text>
         <Box w="100%">
           <CodeHighlight
+            language="python"
+            code={`import agent_control
+from agent_control import control, ControlViolationError
+
+agent_control.init(
+    agent_name="support-agent-v1",
+    agent_description="Customer Support Agent",
+    server_url="http://localhost:8000",
+)
+
+@control()
+async def chat(message: str) -> str:
+    return await llm.generate(message)`}
+          />
+        </Box>
+        <Anchor
+          href="https://github.com/agentcontrol/agent-control/blob/main/README.md"
+          target="_blank"
+          size="sm"
+          c="blue"
+          underline="hover"
+        >
+          <Group gap={4} align="center">
+            <Text size="sm">View docs</Text>
+            <IconExternalLink size={14} />
+          </Group>
+        </Anchor>
+      </Stack>
+    </Center>
+  );
+}
+
+const HomePage = () => {
+  const router = useRouter();
+  // Get search value for debouncing (SearchInput handles the UI and URL sync)
+  const [searchQuery] = useQueryParam('search');
+  const [debouncedSearch] = useDebouncedValue(searchQuery, 300);
+
+  // Server-side search via name param
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    error,
+  } = useAgentsInfinite({
+    name: debouncedSearch || undefined,
+  });
+
+  // Infinite scroll setup
+  const { sentinelRef } = useInfiniteScroll({
+    hasNextPage: hasNextPage ?? false,
+    isFetchingNextPage,
+    fetchNextPage,
+  });
+
+  // Flatten paginated data
+  const agents: AgentTableRow[] = useMemo(() => {
+    return data?.pages.flatMap((page) => page.agents) || [];
+  }, [data]);
+
+  const handleRowClick = (agent: AgentTableRow) => {
+    router.push(getAgentRoute(agent.agent_name));
+  };
+
+  // Define table columns
+  const columns: ColumnDef<AgentTableRow>[] = [
+    {
+      id: 'agent_name',
+      header: 'Agent name',
+      accessorKey: 'agent_name',
+      cell: ({ row }: { row: any }) => (
+        <Text size="sm" fw={500}>
+          {row.original.agent_name}
+        </Text>
+      ),
+    },
+    {
+      id: 'activeControls',
+      header: 'Active controls',
+      accessorKey: 'active_controls_count',
+      size: 140,
+      cell: ({ row }: { row: any }) => (
