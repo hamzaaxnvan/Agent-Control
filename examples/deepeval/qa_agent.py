@@ -136,3 +136,141 @@ class MockQASystem:
         if "trigger_incoherent" in question_lower or "incoherent" in question_lower:
             return cls.INCOHERENT_RESPONSES["trigger_incoherent"]
 
+        if "trigger_irrelevant" in question_lower or "irrelevant" in question_lower:
+            return cls.IRRELEVANT_RESPONSES["trigger_irrelevant"]
+
+        # Match question to good responses
+        if "python" in question_lower:
+            return cls.GOOD_RESPONSES["python"]
+        elif "capital" in question_lower and "france" in question_lower:
+            return cls.GOOD_RESPONSES["capital"]
+        elif "photosynthesis" in question_lower:
+            return cls.GOOD_RESPONSES["photosynthesis"]
+        elif "gravity" in question_lower:
+            return cls.GOOD_RESPONSES["gravity"]
+        else:
+            # Default educational response
+            return (
+                f"That's an interesting question about '{question}'. "
+                "Based on general knowledge, I can provide information on this topic. "
+                "Would you like me to explain in more detail?"
+            )
+
+
+# =============================================================================
+# PROTECTED AGENT FUNCTION
+# =============================================================================
+
+
+@control()
+async def answer_question(question: str) -> str:
+    """
+    Answer a question with quality controls.
+
+    The @control() decorator:
+    - Checks 'pre' controls before generating (validates input)
+    - Checks 'post' controls after generating (validates output quality)
+
+    DeepEval controls check:
+    - Coherence: Is the response logically consistent?
+    - Relevance: Does it address the question?
+    - Correctness: Is it factually accurate? (if enabled)
+
+    If a control fails, ControlViolationError is raised.
+    """
+    print(f"DEBUG: answer_question called with question: {question[:50]}...")
+    response = MockQASystem.answer_question(question)
+    print(f"DEBUG: Generated response: {response[:50]}...")
+    return response
+
+
+# =============================================================================
+# Q&A AGENT CLASS
+# =============================================================================
+
+
+class QAAgent:
+    """
+    Question answering agent with DeepEval quality controls.
+
+    Demonstrates graceful error handling when quality controls fail.
+    """
+
+    def __init__(self):
+        initialize_agent_control()
+        self.conversation_history: list[dict[str, str]] = []
+
+    async def ask(self, question: str) -> str:
+        """
+        Ask a question and get an answer.
+
+        Handles ControlViolationError gracefully by returning
+        a helpful message instead of exposing internal errors.
+        """
+        self.conversation_history.append({"role": "user", "content": question})
+
+        # Debug: Check if agent is still initialized
+        current_agent = agent_control.current_agent()
+        current_agent_name = current_agent.agent_name if current_agent else "NONE"
+        print(f"DEBUG: Current agent before call: {current_agent_name}")
+
+        try:
+            # Get answer - protected by DeepEval controls
+            print("DEBUG: About to call answer_question (with @control decorator)")
+            answer = await answer_question(question)
+            print("DEBUG: answer_question returned successfully")
+
+            self.conversation_history.append({"role": "assistant", "content": answer})
+            return answer
+
+        except ControlViolationError as e:
+            print(f"DEBUG: ControlViolationError caught: {e}")
+            # Control triggered - return helpful feedback
+            fallback = (
+                f"I apologize, but my response didn't meet quality standards. "
+                f"({e.control_name})\n\n"
+                f"Could you rephrase your question or ask something else?"
+            )
+            self.conversation_history.append({"role": "assistant", "content": fallback})
+            print(f"\n⚠️  Quality control triggered: {e.control_name}")
+            print(f"    Reason: {e.message}")
+            return fallback
+        except Exception as e:
+            print(f"DEBUG: Unexpected exception: {type(e).__name__}: {e}")
+            raise
+
+
+# =============================================================================
+# INTERACTIVE MODE
+# =============================================================================
+
+
+def print_header():
+    """Print the demo header."""
+    print()
+    print("=" * 70)
+    print("  Q&A Agent with DeepEval Quality Controls")
+    print("=" * 70)
+    print()
+    print("This agent uses DeepEval GEval to enforce response quality:")
+    print("  ✓ Coherence - Responses must be logically consistent")
+    print("  ✓ Relevance - Answers must address the question")
+    print("  ○ Correctness - Factual accuracy (disabled by default)")
+    print()
+    print("Commands:")
+    print("  /test-good       Test with high-quality questions")
+    print("  /test-bad        Test quality control triggers")
+    print("  /help            Show this help")
+    print("  /quit            Exit")
+    print()
+    print("Or just type a question!")
+    print("-" * 70)
+    print()
+
+
+def print_help():
+    """Print help information."""
+    print()
+    print("Available Commands:")
+    print("  /test-good      Test with questions that produce quality answers")
+    print("  /test-bad       Test questions that trigger quality controls")
