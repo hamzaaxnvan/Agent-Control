@@ -19,24 +19,3 @@ export class HTTPValidationError extends AgentControlSDKError {
 
   constructor(
     err: HTTPValidationErrorData,
-    httpMeta: { response: Response; request: Request; body: string },
-  ) {
-    const message = "message" in err && typeof err.message === "string"
-      ? err.message
-      : `API error occurred: ${JSON.stringify(err)}`;
-    super(message, httpMeta);
-    this.data$ = err;
-    if (err.detail != null) this.detail = err.detail;
-
-    this.name = "HTTPValidationError";
-  }
-}
-
-/** @internal */
-export const HTTPValidationError$inboundSchema: z.ZodMiniType<
-  HTTPValidationError,
-  unknown
-> = z.pipe(
-  z.object({
-    detail: types.optional(z.array(models.ValidationError$inboundSchema)),
-    request$: z.custom<Request>(x => x instanceof Request),

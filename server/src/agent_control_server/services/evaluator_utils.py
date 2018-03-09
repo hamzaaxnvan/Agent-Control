@@ -30,3 +30,36 @@ class ParsedEvaluatorRef:
     """
 
     type: Literal["builtin", "external", "agent"]
+    name: str
+    namespace: str | None
+    local_name: str
+
+
+def parse_evaluator_ref_full(evaluator_ref: str) -> ParsedEvaluatorRef:
+    """Parse evaluator reference into structured form with type detection.
+
+    Determines the evaluator type based on the name format:
+    - Contains ":" → agent-scoped (split on first ":")
+    - Contains "." → external (split on first ".")
+    - Otherwise → built-in
+
+    Args:
+        evaluator_ref: Evaluator reference string
+
+    Returns:
+        ParsedEvaluatorRef with type, namespace, and local name
+
+    Examples:
+        >>> parse_evaluator_ref_full("regex")
+        ParsedEvaluatorRef(type="builtin", name="regex", ...)
+
+        >>> parse_evaluator_ref_full("galileo.luna")
+        ParsedEvaluatorRef(type="external", namespace="galileo", ...)
+
+        >>> parse_evaluator_ref_full("my-agent:pii-detector")
+        ParsedEvaluatorRef(type="agent", namespace="my-agent", ...)
+    """
+    if ":" in evaluator_ref:
+        # Agent-scoped: "my-agent:pii-detector"
+        agent, local_name = evaluator_ref.split(":", 1)
+        return ParsedEvaluatorRef(
