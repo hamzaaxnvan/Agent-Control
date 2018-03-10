@@ -25,3 +25,12 @@ export const SetControlDataApiV1ControlsControlIdDataPutRequest$outboundSchema:
   > = z.pipe(
     z.object({
       controlId: z.int(),
+      body: models.SetControlDataRequest$outboundSchema,
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        controlId: "control_id",
+      });
+    }),
+  );
+

@@ -6,20 +6,3 @@ import { expect, test } from '../fixtures';
 import { openEvaluatorForm } from './helpers';
 
 test.describe('Regex Evaluator', () => {
-  test('displays regex form fields', async ({ mockedPage }) => {
-    await openEvaluatorForm(mockedPage, 'Regex');
-
-    // Check pattern field is visible (use exact match to avoid matching description)
-    await expect(
-      mockedPage.getByText('Pattern', { exact: true })
-    ).toBeVisible();
-    await expect(
-      mockedPage.getByPlaceholder('Enter regex pattern (e.g., ^.*$)')
-    ).toBeVisible();
-  });
-
-  test('pattern field has default value', async ({ mockedPage }) => {
-    await openEvaluatorForm(mockedPage, 'Regex');
-
-    // Default pattern should be ^.*$
-    const patternInput = mockedPage.getByPlaceholder(
