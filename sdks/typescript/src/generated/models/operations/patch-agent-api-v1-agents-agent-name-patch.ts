@@ -16,21 +16,3 @@ export type PatchAgentApiV1AgentsAgentNamePatchRequest$Outbound = {
   agent_name: string;
   body: models.PatchAgentRequest$Outbound;
 };
-
-/** @internal */
-export const PatchAgentApiV1AgentsAgentNamePatchRequest$outboundSchema:
-  z.ZodMiniType<
-    PatchAgentApiV1AgentsAgentNamePatchRequest$Outbound,
-    PatchAgentApiV1AgentsAgentNamePatchRequest
-  > = z.pipe(
-    z.object({
-      agentName: z.string(),
-      body: models.PatchAgentRequest$outboundSchema,
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        agentName: "agent_name",
-      });
-    }),
-  );
-

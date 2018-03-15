@@ -16,13 +16,3 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.1.0",
-    "mypy>=1.8.0",
-]
-
-[project.entry-points."agent_control.evaluators"]
-budget = "agent_control_evaluator_budget.budget:BudgetEvaluator"
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-

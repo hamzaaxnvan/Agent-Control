@@ -57,33 +57,3 @@ def _fetch_control_data(engine: Engine, control_id: int) -> Any:
             text("SELECT data FROM controls WHERE id = :id"),
             {"id": control_id},
         ).scalar_one()
-
-
-@pytest.fixture
-def temp_db_url() -> str:
-    temp_db_name = f"agent_control_action_{uuid.uuid4().hex[:12]}"
-    admin_url = _BASE_DB_URL.set(database="postgres").render_as_string(hide_password=False)
-    target_url = _BASE_DB_URL.set(database=temp_db_name).render_as_string(hide_password=False)
-
-    admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
-    with admin_engine.connect() as conn:
-        conn.execute(text(f'CREATE DATABASE "{temp_db_name}"'))
-    admin_engine.dispose()
-
-    try:
-        yield target_url
-    finally:
-        cleanup_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
-        with cleanup_engine.connect() as conn:
-            conn.execute(
-                text(
-                    """
-                    SELECT pg_terminate_backend(pid)
-                    FROM pg_stat_activity
-                    WHERE datname = :db_name AND pid <> pg_backend_pid()
-                    """
-                ),
-                {"db_name": temp_db_name},
-            )
-            conn.execute(text(f'DROP DATABASE IF EXISTS "{temp_db_name}"'))
-        cleanup_engine.dispose()

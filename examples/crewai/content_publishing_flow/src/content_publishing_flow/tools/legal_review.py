@@ -9,8 +9,3 @@ async def _legal_review(content: str) -> str:
     return json.dumps({
         "disclaimer": (
             "This content has been reviewed for legal compliance. "
-            "Forward-looking statements are subject to change."
-        ),
-        "legal_reviewed": True,
-        "notes": "No legal issues found. Approved for publication.",
-        "reviewed_content": content,
