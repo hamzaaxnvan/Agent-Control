@@ -12,10 +12,3 @@ export class ControlViolationError extends Error {
   readonly evaluationResult: EvaluationResult;
 
   constructor(params: {
-    controlName: string;
-    controlId: string;
-    action: ControlAction;
-    evaluationResult: EvaluationResult;
-    message?: string;
-  }) {
-    super(params.message ?? `Control violation: ${params.controlName}`);
