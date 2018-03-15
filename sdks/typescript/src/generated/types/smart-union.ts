@@ -59,3 +59,34 @@ export function smartUnion<
       // No valid options
       if (candidates.length === 0) {
         parentUnrecognizedCtr.end(0);
+        parentZeroDefaultCtr.end(0);
+        ctx.issues.push({
+          input: input,
+          code: "invalid_union",
+          errors: errors,
+        });
+        return z.NEVER;
+      }
+
+      let best = candidates[0]!;
+
+      // Find the best option
+      for (const candidate of candidates) {
+        // Minor optimization to avoid counting fields if there's only one candidate
+        if (candidates.length > 1) {
+          candidate.fieldCount = countFieldsRecursive(candidate.data);
+        }
+        best = better(candidate, best);
+      }
+
+      // The cost of this union should be the cost of the best candidate not all the candidates
+      parentUnrecognizedCtr.end(best.inexactCount);
+      parentZeroDefaultCtr.end(best.zeroDefaultCount);
+
+      return best.data;
+    }),
+  ) as any;
+}
+
+function better(a: Candidate, b: Candidate): Candidate {
+  // First prefer exact matches over inexact ones

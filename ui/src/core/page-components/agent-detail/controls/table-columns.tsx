@@ -145,3 +145,52 @@ export function useControlsTableColumns({
             );
           }
           return (
+            <Group gap={4} wrap="nowrap">
+              {stepTypes.map((stepType: string) => {
+                const { label, color } = getStepTypeLabelAndColor(stepType);
+                return (
+                  <Badge key={stepType} variant="light" color={color} size="sm">
+                    {label}
+                  </Badge>
+                );
+              })}
+            </Group>
+          );
+        },
+      },
+      {
+        id: 'stages',
+        header: 'Stages',
+        accessorKey: 'control.scope.stages',
+        size: 120,
+        cell: ({ row }: { row: { original: Control } }) => {
+          const stages = row.original.control?.scope?.stages ?? [];
+          if (stages.length === 0) {
+            return (
+              <Badge variant="light" color="gray" size="sm">
+                All
+              </Badge>
+            );
+          }
+          if (stages.length > 1) {
+            return (
+              <Badge variant="light" color="gray" size="sm">
+                Pre/Post
+              </Badge>
+            );
+          }
+          const stage = stages[0];
+          const label = stage === 'pre' ? 'Pre' : 'Post';
+          const color = stage === 'pre' ? 'violet' : 'orange';
+          return (
+            <Badge variant="light" color={color} size="sm">
+              {label}
+            </Badge>
+          );
+        },
+      },
+      {
+        id: 'edit',
+        header: '',
+        size: 44,
+        cell: ({ row }: { row: { original: Control } }) => (

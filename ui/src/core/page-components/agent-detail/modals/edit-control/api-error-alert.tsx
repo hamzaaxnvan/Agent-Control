@@ -28,3 +28,33 @@ export type ApiErrorAlertProps = {
  */
 export const ApiErrorAlert = ({
   error,
+  unmappedErrors = [],
+  onClose,
+}: ApiErrorAlertProps) => {
+  if (!error) return null;
+
+  const errorsToShow =
+    unmappedErrors.length > 0
+      ? unmappedErrors
+      : (error.errors ?? []).map((e) => ({
+          field: e.field,
+          message: e.message,
+        }));
+
+  return (
+    <Alert
+      color="red"
+      title={error.title}
+      icon={<IconAlertCircle size={16} />}
+      withCloseButton={!!onClose}
+      onClose={onClose}
+    >
+      {errorsToShow.length > 0 ? (
+        <List size="sm" spacing={2}>
+          {errorsToShow.map((err, i) => (
+            <List.Item key={i}>
+              {err.field ? (
+                <Text component="span" fw={500} size="sm">
+                  {formatFieldForDisplay(err.field)}
+                </Text>
+              ) : null}
