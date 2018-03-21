@@ -83,3 +83,88 @@ def test_schema_endpoint_reachable_with_admin_key(client: TestClient) -> None:
 def test_schema_endpoint_reachable_with_non_admin_key(
     non_admin_client: TestClient,
 ) -> None:
+    # Given: a non-admin client
+    # When: the schema endpoint is fetched
+    resp = non_admin_client.get(f"{_CONTROLS_URL}/schema")
+
+    # Then: the schema is returned
+    assert resp.status_code == 200, resp.text
+
+
+def test_schema_endpoint_openapi_is_public(client: TestClient) -> None:
+    schema = client.app.openapi()
+
+    operation = schema["paths"][f"{_CONTROLS_URL}/schema"]["get"]
+    assert operation.get("security") == []
+
+
+# ---------------------------------------------------------------------------
+# CONTROLS_READ operations: AUTHENTICATED suffices.
+# ---------------------------------------------------------------------------
+
+
+def test_non_admin_can_list_controls(
+    non_admin_client: TestClient, client: TestClient
+) -> None:
+    # Given: an existing control
+    _create_control(client)
+
+    # When: a non-admin lists controls
+    resp = non_admin_client.get(_CONTROLS_URL)
+
+    # Then: the list is returned
+    assert resp.status_code == 200, resp.text
+
+
+def test_non_admin_can_get_control(
+    non_admin_client: TestClient, client: TestClient
+) -> None:
+    # Given: an existing control
+    control_id = _create_control(client)
+
+    # When: a non-admin reads it
+    resp = non_admin_client.get(f"{_CONTROLS_URL}/{control_id}")
+
+    # Then: the control is returned
+    assert resp.status_code == 200, resp.text
+
+
+def test_non_admin_can_get_control_data(
+    non_admin_client: TestClient, client: TestClient
+) -> None:
+    # Given: an existing control
+    control_id = _create_control(client)
+
+    # When: a non-admin reads its data
+    resp = non_admin_client.get(f"{_CONTROLS_URL}/{control_id}/data")
+
+    # Then: the data is returned
+    assert resp.status_code == 200, resp.text
+
+
+def test_non_admin_can_list_versions(
+    non_admin_client: TestClient, client: TestClient
+) -> None:
+    # Given: an existing control with at least one version (creation)
+    control_id = _create_control(client)
+
+    # When: a non-admin lists versions
+    resp = non_admin_client.get(f"{_CONTROLS_URL}/{control_id}/versions")
+
+    # Then: the version list is returned
+    assert resp.status_code == 200, resp.text
+
+
+def test_non_admin_can_get_specific_version(
+    non_admin_client: TestClient, client: TestClient
+) -> None:
+    # Given: an existing control (version 1 = "created")
+    control_id = _create_control(client)
+
+    # When: a non-admin reads version 1
+    resp = non_admin_client.get(f"{_CONTROLS_URL}/{control_id}/versions/1")
+
+    # Then: the version snapshot is returned
+    assert resp.status_code == 200, resp.text
+
+

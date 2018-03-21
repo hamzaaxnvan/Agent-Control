@@ -27,17 +27,3 @@ class EvaluatorInfo(BaseModel):
     response_model=dict[str, EvaluatorInfo],
     summary="List available evaluators",
     response_description="Dictionary of evaluator name to evaluator info",
-    dependencies=[Depends(require_operation(Operation.EVALUATORS_READ))],
-)
-async def get_evaluators() -> dict[str, EvaluatorInfo]:
-    """List all available evaluators.
-
-    Returns metadata and JSON Schema for each built-in evaluator.
-
-    Built-in evaluators:
-    - **regex**: Regular expression pattern matching
-    - **list**: List-based value matching with flexible logic
-    - **json**: JSON validation with schema, types, constraints
-    - **sql**: SQL query validation
-
-    Custom evaluators are registered per-agent via initAgent.
