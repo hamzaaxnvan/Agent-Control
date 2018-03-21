@@ -45,3 +45,50 @@ class AuthMode(StrEnum):
     API_KEY = "api-key"
 
 
+class ConfigResponse(BaseModel):
+    """Configuration surface exposed to the UI."""
+
+    requires_api_key: bool
+    auth_mode: AuthMode
+    has_active_session: bool = False
+
+
+class LoginRequest(BaseModel):
+    """Request body for the /login endpoint."""
+
+    api_key: str
+
+
+class LoginResponse(BaseModel):
+    """Response body for the /login endpoint."""
+
+    authenticated: bool
+    is_admin: bool
+
+
+# ---------------------------------------------------------------------------
+# JWT helpers
+# ---------------------------------------------------------------------------
+
+
+def create_session_jwt(*, is_admin: bool) -> str:
+    """Mint a signed session JWT. The raw API key is never stored in claims."""
+    now = int(time.time())
+    payload = {
+        "sub": "ac-session",
+        "is_admin": is_admin,
+        "iat": now,
+        "exp": now + SESSION_MAX_AGE_SECONDS,
+    }
+    return jwt.encode(payload, auth_settings.get_session_secret(), algorithm=JWT_ALGORITHM)
+
+
+def decode_session_jwt(token: str) -> dict | None:
+    """Validate and decode a session JWT. Returns None on any failure."""
+    try:
+        return jwt.decode(
+            token,
+            auth_settings.get_session_secret(),
+            algorithms=[JWT_ALGORITHM],
+            options={"require": ["sub", "exp", "iat", "is_admin"]},
+        )

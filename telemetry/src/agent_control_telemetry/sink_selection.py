@@ -44,3 +44,26 @@ class ControlEventSinkSelection(BaseModel):
             "as a transport shape, not as cross-runtime semantics."
         ),
     )
+
+
+class ControlEventSinkFactoryRegistry[SinkT]:
+    """Thread-safe registry for named control-event sink factories."""
+
+    def __init__(self) -> None:
+        self._factories: dict[str, ControlEventSinkFactory[SinkT]] = {}
+        self._lock = Lock()
+
+    def register(self, name: str, factory: ControlEventSinkFactory[SinkT]) -> None:
+        """Register a named sink factory."""
+        if name in {
+            DEFAULT_CONTROL_EVENT_SINK_NAME,
+            REGISTERED_CONTROL_EVENT_SINK_NAME,
+        }:
+            raise ValueError(f"'{name}' is reserved and cannot be registered as a custom sink")
+
+        with self._lock:
+            self._factories[name] = factory
+
+    def unregister(self, name: str) -> None:
+        """Unregister a previously registered named sink factory."""
+        with self._lock:
