@@ -275,3 +275,142 @@ class TestAdminWriteEndpointAuthorization:
         add_control_response = admin_client.post(
             f"/api/v1/policies/{policy_id}/controls/{control_id}"
         )
+        assert add_control_response.status_code == 200
+
+        agent_name = f"admin-agent-{uuid.uuid4().hex[:8]}"
+        init_payload = {
+            "agent": {
+                "agent_name": agent_name,
+                "agent_description": "Admin agent",
+                "agent_version": "1.0",
+            },
+            "steps": [],
+            "evaluators": [],
+        }
+        init_response = admin_client.post("/api/v1/agents/initAgent", json=init_payload)
+        assert init_response.status_code == 200
+
+        set_policy_response = admin_client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+        assert set_policy_response.status_code == 200
+
+
+class TestMultipleApiKeys:
+    """Test support for multiple API keys (key rotation)."""
+
+    @pytest.fixture(autouse=True)
+    def setup_multiple_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Configure multiple API keys for key rotation testing."""
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "key1,key2,key3")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "admin1,admin2")
+        # Clear cached properties so they get recomputed with new values
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+    def test_first_key_works(self, app: object) -> None:
+        """Given multiple API keys configured, when using first key, then request succeeds."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "key1"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then: (404 for non-existent resource, but NOT 401)
+        assert response.status_code == 404
+
+    def test_second_key_works(self, app: object) -> None:
+        """Given multiple API keys configured, when using second key, then request succeeds."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "key2"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then: (404 for non-existent resource, but NOT 401)
+        assert response.status_code == 404
+
+    def test_admin_key_works_as_regular_key(self, app: object) -> None:
+        """Given admin API key, when requesting regular endpoint, then request succeeds."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "admin1"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then: (404 for non-existent resource, but NOT 401)
+        assert response.status_code == 404
+
+    def test_unlisted_key_rejected(self, app: object) -> None:
+        """Given unlisted API key, when requesting endpoint, then returns 401."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "key4"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then:
+        assert response.status_code == 401
+
+
+class TestAuthMisconfiguration:
+    """Test behavior when auth is misconfigured."""
+
+    @pytest.fixture(autouse=True)
+    def setup_no_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Enable auth but configure no keys (misconfiguration)."""
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "")
+        # Clear cached properties so they get recomputed with new values
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+    def test_misconfigured_returns_500(self, unauthenticated_client: TestClient) -> None:
+        """Given auth enabled but no keys configured, when requesting, then returns 500."""
+        # When:
+        response = unauthenticated_client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then:
+        assert response.status_code == 500
+        body = response.json()
+        assert body["error_code"] == "AUTH_MISCONFIGURED"
+        assert body["detail"] == "Server authentication is misconfigured. Contact administrator."
+
+
+class TestOptionalApiKey:
+    """Behavioral tests for optional_api_key dependency."""
+
+    def _make_optional_app(self) -> TestClient:
+        from fastapi import Depends, FastAPI
+
+        from agent_control_server.auth import optional_api_key
+
+        app = FastAPI()
+
+        @app.get("/maybe-auth")
+        def maybe_auth(client=Depends(optional_api_key)) -> dict[str, object]:
+            return {
+                "auth": client is not None,
+                "is_admin": client.is_admin if client else False,
+                "key_id": client.key_id if client else None,
+            }
+
+        return TestClient(app)
+
+    def test_optional_api_key_auth_disabled_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Given: auth disabled
+        monkeypatch.setattr(auth_settings, "api_key_enabled", False)
+
+        # When: calling endpoint with optional auth
+        client = self._make_optional_app()
+        response = client.get("/maybe-auth")
+
+        # Then: client is treated as unauthenticated
+        assert response.status_code == 200
+        assert response.json()["auth"] is False
+
+    def test_optional_api_key_missing_header_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
