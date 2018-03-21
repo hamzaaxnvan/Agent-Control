@@ -4,3 +4,24 @@
 
 import * as z from "zod/v4-mini";
 import { safeParse } from "../lib/schemas.js";
+import { Result as SafeParseResult } from "../types/fp.js";
+import * as types from "../types/primitives.js";
+import { SDKValidationError } from "./errors/sdk-validation-error.js";
+
+export type ValidateControlDataResponse = {
+  /**
+   * Whether the control data is valid
+   */
+  success: boolean;
+};
+
+/** @internal */
+export const ValidateControlDataResponse$inboundSchema: z.ZodMiniType<
+  ValidateControlDataResponse,
+  unknown
+> = z.object({
+  success: types.boolean(),
+});
+
+export function validateControlDataResponseFromJSON(
+  jsonString: string,

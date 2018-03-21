@@ -23,3 +23,11 @@ export const DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest$outboundSc
   > = z.pipe(
     z.object({
       agentName: z.string(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+      });
+    }),
+  );
+
