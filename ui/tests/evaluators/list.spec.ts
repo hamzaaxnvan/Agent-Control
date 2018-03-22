@@ -17,22 +17,3 @@ test.describe('List Evaluator', () => {
 
     // Logic select
     await expect(mockedPage.getByText('Logic', { exact: true })).toBeVisible();
-
-    // Match on select
-    await expect(
-      mockedPage.getByText('Match on', { exact: true })
-    ).toBeVisible();
-
-    // Match mode select
-    await expect(
-      mockedPage.getByText('Match mode', { exact: true })
-    ).toBeVisible();
-
-    // Case sensitive checkbox
-    await expect(mockedPage.getByText('Case sensitive')).toBeVisible();
-  });
-
-  test('can enter multiple values', async ({ mockedPage }) => {
-    await openEvaluatorForm(mockedPage, 'List');
-
-    const valuesTextarea = mockedPage.getByPlaceholder(
