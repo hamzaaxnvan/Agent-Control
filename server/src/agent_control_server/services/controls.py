@@ -727,3 +727,246 @@ class ControlService:
         agent_names: Sequence[str],
         *,
         namespace_key: str,
+    ) -> dict[str, int]:
+        """Return active control counts keyed by agent name."""
+        if not agent_names:
+            return {}
+
+        policy_associations = (
+            select(
+                agent_policies.c.agent_name.label("agent_name"),
+                policy_controls.c.control_id.label("control_id"),
+            )
+            .select_from(
+                agent_policies.join(
+                    policy_controls,
+                    (agent_policies.c.policy_id == policy_controls.c.policy_id)
+                    & (agent_policies.c.namespace_key == policy_controls.c.namespace_key),
+                )
+            )
+            .where(
+                agent_policies.c.namespace_key == namespace_key,
+                policy_controls.c.namespace_key == namespace_key,
+                agent_policies.c.agent_name.in_(agent_names),
+            )
+        )
+        direct_associations = select(
+            agent_controls.c.agent_name.label("agent_name"),
+            agent_controls.c.control_id.label("control_id"),
+        ).where(
+            agent_controls.c.namespace_key == namespace_key,
+            agent_controls.c.agent_name.in_(agent_names),
+        )
+        all_associations = union_all(policy_associations, direct_associations).subquery()
+
+        result = await self._db.execute(
+            select(
+                all_associations.c.agent_name,
+                func.count(func.distinct(all_associations.c.control_id)).label("count"),
+            )
+            .join(Control, all_associations.c.control_id == Control.id)
+            .where(
+                Control.namespace_key == namespace_key,
+                Control.deleted_at.is_(None),
+                or_(
+                    Control.data["enabled"].astext == "true",
+                    ~Control.data.has_key("enabled"),
+                ),
+            )
+            .group_by(all_associations.c.agent_name)
+        )
+        return {cast(str, row[0]): cast(int, row[1]) for row in result.all()}
+
+    async def add_control_to_policy(
+        self, *, policy_id: int, control_id: int, namespace_key: str
+    ) -> None:
+        """Create a policy-control association if it does not already exist."""
+        await self._db.execute(
+            pg_insert(policy_controls)
+            .values(
+                namespace_key=namespace_key,
+                policy_id=policy_id,
+                control_id=control_id,
+            )
+            .on_conflict_do_nothing()
+        )
+
+    async def remove_control_from_policy(
+        self, *, policy_id: int, control_id: int, namespace_key: str
+    ) -> None:
+        """Remove a policy-control association if it exists."""
+        await self._db.execute(
+            delete(policy_controls).where(
+                (policy_controls.c.namespace_key == namespace_key)
+                & (policy_controls.c.policy_id == policy_id)
+                & (policy_controls.c.control_id == control_id)
+            )
+        )
+
+    async def add_control_to_agent(
+        self, *, agent_name: str, control_id: int, namespace_key: str
+    ) -> None:
+        """Create a direct agent-control association if it does not already exist.
+
+        ``namespace_key`` is part of the association table's primary key
+        and the agent/control composite FKs, so writes must include it
+        explicitly rather than relying on the column's server default.
+        """
+        await self._db.execute(
+            pg_insert(agent_controls)
+            .values(
+                namespace_key=namespace_key,
+                agent_name=agent_name,
+                control_id=control_id,
+            )
+            .on_conflict_do_nothing()
+        )
+
+    async def remove_control_from_agent(
+        self,
+        *,
+        agent_name: str,
+        control_id: int,
+        namespace_key: str,
+    ) -> RemoveAgentControlResult:
+        """Remove a direct agent-control association and report remaining active state.
+
+        ``namespace_key`` scopes both the deletion target and the
+        policy-inheritance probe so an association in one namespace
+        cannot be removed by — or affect the active state seen from —
+        another namespace.
+        """
+        remove_direct_result = await self._db.execute(
+            delete(agent_controls)
+            .where(
+                (agent_controls.c.namespace_key == namespace_key)
+                & (agent_controls.c.agent_name == agent_name)
+                & (agent_controls.c.control_id == control_id)
+            )
+            .returning(agent_controls.c.control_id)
+        )
+        removed_direct_association = remove_direct_result.first() is not None
+
+        policy_inheritance_result = await self._db.execute(
+            select(policy_controls.c.control_id)
+            .select_from(
+                agent_policies.join(
+                    policy_controls,
+                    (agent_policies.c.policy_id == policy_controls.c.policy_id)
+                    & (agent_policies.c.namespace_key == policy_controls.c.namespace_key),
+                )
+            )
+            .where(
+                (agent_policies.c.namespace_key == namespace_key)
+                & (agent_policies.c.agent_name == agent_name)
+                & (policy_controls.c.control_id == control_id)
+            )
+            .limit(1)
+        )
+        return RemoveAgentControlResult(
+            removed_direct_association=removed_direct_association,
+            control_still_active=policy_inheritance_result.first() is not None,
+        )
+
+    async def list_control_associations(
+        self, control_id: int, *, namespace_key: str
+    ) -> ControlAssociations:
+        """Return all policy and direct agent associations for a control."""
+        policy_assoc_query = select(
+            policy_controls.c.policy_id.label("policy_id"),
+            literal(None, type_=String).label("agent_name"),
+        ).where(
+            policy_controls.c.namespace_key == namespace_key,
+            policy_controls.c.control_id == control_id,
+        )
+        agent_assoc_query = select(
+            literal(None, type_=Integer).label("policy_id"),
+            agent_controls.c.agent_name.label("agent_name"),
+        ).where(
+            agent_controls.c.namespace_key == namespace_key,
+            agent_controls.c.control_id == control_id,
+        )
+        assoc_result = await self._db.execute(union_all(policy_assoc_query, agent_assoc_query))
+
+        policy_ids: set[int] = set()
+        agent_names: set[str] = set()
+        for policy_id, agent_name in assoc_result.all():
+            if policy_id is not None:
+                policy_ids.add(cast(int, policy_id))
+            if agent_name is not None:
+                agent_names.add(cast(str, agent_name))
+
+        return ControlAssociations(
+            policy_ids=sorted(policy_ids),
+            agent_names=sorted(agent_names),
+        )
+
+    async def remove_all_control_associations(
+        self, control_id: int, *, namespace_key: str
+    ) -> ControlAssociations:
+        """Remove all policy and direct agent associations for a control."""
+        associations = await self.list_control_associations(
+            control_id, namespace_key=namespace_key
+        )
+        if associations.policy_ids:
+            await self._db.execute(
+                delete(policy_controls).where(
+                    policy_controls.c.namespace_key == namespace_key,
+                    policy_controls.c.control_id == control_id,
+                )
+            )
+        if associations.agent_names:
+            await self._db.execute(
+                delete(agent_controls).where(
+                    agent_controls.c.namespace_key == namespace_key,
+                    agent_controls.c.control_id == control_id,
+                )
+            )
+        return associations
+
+    async def _next_version_num(self, control_id: int) -> int:
+        """Compute the next monotonically increasing version number for a control."""
+        result = await self._db.execute(
+            select(func.coalesce(func.max(ControlVersion.version_num), 0) + 1).where(
+                ControlVersion.control_id == control_id
+            )
+        )
+        return cast(int, result.scalar_one())
+
+    async def _lock_control_row(self, control_id: int) -> None:
+        """Serialize version creation on a control by taking a row-level lock."""
+        await self._db.execute(select(Control.id).where(Control.id == control_id).with_for_update())
+
+    async def _list_db_controls_for_agent(
+        self,
+        agent_name: str,
+        *,
+        namespace_key: str,
+        target_type: str | None = None,
+        target_id: str | None = None,
+    ) -> Sequence[Control]:
+        """Return the de-duplicated set of effective DB control rows for an agent.
+
+        Composite foreign keys make cross-namespace writes impossible, but
+        every read must still scope to ``namespace_key`` explicitly so a
+        compromised or mis-routed caller cannot observe rows it did not
+        ask for. Each joined table is filtered on the supplied namespace.
+        """
+        policy_control_ids = (
+            select(policy_controls.c.control_id.label("control_id"))
+            .select_from(
+                policy_controls.join(
+                    agent_policies,
+                    (policy_controls.c.policy_id == agent_policies.c.policy_id)
+                    & (policy_controls.c.namespace_key == agent_policies.c.namespace_key),
+                )
+            )
+            .where(
+                agent_policies.c.agent_name == agent_name,
+                agent_policies.c.namespace_key == namespace_key,
+                policy_controls.c.namespace_key == namespace_key,
+            )
+        )
+        direct_control_ids = select(agent_controls.c.control_id.label("control_id")).where(
+            agent_controls.c.agent_name == agent_name,
+            agent_controls.c.namespace_key == namespace_key,
