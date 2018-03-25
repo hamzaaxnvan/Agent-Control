@@ -65,3 +65,25 @@ export const Agent$inboundSchema: z.ZodMiniType<Agent, unknown> = z.pipe(
     });
   }),
 );
+/** @internal */
+export type Agent$Outbound = {
+  agent_created_at?: string | null | undefined;
+  agent_description?: string | null | undefined;
+  agent_metadata?: { [k: string]: any } | null | undefined;
+  agent_name: string;
+  agent_updated_at?: string | null | undefined;
+  agent_version?: string | null | undefined;
+};
+
+/** @internal */
+export const Agent$outboundSchema: z.ZodMiniType<Agent$Outbound, Agent> = z
+  .pipe(
+    z.object({
+      agentCreatedAt: z.optional(z.nullable(z.string())),
+      agentDescription: z.optional(z.nullable(z.string())),
+      agentMetadata: z.optional(z.nullable(z.record(z.string(), z.any()))),
+      agentName: z.string(),
+      agentUpdatedAt: z.optional(z.nullable(z.string())),
+      agentVersion: z.optional(z.nullable(z.string())),
+    }),
+    z.transform((v) => {

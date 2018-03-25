@@ -200,3 +200,104 @@ def guarded_turn(message: str) -> Iterator[dict[str, Any]]:
     trace: list[dict[str, Any]] = []
 
     def finish(**fields: Any) -> dict[str, Any]:
+        """Close a turn with the fields every outcome shares."""
+        return {
+            "type": "result",
+            "trace": trace,
+            "wall_ms": int((time.monotonic() - started) * 1000),
+            "provider": llm.provider(),
+            "model": llm.model_name(),
+            **fields,
+        }
+
+    def step(name: str, label: str, **fields: Any) -> tuple[dict[str, Any], float]:
+        """Announce the start of a step, and return its event and start time."""
+        return {"type": "step", "step": name, "label": label, "state": "start", **fields}, (
+            time.monotonic()
+        )
+
+    def done(
+        name: str, at: float, fired: list[dict[str, Any]] | None = None, **fields: Any
+    ) -> dict[str, Any]:
+        """Close a step, reporting how long it took and what fired."""
+        return {
+            "type": "step",
+            "step": name,
+            "state": "done",
+            "ms": int((time.monotonic() - at) * 1000),
+            "fired": [d["control"] for d in fired or []],
+            "blocked": any(d["action"] == "deny" for d in fired or []),
+            **fields,
+        }
+
+    event, at = step("screen_input", "screening the message")
+    yield event
+    pre = _evaluate("pre", {"type": "llm", "name": STEP_NAME, "input": message})
+    pre_screened = _screened(pre)
+    pre_fired = [d for d in pre_screened if d["matched"]]
+    trace.append({"stage": "pre", "fired": pre_fired, "screened": pre_screened})
+    yield done("screen_input", at, pre_fired)
+
+    denied = next((d for d in pre_fired if d["action"] == "deny"), None)
+    if denied:
+        yield finish(
+            outcome="blocked_input",
+            reply=(
+                "I can't help with that. A guardrail stopped this message before it "
+                "reached the model."
+            ),
+            llm_called=False,
+            control=denied["control"],
+        )
+        return
+
+    steered = next((d for d in pre_fired if d["action"] == "steer"), None)
+    guidance = steered["steering"] if steered else None
+
+    conversation: list[dict[str, Any]] = [{"role": "user", "content": message}]
+    tool_calls_made: list[dict[str, Any]] = []
+    turn: llm.Turn | None = None
+
+    for _ in range(MAX_TOOL_STEPS):
+        event, at = step("model", "asking the model")
+        yield event
+        try:
+            turn = llm.respond(conversation, guidance)
+        except llm.PlatformRefusedError as refusal:
+            # The hosted model's own filter refused the prompt. When a control
+            # had already steered, its guidance is the right thing to serve
+            # instead: the person still gets a useful response, not a dead end.
+            yield done("model", at, refused=True)
+            yield finish(
+                outcome="platform_refused",
+                reply=(
+                    STEER_FALLBACK
+                    if guidance
+                    else "The model provider declined to respond to that message."
+                ),
+                llm_called=True,
+                control=steered["control"] if steered else None,
+                platform_categories=refusal.categories,
+            )
+            return
+        except Exception as exc:  # surface provider failures in the chat window
+            yield done("model", at, failed=True)
+            yield finish(
+                outcome="llm_error",
+                reply=f"The model call failed: {type(exc).__name__}: {exc}",
+                llm_called=True,
+            )
+            return
+
+        yield done(
+            "model",
+            at,
+            chose_tool=turn.tool_calls[0].name if turn.tool_calls else None,
+            calls=len(turn.tool_calls),
+        )
+
+        if not turn.tool_calls:
+            break
+
+        conversation.append(llm.assistant_message(turn))
+
