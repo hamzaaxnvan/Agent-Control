@@ -121,3 +121,65 @@ def _extract_tokens(data: Any, token_path: str | None) -> tuple[int, int]:
             if inp is None:
                 inp = usage.get("prompt_tokens")
             out = usage.get("output_tokens")
+            if out is None:
+                out = usage.get("completion_tokens")
+            input_tokens = _extract_non_negative_int(inp)
+            output_tokens = _extract_non_negative_int(out)
+            if input_tokens is not None and output_tokens is not None:
+                return input_tokens, output_tokens
+            total = usage.get("total_tokens")
+            if isinstance(total, int) and not isinstance(total, bool) and total > 0:
+                return 0, max(0, total)
+    return 0, 0
+
+
+def _extract_non_negative_int(value: Any) -> int | None:
+    """Return a non-negative integer or None for invalid token values."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    return max(0, value)
+
+
+def _estimate_cost(
+    model: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    pricing: dict[str, ModelPricing] | None,
+) -> float:
+    """Estimate cost in cents (USD) from model pricing table.
+
+    Returns a float for precision. Rounding happens at snapshot time,
+    not per call.
+    """
+    if not model or not pricing:
+        return 0.0
+    rates = pricing.get(model)
+    if not rates:
+        return 0.0
+    input_rate = rates.input_per_1k
+    output_rate = rates.output_per_1k
+    cost = (input_tokens * input_rate + output_tokens * output_rate) / 1000.0
+    if not math.isfinite(cost) or cost < 0:
+        return 0.0
+    return cost
+
+
+def _extract_metadata(data: Any, metadata_paths: dict[str, str]) -> dict[str, str]:
+    """Extract metadata fields from step data using configured paths."""
+    result: dict[str, str] = {}
+    for field_name, path in metadata_paths.items():
+        val = _extract_by_path(data, path)
+        if val is not None:
+            result[field_name] = str(val)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Evaluator
+# ---------------------------------------------------------------------------
+
+
+@register_evaluator
+class BudgetEvaluator(Evaluator[BudgetEvaluatorConfig]):
+    """Tracks cumulative LLM token and cost usage per scope and time window.
+
