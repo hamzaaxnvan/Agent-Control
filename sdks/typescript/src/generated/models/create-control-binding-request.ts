@@ -31,3 +31,19 @@ export type CreateControlBindingRequest = {
 export type CreateControlBindingRequest$Outbound = {
   control_id: number;
   enabled: boolean;
+  target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const CreateControlBindingRequest$outboundSchema: z.ZodMiniType<
+  CreateControlBindingRequest$Outbound,
+  CreateControlBindingRequest
+> = z.pipe(
+  z.object({
+    controlId: z.int(),
+    enabled: z._default(z.boolean(), true),
+    targetId: z.string(),
+    targetType: z.string(),
+  }),
+  z.transform((v) => {

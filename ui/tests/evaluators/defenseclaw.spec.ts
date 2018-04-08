@@ -31,19 +31,3 @@ test.describe('DefenseClaw Rule Pack Evaluator', () => {
       mockedPage.getByText('Schema version', { exact: true })
     ).toHaveCount(0);
     await expect(mockedPage.getByText('Version', { exact: true })).toHaveCount(
-      0
-    );
-    await expect(mockedPage.getByText('Category', { exact: true })).toHaveCount(
-      0
-    );
-  });
-
-  test('can add and remove rules', async ({ mockedPage }) => {
-    await openEvaluatorForm(mockedPage, 'DefenseClaw Rule Pack');
-
-    await mockedPage.getByRole('button', { name: 'Add rule' }).click();
-    await expect(mockedPage.getByText('Rule 2', { exact: true })).toBeVisible();
-
-    await mockedPage.getByRole('button', { name: 'Remove rule 2' }).click();
-    await expect(mockedPage.getByText('Rule 2', { exact: true })).toHaveCount(
-      0

@@ -8,3 +8,14 @@ from pathlib import Path
 from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT_PATH = REPO_ROOT / "scripts" / "contrib_packages.py"
+MODULE_NAME = "agent_control_repo_contrib_packages"
+
+
+def load_contrib_packages_module() -> ModuleType:
+    """Load the repo contrib-packages script as a module for testing."""
+
+    module = sys.modules.get(MODULE_NAME)
+    if module is not None:
+        return module
+
