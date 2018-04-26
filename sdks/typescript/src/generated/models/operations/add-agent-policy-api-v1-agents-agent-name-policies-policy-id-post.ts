@@ -16,3 +16,21 @@ export type AddAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdPostRequest$Outbou
     agent_name: string;
     policy_id: number;
   };
+
+/** @internal */
+export const AddAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdPostRequest$outboundSchema:
+  z.ZodMiniType<
+    AddAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdPostRequest$Outbound,
+    AddAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdPostRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+      policyId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+        policyId: "policy_id",
+      });
+    }),
+  );

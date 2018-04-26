@@ -7,3 +7,12 @@ import { ClientSDK, RequestOptions } from "../lib/sdks.js";
 import * as models from "../models/index.js";
 import { unwrapAsync } from "../types/fp.js";
 
+export class Auth extends ClientSDK {
+  /**
+   * Exchange a credential for a runtime token bound to a target
+   *
+   * @remarks
+   * Mint a short-lived runtime token for the requested target.
+   *
+   * The caller's credential is authenticated and authorized before the
+   * resolved principal supplies the actor identity, grant scopes, and
