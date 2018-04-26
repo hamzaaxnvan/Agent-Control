@@ -26,31 +26,3 @@ CITY_DATA = {
         "display_name": "London",
         "local_time": "3:30 PM",
         "weather": "Cloudy, 61 F",
-    },
-    "tokyo": {
-        "display_name": "Tokyo",
-        "local_time": "11:30 PM",
-        "weather": "Clear, 68 F",
-    },
-    "testville": {
-        "display_name": "Testville",
-        "local_time": "9:00 AM",
-        "weather": "Mild, 65 F",
-    },
-}
-
-
-def _city_record(city: str) -> dict[str, str]:
-    """Get deterministic city data for the example tools."""
-    return CITY_DATA.get(
-        city.lower(),
-        {
-            "display_name": city.title() or "Unknown City",
-            "local_time": "Unknown",
-            "weather": "Unavailable",
-        },
-    )
-
-
-def _note_for_city(city: str) -> str:
-    """Return a deterministic note used by the post-tool demo control."""

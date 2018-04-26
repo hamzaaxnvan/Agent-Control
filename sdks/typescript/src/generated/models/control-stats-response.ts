@@ -55,3 +55,22 @@ export type ControlStatsResponse = {
    *     action_counts: Breakdown of actions for matched executions
    *     timeseries: Time-series data points (only when include_timeseries=true)
    */
+  stats: StatsTotals;
+  /**
+   * Time range used
+   */
+  timeRange: string;
+};
+
+/** @internal */
+export const ControlStatsResponse$inboundSchema: z.ZodMiniType<
+  ControlStatsResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    agent_name: types.string(),
+    control_id: types.number(),
+    control_name: types.string(),
+    stats: StatsTotals$inboundSchema,
+    time_range: types.string(),
+  }),
