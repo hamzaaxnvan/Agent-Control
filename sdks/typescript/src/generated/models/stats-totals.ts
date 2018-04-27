@@ -29,3 +29,34 @@ import {
  *     non_match_count: Total non-matches across all controls (evaluator didn't match)
  *     error_count: Total errors across all controls (evaluation failed)
  *     action_counts: Breakdown of actions for matched executions
+ *     timeseries: Time-series data points (only when include_timeseries=true)
+ */
+export type StatsTotals = {
+  /**
+   * Action breakdown for matches: {deny, steer, observe}
+   */
+  actionCounts?: { [k: string]: number } | undefined;
+  /**
+   * Total errors
+   */
+  errorCount: number;
+  /**
+   * Total executions
+   */
+  executionCount: number;
+  /**
+   * Total matches
+   */
+  matchCount: number;
+  /**
+   * Total non-matches
+   */
+  nonMatchCount: number;
+  /**
+   * Time-series data points (only when include_timeseries=true)
+   */
+  timeseries?: Array<TimeseriesBucket> | null | undefined;
+};
+
+/** @internal */
+export const StatsTotals$inboundSchema: z.ZodMiniType<StatsTotals, unknown> = z
