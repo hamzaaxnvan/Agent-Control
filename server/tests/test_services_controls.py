@@ -542,3 +542,185 @@ async def test_remove_control_from_agent_reports_policy_inheritance(async_db) ->
     async_db.add_all([policy, agent, control])
     await async_db.flush()
 
+    await async_db.execute(
+        insert(agent_policies).values({"agent_name": agent.name, "policy_id": policy.id})
+    )
+    await async_db.execute(
+        insert(policy_controls).values({"policy_id": policy.id, "control_id": control.id})
+    )
+    await async_db.execute(
+        insert(agent_controls).values({"agent_name": agent.name, "control_id": control.id})
+    )
+    await async_db.commit()
+
+    service = ControlService(async_db)
+
+    # When: removing the direct association
+    first_result = await service.remove_control_from_agent(
+        agent_name=agent.name,
+        control_id=control.id,
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+    )
+
+    # Then: the direct link is removed but the control is still active via policy inheritance
+    assert first_result.removed_direct_association is True
+    assert first_result.control_still_active is True
+
+    # When: removing it again without a direct association
+    second_result = await service.remove_control_from_agent(
+        agent_name=agent.name,
+        control_id=control.id,
+        namespace_key=DEFAULT_NAMESPACE_KEY,
+    )
+
+    # Then: the service reports that only the inherited policy link remains
+    assert second_result.removed_direct_association is False
+    assert second_result.control_still_active is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    engine.dialect.name != "postgresql",
+    reason="Concurrent version allocation test requires PostgreSQL row locking semantics",
+)
+async def test_create_version_allocates_sequential_numbers_under_concurrent_mutations() -> None:
+    # Given: an existing control with an initial version
+    async with AsyncSessionTest() as setup_session:
+        setup_service = ControlService(setup_session)
+        control = setup_service.create_control(
+            namespace_key=DEFAULT_NAMESPACE_KEY,
+            name=f"control-{uuid.uuid4()}",
+            data=deepcopy(VALID_CONTROL_PAYLOAD),
+        )
+        await setup_service.create_version(
+            control,
+            event_type="created",
+            note="Initial creation",
+        )
+        await setup_session.commit()
+        control_id = control.id
+
+    start = asyncio.Event()
+    ready_count = 0
+    ready_lock = asyncio.Lock()
+
+    async def mutate_and_version(description: str) -> None:
+        nonlocal ready_count
+
+        async with AsyncSessionTest() as session:
+            service = ControlService(session)
+            control = await service.get_active_control_or_404(
+                control_id,
+                namespace_key=DEFAULT_NAMESPACE_KEY,
+            )
+            updated_data = deepcopy(control.data)
+            updated_data["description"] = description
+            service.replace_control_data(control, data=updated_data)
+
+            async with ready_lock:
+                ready_count += 1
+                if ready_count == 2:
+                    start.set()
+
+            await start.wait()
+            await service.create_version(
+                control,
+                event_type="updated",
+                note=f"Edited to {description}",
+            )
+            await session.commit()
+
+    # When: two sessions create versions concurrently for the same control
+    await asyncio.wait_for(
+        asyncio.gather(
+            mutate_and_version("Concurrent update A"),
+            mutate_and_version("Concurrent update B"),
+        ),
+        timeout=10,
+    )
+
+    # Then: version numbers remain sequential for that control
+    with Session(engine) as session:
+        versions = list(
+            session.scalars(
+                select(ControlVersion)
+                .where(ControlVersion.control_id == control_id)
+                .order_by(ControlVersion.version_num)
+            ).all()
+        )
+
+    assert [version.version_num for version in versions] == [1, 2, 3]
+    assert [version.event_type for version in versions] == [
+        "created",
+        "updated",
+        "updated",
+    ]
+    assert {version.snapshot["data"]["description"] for version in versions[1:]} == {
+        "Concurrent update A",
+        "Concurrent update B",
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_controls_for_agent_corrupted_data_raises(async_db) -> None:
+    # Given: an agent associated with a policy containing corrupted control data
+    policy = Policy(name=f"policy-{uuid.uuid4()}")
+    control = Control(name=f"control-{uuid.uuid4()}", data={"bad": "data"})
+    agent = Agent(
+        name=f"agent-{uuid.uuid4()}",
+        data={},
+    )
+    async_db.add_all([policy, control, agent])
+    await async_db.flush()
+
+    await async_db.execute(
+        insert(agent_policies).values({"agent_name": agent.name, "policy_id": policy.id})
+    )
+    await async_db.execute(
+        insert(policy_controls).values({"policy_id": policy.id, "control_id": control.id})
+    )
+    await async_db.commit()
+
+    # When: listing controls for the agent
+    with pytest.raises(APIValidationError) as exc_info:
+        await ControlService(async_db).list_controls_for_agent(
+            agent.name, namespace_key=DEFAULT_NAMESPACE_KEY
+        )
+
+    # Then: corrupted data error is raised
+    assert exc_info.value.error_code == ErrorCode.CORRUPTED_DATA
+
+
+@pytest.mark.asyncio
+async def test_list_controls_for_agent_corrupted_unrendered_data_raises(async_db) -> None:
+    # Given: an agent directly associated with corrupted unrendered template data
+    control = Control(
+        name=f"control-{uuid.uuid4()}",
+        data={"template": {"description": "bad template"}},
+    )
+    agent = Agent(name=f"agent-{uuid.uuid4()}", data={})
+    async_db.add_all([control, agent])
+    await async_db.flush()
+
+    await async_db.execute(
+        insert(agent_controls).values({"agent_name": agent.name, "control_id": control.id})
+    )
+    await async_db.commit()
+
+    # When: listing active controls, which would normally exclude unrendered drafts
+    with pytest.raises(APIValidationError) as exc_info:
+        await ControlService(async_db).list_controls_for_agent(
+            agent.name,
+            namespace_key=DEFAULT_NAMESPACE_KEY,
+            rendered_state="rendered",
+            enabled_state="enabled",
+        )
+
+    # Then: corrupted data still fails fast
+    assert exc_info.value.error_code == ErrorCode.CORRUPTED_DATA
+
+
+# ---------------------------------------------------------------------------
+# Merge semantics: target bindings unioned into the effective set.
+# ---------------------------------------------------------------------------
+
