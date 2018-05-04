@@ -59,3 +59,23 @@ export const StepSchema$inboundSchema: z.ZodMiniType<StepSchema, unknown> = z
   );
 /** @internal */
 export type StepSchema$Outbound = {
+  description?: string | null | undefined;
+  input_schema?: { [k: string]: any } | null | undefined;
+  metadata?: { [k: string]: any } | null | undefined;
+  name: string;
+  output_schema?: { [k: string]: any } | null | undefined;
+  type: string;
+};
+
+/** @internal */
+export const StepSchema$outboundSchema: z.ZodMiniType<
+  StepSchema$Outbound,
+  StepSchema
+> = z.pipe(
+  z.object({
+    description: z.optional(z.nullable(z.string())),
+    inputSchema: z.optional(z.nullable(z.record(z.string(), z.any()))),
+    metadata: z.optional(z.nullable(z.record(z.string(), z.any()))),
+    name: z.string(),
+    outputSchema: z.optional(z.nullable(z.record(z.string(), z.any()))),
+    type: z.string(),
