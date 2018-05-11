@@ -67,3 +67,72 @@ async def register_agent(
     response = await client.http_client.post(
         "/api/v1/agents/initAgent",
         json=payload,
+        headers=headers,
+    )
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def get_agent(client: AgentControlClient, agent_name: str) -> dict[str, Any]:
+    """Get agent details by name from the server."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.get(f"/api/v1/agents/{normalized_name}")
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def list_agents(
+    client: AgentControlClient,
+    cursor: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """List all registered agents from the server."""
+    params: dict[str, Any] = {"limit": limit}
+    if cursor:
+        params["cursor"] = ensure_agent_name(cursor)
+    response = await client.http_client.get("/api/v1/agents", params=params)
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def get_agent_policies(
+    client: AgentControlClient,
+    agent_name: str,
+) -> dict[str, Any]:
+    """List policy IDs associated with an agent."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.get(f"/api/v1/agents/{normalized_name}/policies")
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def add_agent_policy(
+    client: AgentControlClient,
+    agent_name: str,
+    policy_id: int,
+) -> dict[str, Any]:
+    """Associate a policy with an agent (additive, idempotent)."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.post(
+        f"/api/v1/agents/{normalized_name}/policies/{policy_id}"
+    )
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def remove_agent_policy_association(
+    client: AgentControlClient,
+    agent_name: str,
+    policy_id: int,
+) -> dict[str, Any]:
+    """Remove one policy association from an agent (idempotent)."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.delete(
+        f"/api/v1/agents/{normalized_name}/policies/{policy_id}"
+    )
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def remove_all_agent_policies(
+    client: AgentControlClient,
