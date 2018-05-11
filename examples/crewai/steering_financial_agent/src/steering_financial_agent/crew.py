@@ -10,16 +10,3 @@ from steering_financial_agent.tools.process_transfer import create_transfer_tool
 class SteeringFinancialCrew:
     """Financial operations crew with Agent Control steering."""
 
-    agents_config = "config/agents.yaml"
-    tasks_config = "config/tasks.yaml"
-
-    @agent
-    def financial_operations_agent(self) -> Agent:
-        transfer_tool = create_transfer_tool()
-        return Agent(
-            config=self.agents_config["financial_operations_agent"],
-            tools=[transfer_tool],
-            verbose=True,
-        )
-
-    @task

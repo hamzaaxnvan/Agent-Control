@@ -24,30 +24,3 @@ function getLeafConditionDetails(
   }
 
   return {
-    selectorPath: condition.selector.path ?? '*',
-    evaluatorName: condition.evaluator.name,
-    evaluatorConfig: condition.evaluator.config,
-  };
-}
-
-export function getControlConditionState(
-  definition: ControlDefinition
-): ControlConditionState {
-  const leafCondition = getLeafConditionDetails(definition);
-  const evaluatorId = leafCondition?.evaluatorName ?? '';
-  const evaluator = getEvaluator(evaluatorId);
-
-  return {
-    leafCondition,
-    evaluatorId,
-    evaluator,
-    canEditLeafCondition: Boolean(leafCondition),
-  };
-}
-
-export function buildEditableCondition(
-  definition: ControlDefinition,
-  leafCondition: LeafConditionDetails | null,
-  selectorPath: string,
-  finalConfig: Record<string, unknown>
-): ControlDefinition['condition'] {

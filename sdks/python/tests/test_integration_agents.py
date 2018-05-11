@@ -110,3 +110,115 @@ async def test_agent_update_workflow(
     """
     Test agent update workflow (re-registration).
 
+    Verifies:
+    - Existing agent can be updated via re-registration
+    - Response indicates update (created=False)
+    - Steps are updated
+    """
+    agent = test_agent["agent"]
+
+    # Update agent (re-register with different steps)
+    updated_steps = sample_steps[:1]  # Use only first step
+    response = await agent_control.agents.register_agent(
+        client,
+        agent,
+        steps=updated_steps
+    )
+
+    # Verify this was an update, not a new creation
+    assert response["created"] is False
+
+    print("✓ Agent updated successfully")
+    print(f"✓ Updated with {len(updated_steps)} step(s)")
+
+
+@pytest.mark.asyncio
+async def test_list_agent_controls_typed_returns_model(
+    client: agent_control.AgentControlClient,
+    test_agent: dict,
+) -> None:
+    """Typed controls endpoint returns AgentControlsResponse."""
+    # GIVEN: an existing registered agent.
+
+    # WHEN: controls are requested via the typed API wrapper.
+    response = await agent_control.agents.list_agent_controls_typed(
+        client,
+        test_agent["agent_name"],
+    )
+
+    # THEN: a typed model is returned.
+    assert isinstance(response, AgentControlsResponse)
+    assert isinstance(response.controls, list)
+
+
+@pytest.mark.asyncio
+async def test_list_agent_controls_returns_dict_payload(
+    client: agent_control.AgentControlClient,
+    test_agent: dict,
+) -> None:
+    """Dict controls endpoint returns a dict payload with controls list."""
+    # GIVEN: an existing registered agent.
+
+    # WHEN: controls are requested via the dict API wrapper.
+    response = await agent_control.agents.list_agent_controls(
+        client,
+        test_agent["agent_name"],
+    )
+
+    # THEN: a dict payload is returned with controls list.
+    assert isinstance(response, dict)
+    assert "controls" in response
+    assert isinstance(response["controls"], list)
+
+
+@pytest.mark.asyncio
+async def test_convenience_get_agent_function(
+    test_agent: dict,
+    server_url: str,
+    api_key: str | None,
+) -> None:
+    """
+    Test the convenience get_agent() function.
+
+    Verifies:
+    - Convenience function works without manual client management
+    - Returns same data as client-based approach
+    """
+    agent_name = test_agent["agent_name"]
+
+    # Use convenience function
+    agent_data = await agent_control.get_agent(agent_name, server_url=server_url, api_key=api_key)
+
+    # Verify response
+    assert "agent" in agent_data
+    assert agent_data["agent"]["agent_name"] == agent_name
+
+    print("✓ Convenience function works")
+
+
+@pytest.mark.asyncio
+async def test_convenience_agent_association_functions(
+    test_agent: dict,
+    test_policy: dict,
+    test_control: dict,
+    server_url: str,
+    api_key: str | None,
+) -> None:
+    """Top-level convenience helpers support multi-policy and direct controls."""
+    agent_name = test_agent["agent_name"]
+    policy_id = test_policy["policy_id"]
+    control_id = test_control["control_id"]
+
+    control_data = {
+        "description": "Integration test control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "condition": {
+            "selector": {"path": "input"},
+            "evaluator": {
+                "name": "regex",
+                "config": {"pattern": ".*"},
+            },
+        },
+        "action": {"decision": "observe"},
