@@ -151,3 +151,80 @@ class AgentControlServerDatabaseConfig(BaseSettings):
             "DB_CONNECT_TIMEOUT_SECONDS",
         ),
     )
+    # 0 disables the server-side statement timeout.
+    statement_timeout_seconds: float = Field(
+        default=50.0,
+        ge=0,
+        validation_alias=AliasChoices(
+            "AGENT_CONTROL_DB_STATEMENT_TIMEOUT_SECONDS",
+            "DB_STATEMENT_TIMEOUT_SECONDS",
+        ),
+    )
+
+    def get_url(self) -> str:
+        """Get database URL, preferring an explicit URL if configured."""
+        if self.url:
+            return self.url
+        return (
+            f"postgresql+{self.driver}://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        )
+
+
+class Settings(BaseSettings):
+    """Server configuration settings."""
+
+    model_config = SettingsConfigDict(**_COMMON_SETTINGS_CONFIG, env_prefix="AGENT_CONTROL_")
+
+    # Server settings
+    host: str = _env_alias_field("0.0.0.0", "AGENT_CONTROL_HOST", "HOST")
+    port: int = _env_alias_field(8000, "AGENT_CONTROL_PORT", "PORT")
+    debug: bool = _env_alias_field(False, "AGENT_CONTROL_DEBUG", "DEBUG")
+
+    # API settings
+    api_version: str = _env_alias_field("v1", "AGENT_CONTROL_API_VERSION", "API_VERSION")
+    api_prefix: str = _env_alias_field("/api", "AGENT_CONTROL_API_PREFIX", "API_PREFIX")
+    out_of_box_bootstrap_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias=AliasChoices(
+            "AGENT_CONTROL_OUT_OF_BOX_BOOTSTRAP_TIMEOUT_SECONDS",
+        ),
+    )
+
+    # Prometheus metrics settings
+    prometheus_metrics_prefix: str = _env_alias_field(
+        "agent_control_server",
+        "AGENT_CONTROL_PROMETHEUS_METRICS_PREFIX",
+        "PROMETHEUS_METRICS_PREFIX",
+    )
+
+    # CORS settings
+    cors_origins: list[str] | str = _env_alias_field(
+        "*",
+        "AGENT_CONTROL_CORS_ORIGINS",
+        "CORS_ORIGINS",
+    )
+    allow_methods: list[str] | str = _env_alias_field(
+        ["*"],
+        "AGENT_CONTROL_ALLOW_METHODS",
+        "ALLOW_METHODS",
+    )
+    allow_headers: list[str] | str = _env_alias_field(
+        ["*"],
+        "AGENT_CONTROL_ALLOW_HEADERS",
+        "ALLOW_HEADERS",
+    )
+
+    def get_cors_origins(self) -> list[str]:
+        """Parse CORS origins from string or list."""
+        return self._parse_list_setting(self.cors_origins)
+
+    def get_allow_methods(self) -> list[str]:
+        """Parse allow_methods from string or list."""
+        return self._parse_list_setting(self.allow_methods)
+
+    def get_allow_headers(self) -> list[str]:
+        """Parse allow_headers from string or list."""
+        return self._parse_list_setting(self.allow_headers)
+
+    @staticmethod
