@@ -36,22 +36,3 @@ class BaseControlEventSink(ControlEventSink):
         """Return whether the sink is currently able to deliver events."""
         return True
 
-    def write_event(self, event: ControlExecutionEvent) -> SinkResult:
-        """Write a single control execution event."""
-        return self.write_events([event])
-
-    def write_events(self, events: Sequence[ControlExecutionEvent]) -> SinkResult:
-        """Write a batch of control execution events."""
-        accepted = 0
-        dropped = 0
-        for event in events:
-            result = self.write_event(event)
-            accepted += result.accepted
-            dropped += result.dropped
-        return SinkResult(accepted=accepted, dropped=dropped)
-
-
-class AsyncControlEventSink(Protocol):
-    """Async write-side abstraction for delivering control execution events."""
-
-    async def write_events(self, events: Sequence[ControlExecutionEvent]) -> SinkResult:
