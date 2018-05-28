@@ -22,15 +22,3 @@ import {
  */
 export type BatchEventsRequest = {
   /**
-   * List of events to ingest
-   */
-  events: Array<ControlExecutionEvent>;
-};
-
-/** @internal */
-export type BatchEventsRequest$Outbound = {
-  events: Array<ControlExecutionEvent$Outbound>;
-};
-
-/** @internal */
-export const BatchEventsRequest$outboundSchema: z.ZodMiniType<
