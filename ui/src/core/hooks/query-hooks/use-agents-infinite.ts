@@ -17,3 +17,12 @@ export type UseAgentsInfiniteParams = {
 export function useAgentsInfinite(params?: UseAgentsInfiniteParams) {
   const { enabled = true, ...filterParams } = params ?? {};
 
+  return useInfiniteQuery({
+    queryKey: ['agents', 'infinite', filterParams],
+    queryFn: async ({ pageParam }: { pageParam: string | undefined }) => {
+      const { data, error } = await api.agents.list({
+        cursor: pageParam,
+        limit: AGENTS_PAGE_SIZE,
+        ...filterParams,
+      });
+      if (error) throw error;
