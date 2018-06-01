@@ -10,3 +10,10 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 
+from alembic import op
+
+# revision identifiers, used by Alembic.
+revision = "f3a1c8d7e2b4"
+down_revision = "e2b7f4a9c6d1"
+branch_labels = None
+depends_on = None

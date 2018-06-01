@@ -78,3 +78,30 @@ async def phase_2_decorator_runs_against_merged_set() -> None:
 
     # Input contains a prod-restricted keyword: pre-stage block via the
     # binding-derived control.
+    try:
+        await chat("please run sudo apt-get install something")
+    except ControlViolationError as exc:
+        print(f"  Pre-stage block (binding):  {exc.control_name}")
+
+    # Input is harmless but the simulated LLM will emit an SSN-like string,
+    # tripping the post-stage PII control attached directly to the agent.
+    try:
+        await chat("show me a sample customer record")
+    except ControlViolationError as exc:
+        print(f"  Post-stage block (direct):  {exc.control_name}")
+
+
+async def phase_3_evaluate_controls_defaults_from_session() -> None:
+    print("\n=== 3. evaluate_controls() defaults target from session ===")
+    # No target args here — the SDK uses the session target set at init().
+    result = await agent_control.evaluate_controls(
+        step_name="chat",
+        step_type="llm",
+        stage="pre",
+        input="hello, no per-call target",
+        agent_name=AGENT_NAME,
+    )
+    print(f"  is_safe={result.is_safe}, confidence={result.confidence:.2f}")
+
+
+async def phase_4_per_call_mismatch_rejected() -> None:

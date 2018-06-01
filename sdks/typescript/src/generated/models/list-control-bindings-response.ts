@@ -7,22 +7,3 @@ import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
-import {
-  GetControlBindingResponse,
-  GetControlBindingResponse$inboundSchema,
-} from "./get-control-binding-response.js";
-import {
-  PaginationInfo,
-  PaginationInfo$inboundSchema,
-} from "./pagination-info.js";
-
-/**
- * Paginated/filtered list of control bindings.
- */
-export type ListControlBindingsResponse = {
-  bindings?: Array<GetControlBindingResponse> | undefined;
-  /**
-   * Pagination metadata for cursor-based pagination.
-   */
-  pagination: PaginationInfo;
-};
