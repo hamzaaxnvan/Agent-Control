@@ -15,20 +15,3 @@ export class System extends ClientSDK {
    * UI configuration
    *
    * @remarks
-   * Return configuration flags that drive UI behavior.
-   *
-   * If authentication is enabled, this also reports whether the current
-   * request has an active session (via header or cookie), allowing the UI
-   * to skip the login prompt on refresh when a valid cookie is present.
-   */
-  async getConfigApiConfig(
-    options?: RequestOptions,
-  ): Promise<models.ConfigResponse> {
-    return unwrapAsync(systemGetConfigApiConfig(
-      this,
-      options,
-    ));
-  }
-
-  /**
-   * Login with API key
