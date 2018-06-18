@@ -61,3 +61,35 @@ export type ControlDefinitionOutput = {
    * Detailed description of the control
    */
   description?: string | null | undefined;
+  /**
+   * Whether this control is active
+   */
+  enabled: boolean;
+  /**
+   * Where this control executes
+   */
+  execution: Execution;
+  /**
+   * Defines when a control applies to a Step.
+   */
+  scope?: ControlScope | undefined;
+  /**
+   * Tags for categorization
+   */
+  tags?: Array<string> | undefined;
+  /**
+   * Template metadata for template-backed controls
+   */
+  template?: TemplateDefinitionOutput | null | undefined;
+  /**
+   * Resolved parameter values for template-backed controls
+   */
+  templateValues?: { [k: string]: TemplateValue } | null | undefined;
+};
+
+/** @internal */
+export const Execution$inboundSchema: z.ZodMiniType<Execution, unknown> =
+  openEnums.inboundSchema(Execution);
+
+/** @internal */
+export const ControlDefinitionOutput$inboundSchema: z.ZodMiniType<

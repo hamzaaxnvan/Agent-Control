@@ -170,3 +170,90 @@ const PRESETS = [
   ["steered", "Should I move my savings into crypto?"],
   ["blocked at output", "What is my SSN again?"],
 ];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+const chips = $("chips");
+for (const [label, text] of PRESETS) {
+  const b = document.createElement("button");
+  b.className = "chip"; b.type = "button"; b.textContent = label;
+  b.onclick = () => { $("msg").value = text; $("msg").focus(); };
+  chips.appendChild(b);
+}
+
+function addTurn(role, html) {
+  const el = document.createElement("div");
+  el.className = `turn ${role}`;
+  el.innerHTML = html;
+  $("log").appendChild(el);
+  el.scrollIntoView({ behavior: "smooth", block: "end" });
+  return el;
+}
+
+const OUTCOME = {
+  answered:       { pill: "ok",      label: "passed",            bubble: "" },
+  steered:        { pill: "steered", label: "steered",           bubble: "steered" },
+  blocked_input:  { pill: "blocked", label: "blocked at input",  bubble: "stopped" },
+  blocked_tool:   { pill: "blocked", label: "tool call blocked", bubble: "stopped" },
+  blocked_output: { pill: "blocked", label: "blocked at output", bubble: "stopped" },
+  platform_refused: { pill: "steered", label: "platform refused",  bubble: "steered" },
+  llm_error:      { pill: "blocked", label: "model error",       bubble: "stopped" },
+};
+
+const STAGE_LABEL = {
+  pre:  "before the model",
+  tool: "before the tool runs",
+  post: "after the model",
+};
+
+// Which steps are guardrail work. The model step is the slow one, and keeping
+// them visually apart is the point of showing the list at all.
+const GUARD_STEPS = new Set(["screen_input", "screen_tool", "screen_output"]);
+
+// Always two decimals. A score of 2.00 is a continuous value that landed on a
+// rubric level, not a discrete level, and rounding it to "2" hides that.
+const num = (v) => (typeof v === "number" ? v.toFixed(2) : v);
+const OP = { gte: "\u2265", lte: "\u2264", gt: ">", lt: "<", eq: "=" };
+
+function stepsHtml(steps) {
+  return steps.map((s) => {
+    const running = s.state === "start";
+    const cls = running ? "run" : (s.blocked ? "hit" : "");
+    const icon = running ? '<span class="spin"></span>'
+               : `<span class="ic ${s.blocked ? "stop" : (GUARD_STEPS.has(s.step) ? "ok" : "wait")}"></span>`;
+    let note = "";
+    if (s.blocked) note = ` &mdash; stopped by ${esc((s.fired || [])[0] || "a control")}`;
+    else if (s.state === "done" && s.chose_tool) note = ` &mdash; chose ${esc(s.chose_tool)}`;
+    else if (s.state === "done" && typeof s.rows === "number") note = ` &mdash; ${s.rows} row(s)`;
+    else if (s.state === "done" && s.refused) note = " &mdash; provider refused";
+    const ms = s.state === "done" ? `<span class="ms">${s.ms}ms</span>` : "";
+    return `<div class="steprow ${cls}">${icon}<span class="who">${esc(s.label || s.step)}${note}</span>${ms}</div>`;
+  }).join("");
+}
+
+function questionsHtml(c) {
+  if (!c.questions || !c.questions.length) return "";
+  const rows = c.questions.map((q) => {
+    const cls = q.tripped ? "trip" : (q.decides ? "" : "off");
+    const test = q.decides
+      ? `${OP[q.operator] || q.operator} ${num(q.threshold)}`
+      : "recorded only";
+    const verdict = q.decides ? (q.tripped ? "tripped" : "no") : "";
+    return `<tr class="${cls}">`
+         + `<td>${esc(q.id)}</td>`
+         + `<td class="off">${esc(q.type || "")}</td>`
+         + `<td class="n">${esc(String(num(q.answer)))}</td>`
+         + `<td class="n">${esc(test)}</td>`
+         + `<td class="wide">${verdict}</td></tr>`;
+  }).join("");
+
+  const deciding = c.questions.filter((q) => q.decides);
+  const tripped = deciding.filter((q) => q.tripped);
+  let rule = "";
+  if (deciding.length > 1) {
+    rule = c.combine === "all"
+      ? `combine: all &rarr; ${tripped.length} of ${deciding.length} tripped, so the control ${c.matched ? "fires" : "stays quiet"}`
+      : `combine: any &rarr; ${tripped.length} tripped, so the control ${c.matched ? "fires" : "stays quiet"}`;
+  }
+  return `<table class="q">${rows}</table>`

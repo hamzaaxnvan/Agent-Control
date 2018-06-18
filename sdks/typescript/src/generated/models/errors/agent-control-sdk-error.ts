@@ -9,15 +9,3 @@ export class AgentControlSDKError extends Error {
   /** HTTP body */
   public readonly body: string;
   /** HTTP headers */
-  public readonly headers: Headers;
-  /** HTTP content type */
-  public readonly contentType: string;
-  /** Raw response */
-  public readonly rawResponse: Response;
-
-  constructor(
-    message: string,
-    httpMeta: {
-      response: Response;
-      request: Request;
-      body: string;
