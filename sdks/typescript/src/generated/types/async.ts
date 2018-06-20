@@ -15,20 +15,3 @@ export type APICall =
     }
   | {
       status: "invalid";
-      request?: undefined;
-      response?: undefined;
-    };
-
-export class APIPromise<T> implements Promise<T> {
-  readonly #promise: Promise<[T, APICall]>;
-  readonly #unwrapped: Promise<T>;
-
-  readonly [Symbol.toStringTag] = "APIPromise";
-
-  constructor(p: [T, APICall] | Promise<[T, APICall]>) {
-    this.#promise = p instanceof Promise ? p : Promise.resolve(p);
-    this.#unwrapped =
-      p instanceof Promise
-        ? this.#promise.then(([value]) => value)
-        : Promise.resolve(p[0]);
-  }
