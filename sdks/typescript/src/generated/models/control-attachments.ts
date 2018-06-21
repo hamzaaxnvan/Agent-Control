@@ -12,17 +12,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 import { PolicyRef, PolicyRef$inboundSchema } from "./policy-ref.js";
 import {
   TargetAttachmentRef,
-  TargetAttachmentRef$inboundSchema,
-} from "./target-attachment-ref.js";
-
-/**
- * Attachments for a listed control.
- */
-export type ControlAttachments = {
-  /**
-   * Direct agent associations for this control
-   */
-  agents?: Array<AgentRef> | undefined;
-  /**
-   * Policy associations for this control
-   */
