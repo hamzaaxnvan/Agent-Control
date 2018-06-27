@@ -133,3 +133,138 @@ def control_event_to_otel_span(event: ControlExecutionEvent) -> OTELControlEvent
 
     if event.execution_duration_ms is not None:
         attributes["agent_control.execution_duration_ms"] = event.execution_duration_ms
+    if event.evaluator_name is not None:
+        attributes["agent_control.evaluator_name"] = event.evaluator_name
+    if event.selector_path is not None:
+        attributes["agent_control.selector_path"] = event.selector_path
+    if event.error_message is not None:
+        attributes["agent_control.error_message"] = event.error_message
+
+    for key, value in sorted(event.metadata.items()):
+        if key in _DEBUG_METADATA_ATTRIBUTE_KEYS:
+            continue
+        attributes[f"agent_control.metadata.{key}"] = _normalize_attribute_value(value)
+
+    return OTELControlEventSpan(
+        name="agent_control.control_execution",
+        trace_id=event.trace_id,
+        parent_span_id=event.span_id,
+        attributes=attributes,
+        start_time_unix_nano=start_time_unix_nano,
+        end_time_unix_nano=end_time_unix_nano,
+        error_message=event.error_message,
+    )
+
+
+class _NoOpControlEventSink(BaseControlEventSink):
+    """Sink that accepts events but intentionally emits nothing."""
+
+    def is_active(self) -> bool:
+        return False
+
+    def write_events(self, events: Sequence[ControlExecutionEvent]) -> SinkResult:
+        return SinkResult(accepted=len(events), dropped=0)
+
+
+class OTELControlEventSink(BaseControlEventSink):
+    """Emit control-execution events as OpenTelemetry spans."""
+
+    def __init__(
+        self,
+        *,
+        tracer_provider: Any,
+        tracer: Any,
+        sdk_modules: OTELSDKModules,
+        provider_owned: bool,
+    ) -> None:
+        self._tracer_provider: Any = tracer_provider
+        self._tracer: Any = tracer
+        self._sdk_modules = sdk_modules
+        self._provider_owned = provider_owned
+
+    def write_events(self, events: Sequence[ControlExecutionEvent]) -> SinkResult:
+        accepted = 0
+        dropped = 0
+
+        for event in events:
+            try:
+                self._write_event(event)
+                accepted += 1
+            except Exception:
+                logger.warning("Failed to emit control event to OTEL", exc_info=True)
+                dropped += 1
+
+        return SinkResult(accepted=accepted, dropped=dropped)
+
+    def flush(self) -> None:
+        force_flush = getattr(self._tracer_provider, "force_flush", None)
+        if callable(force_flush):
+            force_flush()
+
+    def close(self) -> None:
+        if not self._provider_owned:
+            return
+        shutdown = getattr(self._tracer_provider, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+
+    def _write_event(self, event: ControlExecutionEvent) -> None:
+        span_data = control_event_to_otel_span(event)
+        parent_context = self._build_parent_context(span_data)
+        span = self._tracer.start_span(
+            span_data.name,
+            context=parent_context,
+            kind=self._sdk_modules.span_kind.INTERNAL,
+            start_time=span_data.start_time_unix_nano,
+        )
+        span.set_attributes(span_data.attributes)
+        if span_data.error_message:
+            record_exception = getattr(span, "record_exception", None)
+            if callable(record_exception):
+                record_exception(RuntimeError(span_data.error_message))
+            set_status = getattr(span, "set_status", None)
+            if callable(set_status):
+                set_status(
+                    self._sdk_modules.status_cls(
+                        self._sdk_modules.status_code_cls.ERROR,
+                        span_data.error_message,
+                    )
+                )
+        span.end(end_time=span_data.end_time_unix_nano)
+
+    def _build_parent_context(self, span_data: OTELControlEventSpan) -> object | None:
+        trace_id = span_data.trace_id
+        parent_span_id = span_data.parent_span_id
+
+        if not validate_trace_id(trace_id) or trace_id == "0" * 32:
+            return None
+        if not validate_span_id(parent_span_id) or parent_span_id == "0" * 16:
+            parent_span_id = _generate_span_id()
+
+        parent_span_context = self._sdk_modules.span_context_cls(
+            trace_id=int(trace_id, 16),
+            span_id=int(parent_span_id, 16),
+            is_remote=True,
+            trace_flags=self._sdk_modules.trace_flags_cls(
+                self._sdk_modules.trace_flags_cls.SAMPLED
+            ),
+            trace_state=self._sdk_modules.trace_state_cls(),
+        )
+        return cast(
+            object,
+            self._sdk_modules.set_span_in_context(
+                self._sdk_modules.non_recording_span_cls(parent_span_context)
+            ),
+        )
+
+
+def _resolve_otel_sink_config(config: JSONObject) -> OTELSinkConfig:
+    """Resolve OTEL sink config from settings with per-sink overrides."""
+    settings = get_settings()
+
+    enabled = bool(config.get("enabled", settings.otel_enabled))
+
+    endpoint_value = config.get("endpoint", settings.otel_endpoint)
+    endpoint = str(endpoint_value) if endpoint_value else None
+
+    headers_value = config.get("headers", settings.otel_headers)

@@ -1,0 +1,32 @@
+# Agent Control Server - Docker Compose Configuration
+#
+# Quick Start:
+#   docker compose up -d
+#   AGENT_CONTROL_SERVER_HOST_PORT=18000 AGENT_CONTROL_DB_HOST_PORT=15432 docker compose up -d
+#   AGENT_CONTROL_POSTGRES_PASSWORD=agent_control_local docker compose up -d
+#
+# Services:
+#   - PostgreSQL database (port 5432)
+#   - Agent Control Server API (port 8000)
+#   - Agent Control UI Dashboard (port 4000)
+#
+# The images are published to Docker Hub at:
+#   galileoai/agent-control-server:latest
+#   galileoai/agent-control-ui:latest
+#
+# This compose file pulls prebuilt images for both server and UI from Docker Hub.
+# For local development (run server with uvicorn or build UI locally), use:
+#   docker compose -f docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent_control_postgres
+    ports:
+      - "${AGENT_CONTROL_DB_HOST_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: agent_control
+      POSTGRES_USER: agent_control
+      POSTGRES_PASSWORD: "${AGENT_CONTROL_POSTGRES_PASSWORD:-agent_control}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
