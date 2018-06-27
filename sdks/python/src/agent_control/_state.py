@@ -17,13 +17,3 @@ if TYPE_CHECKING:
 
 
 class _StateContainer:
-    """Container for global SDK state."""
-
-    def __init__(self) -> None:
-        self.current_agent: Agent | None = None
-        self.control_engine: Any = None
-        self.client: AgentControlClient | None = None
-        self.server_controls: list[dict[str, Any]] | None = None
-        self.server_url: str | None = None
-        self.api_key: str | None = None
-        self.api_key_header: str | None = None

@@ -7,21 +7,3 @@ import { remap as remap$ } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
-import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-/**
- * Evaluator schema summary for list response.
- */
-export type EvaluatorSchemaItem = {
-  configSchema: { [k: string]: any };
-  description: string | null;
-  name: string;
-};
-
-/** @internal */
-export const EvaluatorSchemaItem$inboundSchema: z.ZodMiniType<
-  EvaluatorSchemaItem,
-  unknown
-> = z.pipe(
-  z.object({
-    config_schema: z.record(z.string(), z.any()),
