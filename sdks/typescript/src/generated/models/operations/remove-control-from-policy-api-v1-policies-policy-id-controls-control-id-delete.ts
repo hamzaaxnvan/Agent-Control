@@ -27,3 +27,13 @@ export const RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDelete
     z.object({
       policyId: z.int(),
       controlId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        policyId: "policy_id",
+        controlId: "control_id",
+      });
+    }),
+  );
+
+export function removeControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequestToJSON(
