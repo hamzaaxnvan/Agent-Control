@@ -7,3 +7,6 @@ export type ListFormValues = {
   values: string;
   /** Match logic: any or all */
   logic: 'any' | 'all';
+  /** When to trigger: on match or no match */
+  match_on: 'match' | 'no_match';
+  /** Match mode: exact, contains, starts_with, or ends_with */

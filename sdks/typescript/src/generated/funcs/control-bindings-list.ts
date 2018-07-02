@@ -75,3 +75,42 @@ async function $do(
     Result<
       models.ListControlBindingsResponse,
       | errors.HTTPValidationError
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) =>
+      z.parse(
+        z.optional(
+          operations
+            .ListControlBindingsApiV1ControlBindingsGetRequest$outboundSchema,
+        ),
+        value,
+      ),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = null;
+
+  const path = pathToFunc("/api/v1/control-bindings")();
+
+  const query = encodeFormQuery({
+    "control_id": payload?.control_id,
+    "cursor": payload?.cursor,
+    "limit": payload?.limit,
+    "target_id": payload?.target_id,
+    "target_type": payload?.target_type,
+  });
