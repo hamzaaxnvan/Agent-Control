@@ -90,34 +90,3 @@ async function $do(
   const secConfig = await extractSecurity(client._options.apiKeyHeader);
   const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
   const requestSecurity = resolveGlobalSecurity(securityInput);
-
-  const context = {
-    options: client._options,
-    baseURL: options?.serverURL ?? client._baseURL ?? "",
-    operationID: "get_evaluators_api_v1_evaluators_get",
-    oAuth2Scopes: null,
-
-    resolvedSecurity: requestSecurity,
-
-    securitySource: client._options.apiKeyHeader,
-    retryConfig: options?.retries
-      || client._options.retryConfig
-      || { strategy: "none" },
-    retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
-  };
-
-  const requestRes = client._createRequest(context, {
-    security: requestSecurity,
-    method: "GET",
-    baseURL: options?.serverURL,
-    path: path,
-    headers: headers,
-    userAgent: client._options.userAgent,
-    timeoutMs: options?.timeoutMs || client._options.timeoutMs || -1,
-  }, options);
-  if (!requestRes.ok) {
-    return [requestRes, { status: "invalid" }];
-  }
-  const req = requestRes.value;
-
-  const doResult = await client._do(req, {
