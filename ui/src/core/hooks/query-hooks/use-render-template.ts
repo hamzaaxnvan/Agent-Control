@@ -11,10 +11,3 @@ export function useRenderTemplate() {
   return useMutation({
     mutationFn: async (request: RenderControlTemplateRequest) => {
       const { data, error, response } =
-        await api.controlTemplates.render(request);
-
-      if (error) {
-        throw parseApiError(
-          error,
-          'Failed to render template',
-          response?.status

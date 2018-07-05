@@ -10,3 +10,7 @@ export function isReadableStream<T = Uint8Array>(
   }
 
   // Check for the presence of methods specific to ReadableStream
+  const stream = val as ReadableStream<Uint8Array>;
+
+  // ReadableStream has methods like getReader, cancel, and tee
+  return (
