@@ -55,3 +55,61 @@ export function systemLoginApi(
 > {
   return new APIPromise($do(
     client,
+    request,
+    options,
+  ));
+}
+
+async function $do(
+  client: AgentControlSDKCore,
+  request: models.LoginRequest,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      models.LoginResponse,
+      | errors.HTTPValidationError
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) => z.parse(models.LoginRequest$outboundSchema, value),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = encodeJSON("body", payload, { explode: true });
+
+  const path = pathToFunc("/api/login")();
+
+  const headers = new Headers(compactMap({
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID: "login_api_login_post",
+    oAuth2Scopes: null,
+
+    resolvedSecurity: requestSecurity,
+
+    securitySource: client._options.apiKeyHeader,
+    retryConfig: options?.retries
