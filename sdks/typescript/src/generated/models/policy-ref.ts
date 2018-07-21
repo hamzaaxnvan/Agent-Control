@@ -15,20 +15,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 export type PolicyRef = {
   /**
    * Policy ID
-   */
-  policyId: number;
-};
-
-/** @internal */
-export const PolicyRef$inboundSchema: z.ZodMiniType<PolicyRef, unknown> = z
-  .pipe(
-    z.object({
-      policy_id: types.number(),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        "policy_id": "policyId",
-      });
-    }),
-  );
-

@@ -1,0 +1,15 @@
+[project]
+name = "evaluator-showcase"
+version = "0.1.0"
+description = "CrewAI agent demonstrating all built-in evaluators: regex, list, json, and sql"
+requires-python = ">=3.12"
+dependencies = [
+    "crewai[tools]>=1.10.1",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "sqlglot[c]>=30.11.0,<30.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
