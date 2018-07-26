@@ -30,3 +30,36 @@ class EventStoreControlEventSink:
     def __init__(self, store: EventStore):
         self.store = store
 
+    async def write_events(
+        self,
+        events: Sequence[ControlExecutionEvent],
+        *,
+        namespace_key: str,
+    ) -> SinkResult:
+        """Write events to the underlying store and report accepted/dropped counts."""
+        stored = await self.store.store(list(events), namespace_key=namespace_key)
+        dropped = max(len(events) - stored, 0)
+        return SinkResult(accepted=stored, dropped=dropped)
+
+
+ServerControlEventSink = AsyncControlEventSink | EventStoreControlEventSink
+
+
+@dataclass(frozen=True)
+class ResolvedControlEventBackend:
+    """Server observability backend with aligned write and query dependencies."""
+
+    sink: ServerControlEventSink
+    event_store: EventStore
+
+
+def register_control_event_sink_factory(
+    name: str,
+    factory: ControlEventSinkFactory[ResolvedControlEventBackend],
+) -> None:
+    """Register a named server observability backend factory for sink selection."""
+    _named_event_sink_factories.register(name, factory)
+
+
+def unregister_control_event_sink_factory(name: str) -> None:
+    """Unregister a named async control-event sink factory."""
