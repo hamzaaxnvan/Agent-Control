@@ -22,15 +22,3 @@ export type DeleteControlApiV1ControlsControlIdDeleteRequest$Outbound = {
 /** @internal */
 export const DeleteControlApiV1ControlsControlIdDeleteRequest$outboundSchema:
   z.ZodMiniType<
-    DeleteControlApiV1ControlsControlIdDeleteRequest$Outbound,
-    DeleteControlApiV1ControlsControlIdDeleteRequest
-  > = z.pipe(
-    z.object({
-      controlId: z.int(),
-      force: z._default(z.boolean(), false),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        controlId: "control_id",
-      });
-    }),
