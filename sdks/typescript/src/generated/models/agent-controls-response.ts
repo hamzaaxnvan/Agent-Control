@@ -15,3 +15,11 @@ export type AgentControlsResponse = {
   controls: Array<Control>;
 };
 
+/** @internal */
+export const AgentControlsResponse$inboundSchema: z.ZodMiniType<
+  AgentControlsResponse,
+  unknown
+> = z.object({
+  controls: z.array(Control$inboundSchema),
+});
+
