@@ -126,3 +126,67 @@ def _infer_input_schema(
     try:
         signature = inspect.signature(unwrapped)
     except Exception as exc:
+        _warn(
+            func,
+            phase="input",
+            reason="failed to inspect function signature",
+            exc=exc,
+            fallback=_INPUT_FALLBACK_SCHEMA,
+        )
+        return _fallback_input_schema()
+
+    fields: dict[str, tuple[Any, Any]] = {}
+    for name, param in signature.parameters.items():
+        if name in {"self", "cls"}:
+            continue
+        if param.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}:
+            continue
+
+        annotation = hints.get(name, Any)
+        default = ... if param.default is inspect.Parameter.empty else param.default
+        fields[name] = (annotation, default)
+
+    model_name = _build_model_name(unwrapped, suffix="Input")
+    try:
+        model = create_model(model_name, **fields)  # type: ignore[call-overload]
+        schema = model.model_json_schema()
+    except Exception as exc:
+        _warn(
+            func,
+            phase="input",
+            reason="failed to infer schema from signature",
+            exc=exc,
+            fallback=_INPUT_FALLBACK_SCHEMA,
+        )
+        return _fallback_input_schema()
+
+    if not isinstance(schema, dict):
+        _warn(
+            func,
+            phase="input",
+            reason="inferred input schema is not a dict",
+            fallback=_INPUT_FALLBACK_SCHEMA,
+        )
+        return _fallback_input_schema()
+
+    return schema
+
+
+def _infer_output_schema(func: Callable[..., Any], hints: dict[str, Any]) -> dict[str, Any]:
+    """Infer output schema from return type annotation using ``TypeAdapter``."""
+    if "return" not in hints:
+        _warn(
+            func,
+            phase="output",
+            reason="missing return type annotation",
+            fallback=_OUTPUT_FALLBACK_SCHEMA,
+        )
+        return _fallback_output_schema()
+
+    return_annotation = hints["return"]
+    try:
+        schema = TypeAdapter(return_annotation).json_schema()
+    except Exception as exc:
+        _warn(
+            func,
+            phase="output",
