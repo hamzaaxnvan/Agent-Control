@@ -14,9 +14,3 @@ import { beforeMount } from '@playwright/experimental-ct-react/hooks';
 import { JupiterThemeProvider } from '@rungalileo/jupiter-ds';
 
 import { appTheme } from '@/theme';
-
-beforeMount(async ({ App }) => (
-  <MantineProvider theme={appTheme} defaultColorScheme="light">
-    <DatesProvider settings={{ firstDayOfWeek: 0 }}>
-      <JupiterThemeProvider>
-        <ModalsProvider>
