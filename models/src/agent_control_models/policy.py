@@ -14,8 +14,3 @@ class Control(BaseModel):
     name: str
     control: ControlDefinition | UnrenderedTemplateControl
 
-
-class Policy(BaseModel):
-    """A policy with its associated controls.
-
-    Policies define a collection of controls that can be assigned to agents.

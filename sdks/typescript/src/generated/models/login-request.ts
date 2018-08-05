@@ -12,3 +12,11 @@ export type LoginRequest = {
   apiKey: string;
 };
 
+/** @internal */
+export type LoginRequest$Outbound = {
+  api_key: string;
+};
+
+/** @internal */
+export const LoginRequest$outboundSchema: z.ZodMiniType<
+  LoginRequest$Outbound,
