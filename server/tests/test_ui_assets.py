@@ -40,24 +40,3 @@ def test_resolve_ui_asset_path_serves_route_specific_index(tmp_path: Path) -> No
 
     assert resolve_ui_asset_path(ui_bundle, "/") == ui_bundle / "index.html"
     assert (
-        resolve_ui_asset_path(ui_bundle, "/agents")
-        == ui_bundle / "agents" / "index.html"
-    )
-    assert (
-        resolve_ui_asset_path(ui_bundle, "/_next/static/app.js")
-        == ui_bundle / "_next" / "static" / "app.js"
-    )
-    assert (
-        resolve_ui_asset_path(ui_bundle, "/site.webmanifest")
-        == ui_bundle / "site.webmanifest"
-    )
-
-
-def test_resolve_ui_asset_path_falls_back_to_root_index_for_unknown_routes(
-    tmp_path: Path,
-) -> None:
-    ui_bundle = _create_ui_bundle(tmp_path / "ui")
-
-    assert (
-        resolve_ui_asset_path(ui_bundle, "/does-not-exist")
-        == ui_bundle / "index.html"
