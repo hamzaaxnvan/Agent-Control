@@ -136,3 +136,72 @@ async def remove_agent_policy_association(
 
 async def remove_all_agent_policies(
     client: AgentControlClient,
+    agent_name: str,
+) -> dict[str, Any]:
+    """Remove all policy associations from an agent."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.delete(f"/api/v1/agents/{normalized_name}/policies")
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def get_agent_policy(
+    client: AgentControlClient,
+    agent_name: str,
+) -> dict[str, Any]:
+    """Get the primary policy assigned to an agent (compatibility endpoint)."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.get(f"/api/v1/agents/{normalized_name}/policy")
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def remove_agent_policy(
+    client: AgentControlClient,
+    agent_name: str,
+) -> dict[str, Any]:
+    """Remove all policy associations via singular compatibility endpoint."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.delete(f"/api/v1/agents/{normalized_name}/policy")
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def add_agent_control(
+    client: AgentControlClient,
+    agent_name: str,
+    control_id: int,
+) -> dict[str, Any]:
+    """Associate a control directly with an agent (idempotent)."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.post(
+        f"/api/v1/agents/{normalized_name}/controls/{control_id}"
+    )
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def remove_agent_control(
+    client: AgentControlClient,
+    agent_name: str,
+    control_id: int,
+) -> dict[str, Any]:
+    """Remove a direct control association from an agent (idempotent)."""
+    normalized_name = ensure_agent_name(agent_name)
+    response = await client.http_client.delete(
+        f"/api/v1/agents/{normalized_name}/controls/{control_id}"
+    )
+    response.raise_for_status()
+    return cast(dict[str, Any], response.json())
+
+
+async def list_agent_controls(
+    client: AgentControlClient,
+    agent_name: str,
+    *,
+    rendered_state: Literal["rendered", "unrendered", "all"] | None = None,
+    enabled_state: Literal["enabled", "disabled", "all"] | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+) -> dict[str, Any]:
+    """List effective controls for an agent.

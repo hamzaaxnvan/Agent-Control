@@ -15,38 +15,3 @@ import { StatsTotals, StatsTotals$inboundSchema } from "./stats-totals.js";
  * Response model for agent-level aggregated statistics.
  *
  * @remarks
- *
- * Contains agent-level totals (with optional timeseries) and per-control breakdown.
- *
- * Attributes:
- *     agent_name: Agent identifier
- *     time_range: Time range used
- *     totals: Agent-level aggregate statistics (includes timeseries)
- *     controls: Per-control breakdown for discovery and detail
- */
-export type StatsResponse = {
-  /**
-   * Agent identifier
-   */
-  agentName: string;
-  /**
-   * Per-control breakdown
-   */
-  controls: Array<ControlStats>;
-  /**
-   * Time range used
-   */
-  timeRange: string;
-  /**
-   * Agent-level aggregate statistics.
-   *
-   * @remarks
-   *
-   * Invariant: execution_count = match_count + non_match_count + error_count
-   *
-   * Matches have actions (deny, steer, observe) tracked in action_counts.
-   * sum(action_counts.values()) == match_count
-   *
-   * Attributes:
-   *     execution_count: Total executions across all controls
-   *     match_count: Total matches across all controls (evaluator matched)
