@@ -28,3 +28,34 @@ from agent_control_models.evaluation import EvaluationRequest, EvaluationRespons
 ENABLED = os.getenv("AGENT_CONTROL_OBSERVE", "1") != "0"
 
 _started = False
+
+
+def start(agent_name: str, server_url: str, step_name: str, tool_name: str) -> bool:
+    """Initialize the SDK so its observability batcher is running.
+
+    Both steps are declared here. init() replaces the agent's step list, so
+    leaving the tool step out would deregister it and the tool-stage control
+    would have nothing to attach to.
+
+    Args:
+        agent_name: The agent to register.
+        server_url: The Agent Control server.
+        step_name: The chat step's name.
+        tool_name: The lookup tool's step name.
+
+    Returns:
+        True when observability is on and initialization succeeded.
+    """
+    global _started
+    if not ENABLED or _started:
+        return _started
+    try:
+        agent_control.init(
+            agent_name=agent_name,
+            agent_description="TypeSafe Jev demo",
+            server_url=server_url,
+            steps=[
+                {"type": "llm", "name": step_name, "description": "A chat turn."},
+                {
+                    "type": "tool",
+                    "name": tool_name,
