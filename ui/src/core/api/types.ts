@@ -52,3 +52,111 @@ export type ProblemDetail = {
 export type Agent = components['schemas']['Agent'];
 export type EvaluatorSchema = components['schemas']['EvaluatorSchema'];
 export type StepSchema = components['schemas']['StepSchema'];
+export type AgentSummary = components['schemas']['AgentSummary'];
+export type ListAgentsResponse = components['schemas']['ListAgentsResponse'];
+
+// Evaluator types
+export type EvaluatorInfo = components['schemas']['EvaluatorInfo'];
+export type EvaluatorsResponse = Record<string, EvaluatorInfo>;
+// Request/Response types
+export type InitAgentRequest = components['schemas']['InitAgentRequest'];
+export type InitAgentResponse = components['schemas']['InitAgentResponse'];
+export type GetAgentResponse = components['schemas']['GetAgentResponse'];
+export type ControlActionDecision =
+  components['schemas']['ControlAction']['decision'];
+export type ControlExecution =
+  components['schemas']['ControlDefinition-Input']['execution'];
+export type ControlStage = NonNullable<
+  components['schemas']['ControlScope']['stages']
+>[number];
+export type ControlScope = components['schemas']['ControlScope'];
+export type ControlSelector = components['schemas']['ControlSelector'];
+export type ControlAction = components['schemas']['ControlAction'];
+export type ConditionNodeInput = components['schemas']['ConditionNode-Input'];
+export type ConditionNodeOutput = components['schemas']['ConditionNode-Output'];
+export type ConditionNode = ConditionNodeInput | ConditionNodeOutput;
+export type ControlDefinitionInput =
+  components['schemas']['ControlDefinition-Input'];
+export type ControlDefinitionOutput =
+  components['schemas']['ControlDefinition-Output'];
+export type ControlDefinition =
+  | ControlDefinitionInput
+  | ControlDefinitionOutput;
+export type Control = components['schemas']['Control'];
+export type AgentControlsResponse =
+  components['schemas']['AgentControlsResponse'];
+
+// Control types
+export type CreateControlRequest =
+  components['schemas']['CreateControlRequest'];
+export type CreateControlResponse =
+  components['schemas']['CreateControlResponse'];
+export type PatchControlRequest = components['schemas']['PatchControlRequest'];
+export type PatchControlResponse =
+  components['schemas']['PatchControlResponse'];
+export type SetControlDataRequest =
+  components['schemas']['SetControlDataRequest'];
+export type SetControlDataResponse =
+  components['schemas']['SetControlDataResponse'];
+export type GetControlDataResponse =
+  components['schemas']['GetControlDataResponse'];
+export type GetControlSchemaResponse =
+  components['schemas']['GetControlSchemaResponse'];
+
+export type ValidateControlDataRequest =
+  components['schemas']['ValidateControlDataRequest'];
+export type ValidateControlDataResponse =
+  components['schemas']['ValidateControlDataResponse'];
+export type ControlSummary = components['schemas']['ControlSummary'];
+export type ListControlsResponse =
+  components['schemas']['ListControlsResponse'];
+
+export type AgentRef = components['schemas']['AgentRef'];
+
+// =============================================================================
+// Template Types (manual until API types are regenerated)
+// =============================================================================
+
+export type TemplateValue = string | boolean | string[];
+
+export type TemplateParameterBase = {
+  label: string;
+  description?: string | null;
+  required?: boolean;
+  ui_hint?: string | null;
+};
+
+export type StringTemplateParameter = TemplateParameterBase & {
+  type: 'string';
+  default?: string | null;
+  placeholder?: string | null;
+};
+
+export type StringListTemplateParameter = TemplateParameterBase & {
+  type: 'string_list';
+  default?: string[] | null;
+  placeholder?: string[] | null;
+};
+
+export type EnumTemplateParameter = TemplateParameterBase & {
+  type: 'enum';
+  allowed_values: string[];
+  default?: string | null;
+};
+
+export type BooleanTemplateParameter = TemplateParameterBase & {
+  type: 'boolean';
+  default?: boolean | null;
+};
+
+export type RegexTemplateParameter = TemplateParameterBase & {
+  type: 'regex_re2';
+  default?: string | null;
+  placeholder?: string | null;
+};
+
+export type TemplateParameterDefinition =
+  | StringTemplateParameter
+  | StringListTemplateParameter
+  | EnumTemplateParameter
+  | BooleanTemplateParameter
