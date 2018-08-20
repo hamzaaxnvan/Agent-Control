@@ -1,6 +1,3 @@
 transfer_task:
   description: >
     Process this wire transfer request: {transfer_request}
-
-    Use the process_transfer tool with a JSON string containing
-    the transfer details. Report the outcome.
