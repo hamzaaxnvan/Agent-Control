@@ -30,35 +30,3 @@ export type ValidateControlDataRequest = {
    * Control configuration data to validate
    */
   data: ControlDefinitionInput | TemplateControlInput;
-};
-
-/** @internal */
-export type ValidateControlDataRequestData$Outbound =
-  | ControlDefinitionInput$Outbound
-  | TemplateControlInput$Outbound;
-
-/** @internal */
-export const ValidateControlDataRequestData$outboundSchema: z.ZodMiniType<
-  ValidateControlDataRequestData$Outbound,
-  ValidateControlDataRequestData
-> = smartUnion([
-  ControlDefinitionInput$outboundSchema,
-  TemplateControlInput$outboundSchema,
-]);
-
-export function validateControlDataRequestDataToJSON(
-  validateControlDataRequestData: ValidateControlDataRequestData,
-): string {
-  return JSON.stringify(
-    ValidateControlDataRequestData$outboundSchema.parse(
-      validateControlDataRequestData,
-    ),
-  );
-}
-
-/** @internal */
-export type ValidateControlDataRequest$Outbound = {
-  data: ControlDefinitionInput$Outbound | TemplateControlInput$Outbound;
-};
-
-/** @internal */

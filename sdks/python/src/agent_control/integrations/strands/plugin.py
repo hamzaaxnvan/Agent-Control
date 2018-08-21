@@ -218,3 +218,113 @@ class AgentControlPlugin(Plugin):
         input_text, _ = self._extract_messages(event)
         await self._evaluate_and_enforce(
             step_name="check_before_invocation",
+            input=input_text,
+            tools=self._available_tools(),
+            step_type="llm",
+            stage="pre",
+        )
+
+    async def check_before_model(self, event: BeforeModelCallEvent) -> None:
+        input_text, _ = self._extract_messages(event)
+        await self._evaluate_and_enforce(
+            step_name="check_before_model",
+            input=input_text,
+            tools=self._available_tools(),
+            step_type="llm",
+            stage="pre",
+        )
+
+    async def check_after_model(self, event: AfterModelCallEvent) -> None:
+        input_text, output_text = self._extract_messages(event)
+        context = self._extract_context(event)
+        await self._evaluate_and_enforce(
+            step_name="check_after_model",
+            input=input_text,
+            output=output_text,
+            context=context,
+            tools=self._available_tools(),
+            step_type="llm",
+            stage="post",
+        )
+
+    async def check_before_tool(self, event: BeforeToolCallEvent) -> None:
+        tool_name, tool_input = self._extract_tool_data(event)
+        context = self._extract_context(event)
+        await self._evaluate_and_enforce(
+            step_name=tool_name,
+            input=tool_input,
+            context=context,
+            step_type="tool",
+            stage="pre",
+            use_runtime_error=True,
+        )
+
+    async def check_after_tool(self, event: AfterToolCallEvent) -> None:
+        tool_name, tool_output = self._extract_tool_data(event)
+        tool_input: Any = event.tool_use.get("input", {}) if event.tool_use else {}
+        context = self._extract_context(event)
+        await self._evaluate_and_enforce(
+            step_name=tool_name,
+            input=tool_input,
+            output=tool_output,
+            context=context,
+            step_type="tool",
+            stage="post",
+            use_runtime_error=True,
+        )
+
+    async def check_before_node(self, event: BeforeNodeCallEvent) -> None:
+        input_text, _ = self._extract_messages(event)
+        node_id = getattr(event, "node_id", "unknown")
+        context = self._extract_context(event)
+        await self._evaluate_and_enforce(
+            step_name=node_id,
+            input=input_text,
+            context=context,
+            tools=self._available_tools(),
+            step_type="llm",
+            stage="pre",
+        )
+
+    async def check_after_node(self, event: AfterNodeCallEvent) -> None:
+        input_text, output_text = self._extract_messages(event)
+        node_id = getattr(event, "node_id", "unknown")
+        context = self._extract_context(event)
+        await self._evaluate_and_enforce(
+            step_name=node_id,
+            input=input_text,
+            output=output_text,
+            context=context,
+            tools=self._available_tools(),
+            step_type="llm",
+            stage="post",
+        )
+
+    def _available_tools(self) -> list[dict[str, Any]] | None:
+        """Return the complete current Strands registry in normalized form."""
+        get_specs = getattr(self._tool_registry, "get_all_tool_specs", None)
+        if not callable(get_specs):
+            return None
+        try:
+            return normalize_strands_tool_specs(get_specs())
+        except Exception:
+            logger.warning("Unable to capture complete Strands tool definitions", exc_info=True)
+            return None
+
+    def _extract_user_message_from_list(self, messages: list | None, reverse: bool = False) -> str:
+        if not messages:
+            return ""
+        msg_iter = reversed(messages) if reverse else messages
+        for msg in msg_iter:
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                return self._extract_content_text(msg.get("content", ""))
+        return ""
+
+    def _extract_messages(self, event: Any) -> tuple[str, str]:
+        input_text = ""
+        output_text = ""
+
+        if isinstance(event, BeforeInvocationEvent):
+            input_text = self._extract_user_message_from_list(event.messages)
+        elif isinstance(event, BeforeModelCallEvent):
+            state = event.invocation_state or {}
