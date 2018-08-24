@@ -40,24 +40,3 @@ export const ListForm = ({ form }: EvaluatorFormProps<ListFormValues>) => {
           { value: 'all', label: 'All (match if all values match)' },
         ]}
         size="sm"
-        {...form.getInputProps('logic')}
-        onChange={(value) =>
-          form.setFieldValue(
-            'logic',
-            (value as ListFormValues['logic']) || 'any'
-          )
-        }
-      />
-
-      <Select
-        label={
-          <LabelWithTooltip
-            label="Match on"
-            tooltip="Whether to trigger when value matches or when it does not match"
-          />
-        }
-        labelProps={labelPropsInline}
-        data={[
-          { value: 'match', label: 'Match (trigger when matched)' },
-          { value: 'no_match', label: 'No match (trigger when not matched)' },
-        ]}
