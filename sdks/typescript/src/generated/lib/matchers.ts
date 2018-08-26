@@ -141,3 +141,146 @@ export function sseErr<E>(
   return { ...options, err: true, enc: "sse", codes, schema };
 }
 export function sse<T>(
+  codes: StatusCodePredicate,
+  schema: Schema<T>,
+  options?: MatchOptions,
+): ValueMatcher<T> {
+  return { ...options, enc: "sse", codes, schema };
+}
+
+export function nilErr<E>(
+  codes: StatusCodePredicate,
+  schema: Schema<E>,
+  options?: MatchOptions,
+): ErrorMatcher<E> {
+  return { ...options, err: true, enc: "nil", codes, schema };
+}
+export function nil<T>(
+  codes: StatusCodePredicate,
+  schema: Schema<T>,
+  options?: MatchOptions,
+): ValueMatcher<T> {
+  return { ...options, enc: "nil", codes, schema };
+}
+
+export function fail(codes: StatusCodePredicate): FailMatcher {
+  return { enc: "fail", codes };
+}
+
+export type MatchedValue<Matchers> = Matchers extends Matcher<infer T, any>[]
+  ? T
+  : never;
+export type MatchedError<Matchers> = Matchers extends Matcher<any, infer E>[]
+  ? E
+  : never;
+export type MatchFunc<T, E> = (
+  response: Response,
+  request: Request,
+  options?: { resultKey?: string; extraFields?: Record<string, unknown> },
+) => Promise<[result: Result<T, E>, raw: unknown]>;
+
+export function match<T, E>(
+  ...matchers: Array<Matcher<T, E>>
+): MatchFunc<T, E | AgentControlSDKDefaultError | ResponseValidationError> {
+  return async function matchFunc(
+    response: Response,
+    request: Request,
+    options?: { resultKey?: string; extraFields?: Record<string, unknown> },
+  ): Promise<
+    [
+      result: Result<
+        T,
+        E | AgentControlSDKDefaultError | ResponseValidationError
+      >,
+      raw: unknown,
+    ]
+  > {
+    let raw: unknown;
+    let matcher: Matcher<T, E> | undefined;
+    for (const match of matchers) {
+      const { codes } = match;
+      const ctpattern = "ctype" in match
+        ? match.ctype
+        : DEFAULT_CONTENT_TYPES[match.enc];
+      if (ctpattern && matchResponse(response, codes, ctpattern)) {
+        matcher = match;
+        break;
+      } else if (!ctpattern && matchStatusCode(response, codes)) {
+        matcher = match;
+        break;
+      }
+    }
+
+    if (!matcher) {
+      return [{
+        ok: false,
+        error: new AgentControlSDKDefaultError(
+          "Unexpected Status or Content-Type",
+          {
+            response,
+            request,
+            body: await response.text().catch(() => ""),
+          },
+        ),
+      }, raw];
+    }
+
+    const encoding = matcher.enc;
+    let body = "";
+    switch (encoding) {
+      case "json":
+        body = await response.text();
+        raw = JSON.parse(body);
+        break;
+      case "jsonl":
+        raw = response.body;
+        break;
+      case "bytes":
+        raw = new Uint8Array(await response.arrayBuffer());
+        break;
+      case "stream":
+        raw = response.body;
+        break;
+      case "text":
+        body = await response.text();
+        raw = body;
+        break;
+      case "sse":
+        raw = response.body;
+        break;
+      case "nil":
+        body = await response.text();
+        raw = undefined;
+        break;
+      case "fail":
+        body = await response.text();
+        raw = body;
+        break;
+      default:
+        encoding satisfies never;
+        throw new Error(`Unsupported response type: ${encoding}`);
+    }
+
+    if (matcher.enc === "fail") {
+      return [{
+        ok: false,
+        error: new AgentControlSDKDefaultError("API error occurred", {
+          request,
+          response,
+          body,
+        }),
+      }, raw];
+    }
+
+    const resultKey = matcher.key || options?.resultKey;
+    let data: unknown;
+
+    if ("err" in matcher) {
+      data = {
+        ...options?.extraFields,
+        ...(matcher.hdrs ? { Headers: unpackHeaders(response.headers) } : null),
+        ...(isPlainObject(raw) ? raw : null),
+        request$: request,
+        response$: response,
+        body$: body,
+      };

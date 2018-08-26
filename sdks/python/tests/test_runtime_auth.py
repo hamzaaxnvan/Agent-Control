@@ -71,3 +71,77 @@ def test_runtime_token_cache_is_keyed_by_client_identity() -> None:
             "https://server-a.test",
             "log_stream",
             "ls-1",
+            cache_identity="client-b",
+            refresh_margin_seconds=0,
+        )
+        is None
+    )
+
+    cache.mark_jwt_unavailable(
+        server_url="https://server-a.test",
+        target_type="log_stream",
+        target_id="ls-1",
+        cache_identity="client-b",
+    )
+
+    assert not cache.is_jwt_unavailable(
+        "https://server-a.test",
+        "log_stream",
+        "ls-1",
+        cache_identity="client-a",
+    )
+    assert cache.is_jwt_unavailable(
+        "https://server-a.test",
+        "log_stream",
+        "ls-1",
+        cache_identity="client-b",
+    )
+
+
+def test_runtime_token_repr_redacts_jwt() -> None:
+    token = _runtime_token(token="raw-jwt-value")
+
+    assert "raw-jwt-value" not in repr(token)
+
+
+def test_runtime_token_cache_drops_stale_tokens() -> None:
+    cache = RuntimeTokenCache()
+    cache.set(_runtime_token(expires_at=datetime.now(UTC) + timedelta(seconds=5)))
+
+    assert (
+        cache.get("https://server-a.test", "log_stream", "ls-1", refresh_margin_seconds=30) is None
+    )
+    assert (
+        cache.get("https://server-a.test", "log_stream", "ls-1", refresh_margin_seconds=0) is None
+    )
+
+
+def test_runtime_token_cache_tracks_jwt_unavailable_by_server_and_target() -> None:
+    cache = RuntimeTokenCache()
+
+    cache.mark_jwt_unavailable(
+        server_url="https://server-a.test",
+        target_type="log_stream",
+        target_id="ls-1",
+    )
+
+    assert cache.is_jwt_unavailable("https://server-a.test", "log_stream", "ls-1")
+    assert not cache.is_jwt_unavailable("https://server-b.test", "log_stream", "ls-1")
+
+    cache.set(_runtime_token())
+
+    assert not cache.is_jwt_unavailable("https://server-a.test", "log_stream", "ls-1")
+
+
+def test_runtime_token_cache_target_unavailable_marker_expires() -> None:
+    cache = RuntimeTokenCache()
+
+    cache.mark_jwt_unavailable(
+        server_url="https://server-a.test",
+        target_type="log_stream",
+        target_id="ls-1",
+        ttl_seconds=0,
+    )
+
+    assert not cache.is_jwt_unavailable("https://server-a.test", "log_stream", "ls-1")
+
