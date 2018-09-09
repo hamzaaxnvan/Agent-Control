@@ -8,3 +8,23 @@ import { remap as remap$ } from "../lib/primitives.js";
 /**
  * Request to detach a control binding by natural key (idempotent).
  */
+export type DeleteControlBindingByKeyRequest = {
+  controlId: number;
+  targetId: string;
+  targetType: string;
+};
+
+/** @internal */
+export type DeleteControlBindingByKeyRequest$Outbound = {
+  control_id: number;
+  target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const DeleteControlBindingByKeyRequest$outboundSchema: z.ZodMiniType<
+  DeleteControlBindingByKeyRequest$Outbound,
+  DeleteControlBindingByKeyRequest
+> = z.pipe(
+  z.object({
+    controlId: z.int(),
