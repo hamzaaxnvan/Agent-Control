@@ -12,8 +12,3 @@ def test_ensure_agent_name_normalizes_to_lowercase() -> None:
 def test_ensure_agent_name_rejects_too_short() -> None:
     with pytest.raises(ValueError, match="at least 10 characters"):
         ensure_agent_name("short")
-
-
-def test_ensure_agent_name_rejects_invalid_characters() -> None:
-    with pytest.raises(ValueError, match="may only contain"):
-        ensure_agent_name("agent name with spaces")
