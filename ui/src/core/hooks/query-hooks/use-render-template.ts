@@ -4,10 +4,3 @@ import { api } from '@/core/api/client';
 import { parseApiError } from '@/core/api/errors';
 import type { RenderControlTemplateRequest } from '@/core/api/types';
 
-/**
- * Mutation hook to render a control template preview without persisting.
- */
-export function useRenderTemplate() {
-  return useMutation({
-    mutationFn: async (request: RenderControlTemplateRequest) => {
-      const { data, error, response } =

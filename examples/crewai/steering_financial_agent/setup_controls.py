@@ -207,3 +207,73 @@ async def setup():
                                                     "type": "number",
                                                     "minimum": 50000,
                                                 },
+                                                "manager_approved": {"const": True},
+                                            }
+                                        },
+                                    ]
+                                }
+                            },
+                        },
+                    },
+                    "action": {
+                        "decision": "steer",
+                        "steering_context": {
+                            "message": (
+                                '{"required_actions": ["collect_justification", "get_manager_approval"],'
+                                ' "reason": "Transfers >= $50,000 require manager sign-off.'
+                                " Collect a business justification from the requestor,"
+                                ' then obtain manager approval before retrying.",'
+                                ' "retry_with": {"manager_approved": true}}'
+                            )
+                        },
+                    },
+                },
+            ),
+            # ┌─────────────────────────────────────────────────────────┐
+            # │  OBSERVE: New Recipient                                 │
+            # │  Uses LIST evaluator with "not in" logic.              │
+            # │  Records an advisory event when recipient is unknown   │
+            # │  but does NOT block the transfer. Useful for audit.    │
+            # └─────────────────────────────────────────────────────────┘
+            (
+                "observe-new-recipient",
+                {
+                    "description": "Observe transfers to unknown recipients",
+                    "enabled": True,
+                    "execution": "server",
+                    "scope": {
+                        "step_types": ["tool"],
+                        "step_names": ["process_transfer"],
+                        "stages": ["pre"],
+                    },
+                    "condition": {
+                        "selector": {"path": "input.recipient"},
+                        "evaluator": {
+                            "name": "list",
+                            "config": {
+                                "values": [
+                                    "Acme Corp",
+                                    "Global Suppliers Inc",
+                                    "TechVentures LLC",
+                                ],
+                                "match_type": "not_in",
+                                "case_sensitive": False,
+                            },
+                        },
+                    },
+                    "action": {"decision": "observe"},
+                },
+            ),
+            # ┌─────────────────────────────────────────────────────────┐
+            # │  OBSERVE: PII in Output                                 │
+            # │  Uses REGEX evaluator to detect leaked PII in the      │
+            # │  transfer confirmation. Records for compliance review. │
+            # └─────────────────────────────────────────────────────────┘
+            (
+                "observe-pii-in-confirmation",
+                {
+                    "description": "Observe PII patterns in transfer confirmation output",
+                    "enabled": True,
+                    "execution": "server",
+                    "scope": {
+                        "step_types": ["tool"],
