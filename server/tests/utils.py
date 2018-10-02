@@ -25,3 +25,30 @@ def canonicalize_control_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(canonical, dict):
         raise TypeError("Control payload canonicalization must return a dict.")
     return canonical
+
+
+def create_and_assign_policy(
+    client: TestClient,
+    control_config: dict[str, Any] | None = None,
+    agent_name: str = "mytestagent01",
+) -> tuple[str, str]:
+    """Helper to setup Agent -> Policy -> Control hierarchy.
+
+    Args:
+        client: Test client
+        control_config: Optional control configuration. If None, uses VALID_CONTROL_PAYLOAD.
+        agent_name: Name for the test agent
+
+    Returns:
+        tuple: (agent_name, control_name)
+    """
+    if control_config is None:
+        control_config = deepcopy(VALID_CONTROL_PAYLOAD)
+    else:
+        control_config = canonicalize_control_payload(control_config)
+
+    # 1. Create Control
+    control_name = f"control-{uuid.uuid4()}"
+    resp = client.put("/api/v1/controls", json={"name": control_name, "data": control_config})
+    assert resp.status_code == 200
+    control_id = resp.json()["control_id"]
