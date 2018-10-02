@@ -16,3 +16,12 @@ export class Auth extends ClientSDK {
    *
    * The caller's credential is authenticated and authorized before the
    * resolved principal supplies the actor identity, grant scopes, and
+   * expiry. This endpoint then mints a local HS256 token whose lifetime
+   * cannot outlive the grant.
+   *
+   * Runtime auth must be enabled via
+   * ``AGENT_CONTROL_RUNTIME_TOKEN_SECRET``; otherwise the endpoint
+   * returns 503.
+   */
+  async runtimeTokenExchange(
+    request: models.RuntimeTokenExchangeRequest,
