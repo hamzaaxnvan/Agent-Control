@@ -290,3 +290,295 @@ class InitAgentResponse(BaseModel):
 
 
 class GetAgentResponse(BaseModel):
+    """Response containing agent details and registered steps."""
+    agent: Agent = Field(..., description="Agent metadata")
+    steps: list[StepSchema] = Field(..., description="Steps registered with this agent")
+    evaluators: list[EvaluatorSchema] = Field(
+        default_factory=list, description="Custom evaluators registered with this agent"
+    )
+
+
+class CreatePolicyResponse(BaseModel):
+    policy_id: int = Field(description="Identifier of the created policy")
+
+
+class GetAgentPoliciesResponse(BaseModel):
+    policy_ids: list[int] = Field(
+        default_factory=list, description="IDs of policies associated with the agent"
+    )
+
+
+class SetPolicyResponse(BaseModel):
+    """Compatibility response for singular policy assignment endpoint."""
+
+    success: bool = Field(description="Whether the request succeeded")
+    old_policy_id: int | None = Field(
+        default=None,
+        description="Previously associated policy ID, if any",
+    )
+
+
+class GetPolicyResponse(BaseModel):
+    """Compatibility response for singular policy retrieval endpoint."""
+
+    policy_id: int = Field(description="Associated policy ID")
+
+
+class DeletePolicyResponse(BaseModel):
+    """Compatibility response for singular policy deletion endpoint."""
+
+    success: bool = Field(description="Whether the request succeeded")
+
+
+class AgentControlsResponse(BaseModel):
+    controls: list[Control] = Field(
+        description=(
+            "List of agent-associated controls matching the requested state filters "
+            "(all associated controls by default, including disabled and unrendered controls)"
+        )
+    )
+
+
+class CreateControlResponse(BaseModel):
+    control_id: int = Field(description="Identifier of the created control")
+
+
+class GetControlResponse(BaseModel):
+    """Response containing control details."""
+
+    id: int = Field(..., description="Control ID")
+    name: str = Field(..., description="Control name")
+    cloned_from_control_id: int | None = Field(
+        None, description="Source control ID when this control is a clone."
+    )
+    data: ControlDefinition | UnrenderedTemplateControl = Field(
+        description=(
+            "Control configuration data. A ControlDefinition for raw/rendered "
+            "controls or an UnrenderedTemplateControl for unrendered templates."
+        ),
+    )
+
+
+class GetPolicyControlsResponse(BaseModel):
+    """Response containing control IDs associated with a policy."""
+
+    control_ids: list[int] = Field(
+        description="List of control IDs associated with the policy"
+    )
+
+
+class AssocResponse(BaseModel):
+    success: bool = Field(description="Whether the association change succeeded")
+
+
+class RemoveAgentControlResponse(BaseModel):
+    """Response for removing a direct agent-control association."""
+
+    success: bool = Field(description="Whether the request succeeded")
+    removed_direct_association: bool = Field(
+        description="True if a direct agent-control link was removed"
+    )
+    control_still_active: bool = Field(
+        description="True if the control remains active via policy association(s)"
+    )
+
+
+class GetControlDataResponse(BaseModel):
+    data: ControlDefinition | UnrenderedTemplateControl = Field(
+        description="Control data payload (rendered control or unrendered template)"
+    )
+
+
+class GetControlSchemaResponse(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    schema_: dict[str, Any] = Field(
+        alias="schema",
+        serialization_alias="schema",
+        description="JSON Schema for a full ControlDefinition payload",
+    )
+
+
+class SetControlDataRequest(BaseModel):
+    """Request to update control configuration data."""
+    data: ControlInput = Field(
+        ...,
+        description="Control configuration data (replaces existing)",
+    )
+
+
+class ValidateControlDataRequest(BaseModel):
+    """Request to validate control configuration data without saving."""
+
+    data: ControlInput = Field(
+        ...,
+        description="Control configuration data to validate",
+    )
+
+
+class SetControlDataResponse(BaseModel):
+    success: bool = Field(description="Whether the control data was updated")
+
+
+class ValidateControlDataResponse(BaseModel):
+    success: bool = Field(description="Whether the control data is valid")
+
+
+class RenderControlTemplateRequest(BaseModel):
+    """Request to render a template-backed control without persisting it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: TemplateDefinition = Field(..., description="Template definition to render")
+    template_values: dict[str, TemplateValue] = Field(
+        default_factory=dict,
+        description="Template parameter values used during rendering",
+    )
+
+
+class RenderControlTemplateResponse(BaseModel):
+    """Rendered template preview response."""
+
+    control: ControlDefinition = Field(
+        ...,
+        description="Rendered control definition including template metadata",
+    )
+
+
+class StepKey(BaseModel):
+    """Identifies a registered step schema by type and name."""
+
+    type: str = Field(..., min_length=1, description="Step type")
+    name: str = Field(..., description="Registered step name")
+
+
+class PatchAgentRequest(BaseModel):
+    """Request to modify an agent (remove steps/evaluators)."""
+
+    remove_steps: list[StepKey] = Field(
+        default_factory=list, description="Step identifiers to remove from the agent"
+    )
+    remove_evaluators: list[str] = Field(
+        default_factory=list, description="Evaluator names to remove from the agent"
+    )
+
+
+class PatchAgentResponse(BaseModel):
+    """Response from agent modification."""
+
+    steps_removed: list[StepKey] = Field(
+        default_factory=list, description="Step identifiers that were removed"
+    )
+    evaluators_removed: list[str] = Field(
+        default_factory=list, description="Evaluator names that were removed"
+    )
+
+
+class AgentSummary(BaseModel):
+    """Summary of an agent for list responses."""
+
+    agent_name: str = Field(..., description="Unique identifier of the agent")
+    policy_ids: list[int] = Field(
+        default_factory=list, description="IDs of policies associated with the agent"
+    )
+    created_at: str | None = Field(None, description="ISO 8601 timestamp when agent was created")
+    step_count: int = Field(0, description="Number of steps registered with the agent")
+    evaluator_count: int = Field(0, description="Number of evaluators registered with the agent")
+    active_controls_count: int = Field(
+        0, description="Number of active controls for this agent"
+    )
+
+
+class PaginationInfo(BaseModel):
+    """Pagination metadata for cursor-based pagination."""
+
+    limit: int = Field(..., description="Number of items per page")
+    total: int = Field(..., description="Total number of items")
+    next_cursor: str | None = Field(
+        None, description="Cursor for fetching the next page (null if no more pages)"
+    )
+    has_more: bool = Field(..., description="Whether there are more pages available")
+
+
+class ListAgentsResponse(BaseModel):
+    """Response for listing agents."""
+
+    agents: list[AgentSummary] = Field(..., description="List of agent summaries")
+    pagination: PaginationInfo = Field(..., description="Pagination metadata")
+
+
+# =============================================================================
+# Control List/Update/Delete Models
+# =============================================================================
+
+
+class AgentRef(BaseModel):
+    """Reference to an agent (for listing which agents use a control)."""
+
+    agent_name: str = Field(..., description="Agent name")
+
+
+class PolicyRef(BaseModel):
+    """Reference to a policy attached to a control."""
+
+    policy_id: int = Field(..., description="Policy ID")
+
+
+class TargetAttachmentRef(BaseModel):
+    """Reference to a target binding attached to a control."""
+
+    binding_id: int = Field(..., description="Control binding ID")
+    target_type: str = Field(..., description="Opaque target kind")
+    target_id: str = Field(..., description="Opaque target identifier")
+    enabled: bool = Field(..., description="Whether this target binding is enabled")
+
+
+class ControlAttachments(BaseModel):
+    """Attachments for a listed control."""
+
+    agents: list[AgentRef] = Field(
+        default_factory=list,
+        description="Direct agent associations for this control",
+    )
+    policies: list[PolicyRef] = Field(
+        default_factory=list,
+        description="Policy associations for this control",
+    )
+    targets: list[TargetAttachmentRef] = Field(
+        default_factory=list,
+        description="Target bindings for this control",
+    )
+    targets_total: int = Field(
+        default=0,
+        description="Total target bindings matching the attachment filters",
+    )
+    targets_truncated: bool = Field(
+        default=False,
+        description="Whether the target bindings list was capped",
+    )
+
+
+class ControlSummary(BaseModel):
+    """Summary of a control for list responses."""
+
+    id: int = Field(..., description="Control ID")
+    name: str = Field(..., description="Control name")
+    cloned_from_control_id: int | None = Field(
+        None, description="Source control ID when this control is a clone."
+    )
+    description: str | None = Field(None, description="Control description")
+    enabled: bool = Field(True, description="Whether control is enabled")
+    execution: str | None = Field(None, description="'server' or 'sdk'")
+    action: ControlAction | None = Field(
+        None, description="Action applied when the control matches."
+    )
+    step_types: list[str] | None = Field(None, description="Step types in scope")
+    stages: list[str] | None = Field(None, description="Evaluation stages in scope")
+    tags: list[str] = Field(default_factory=list, description="Control tags")
+    template_backed: bool = Field(
+        False,
+        description="Whether the control was created from a template",
+    )
+    template_rendered: bool | None = Field(
+        None,
+        description=(
