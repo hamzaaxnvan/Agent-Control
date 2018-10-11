@@ -167,3 +167,172 @@ async def test_before_model_safe(plugin_module):
         AsyncMock(return_value=MagicMock()),
     ) as mock_eval, patch.object(plugin, "_schedule_step_sync") as mock_schedule:
         result = await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    assert result is None
+    assert request.config.system_instruction is None
+    mock_schedule.assert_called_once()
+    assert mock_eval.await_args.args[1] == "researcher"
+
+
+@pytest.mark.asyncio
+async def test_before_model_deny_returns_blocked_response(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    context = MockCallbackContext("writer", invocation_id="inv-1")
+    request = MockLlmRequest("hello", request_id="call-1")
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(side_effect=ControlViolationError(control_name="c1", message="Denied")),
+    ):
+        result = await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    assert isinstance(result, MockLlmResponse)
+    assert result.content.parts[0].text == "Denied"
+    assert plugin._request_text_by_call_key == {}
+    assert plugin._current_llm_call_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_before_model_steer_injects_guidance(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    context = MockCallbackContext("writer", invocation_id="inv-1")
+    request = MockLlmRequest("hello", config=MockConfig("Existing"), request_id="call-1")
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(
+            side_effect=ControlSteerError(
+                control_name="c1",
+                message="Steer",
+                steering_context="Rewrite safely",
+            )
+        ),
+    ):
+        result = await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    assert result is None
+    assert "Rewrite safely" in request.config.system_instruction
+    assert plugin._request_text_by_call_key == {("inv-1", "call-1"): "hello"}
+    assert plugin._current_llm_call_ids == {"inv-1": ["call-1"]}
+
+
+@pytest.mark.asyncio
+async def test_before_model_steer_falls_back_to_blocked_response(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    context = MockCallbackContext("writer")
+    request = MockLlmRequest("hello")
+    request.config = None
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(
+            side_effect=ControlSteerError(
+                control_name="c1",
+                message="Steer",
+                steering_context="Rewrite safely",
+            )
+        ),
+    ):
+        result = await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    assert isinstance(result, MockLlmResponse)
+    assert result.content.parts[0].text == "Rewrite safely"
+
+
+@pytest.mark.asyncio
+async def test_after_model_steer_returns_replacement_response(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    context = MockCallbackContext("writer", invocation_id="inv-1")
+    request = MockLlmRequest("hello", request_id="call-1")
+    response = MockLlmResponse(
+        MockContent(role="model", parts=[MockPart("unsafe")]),
+        request_id="call-1",
+    )
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(
+            side_effect=[
+                MagicMock(),
+                ControlSteerError(
+                    control_name="c1",
+                    message="Steer",
+                    steering_context="Please rewrite",
+                ),
+            ],
+        ),
+    ):
+        await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+        result = await plugin.after_model_callback(
+            callback_context=context,
+            llm_response=response,
+        )
+
+    assert isinstance(result, MockLlmResponse)
+    assert result.content.parts[0].text == "Please rewrite"
+    assert plugin._request_text_by_call_key == {}
+    assert plugin._current_llm_call_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_after_model_uses_request_id_correlation_for_multiple_inflight_calls(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    context = MockCallbackContext("writer", invocation_id="inv-1")
+    first_request = MockLlmRequest("first", request_id="call-1")
+    second_request = MockLlmRequest("second", request_id="call-2")
+    response = MockLlmResponse(
+        MockContent(role="model", parts=[MockPart("done")]),
+        request_id="call-1",
+    )
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(return_value=MagicMock()),
+    ) as mock_eval:
+        await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=first_request,
+        )
+        await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=second_request,
+        )
+        await plugin.after_model_callback(
+            callback_context=context,
+            llm_response=response,
+        )
+
+    assert mock_eval.await_args_list[2].kwargs["input"] == "first"
+    assert plugin._request_text_by_call_key == {("inv-1", "call-2"): "second"}
+    assert plugin._current_llm_call_ids == {"inv-1": ["call-2"]}
+
+
+@pytest.mark.asyncio
+async def test_on_model_error_clears_pending_request_state(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    context = MockCallbackContext("writer", invocation_id="inv-1")
+    request = MockLlmRequest("hello", request_id="call-1")
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
