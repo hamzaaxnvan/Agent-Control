@@ -41,18 +41,3 @@ export type AgentSummary = {
 
 /** @internal */
 export const AgentSummary$inboundSchema: z.ZodMiniType<AgentSummary, unknown> =
-  z.pipe(
-    z.object({
-      active_controls_count: z._default(types.number(), 0),
-      agent_name: types.string(),
-      created_at: z.optional(z.nullable(types.string())),
-      evaluator_count: z._default(types.number(), 0),
-      policy_ids: types.optional(z.array(types.number())),
-      step_count: z._default(types.number(), 0),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        "active_controls_count": "activeControlsCount",
-        "agent_name": "agentName",
-        "created_at": "createdAt",
-        "evaluator_count": "evaluatorCount",

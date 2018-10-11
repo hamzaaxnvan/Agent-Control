@@ -206,3 +206,107 @@ class Control(Base):
     seed_source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     seed_opted_out_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Many-to-many backref: Control <> Policy
+    policies: Mapped[list["Policy"]] = relationship(
+        "Policy", secondary=lambda: policy_controls, back_populates="controls"
+    )
+    # Many-to-many backref: Control <> Agent (direct relationship)
+    agents: Mapped[list["Agent"]] = relationship(
+        "Agent", secondary=lambda: agent_controls, back_populates="controls"
+    )
+
+
+class ControlVersion(Base):
+    __tablename__ = "control_versions"
+    __table_args__ = (
+        UniqueConstraint("control_id", "version_num", name="uq_control_versions_control_version"),
+        Index("idx_control_versions_control_created", "control_id", text("created_at DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    control_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("controls.id"), nullable=False
+    )
+    version_num: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False
+    )
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+    __table_args__ = (
+        CheckConstraint("char_length(name) >= 10", name="ck_agents_name_min_length"),
+        CheckConstraint("name ~ '^[a-z0-9:_-]+$'", name="ck_agents_name_format"),
+        # Plain index on name preserves name-only lookup performance while
+        # service code is still namespace-blind.
+        Index("ix_agents_name", "name"),
+    )
+
+    namespace_key: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+        nullable=False,
+        server_default=_NAMESPACE_SERVER_DEFAULT,
+    )
+    name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    data: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    policies: Mapped[list["Policy"]] = relationship(
+        "Policy", secondary=lambda: agent_policies, back_populates="agents"
+    )
+    controls: Mapped[list["Control"]] = relationship(
+        "Control", secondary=lambda: agent_controls, back_populates="agents"
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(), server_default=text("CURRENT_TIMESTAMP"), nullable=False, index=True
+    )
+
+    @validates("name")
+    def _normalize_name(self, _key: str, value: str) -> str:
+        return normalize_agent_name(value)
+
+
+class ControlBinding(Base):
+    """Attaches a control to an opaque external target.
+
+    Each row is a single attachment scoped to a namespace. Uniqueness is
+    enforced on ``(namespace_key, target_type, target_id, control_id)``.
+    The ``enabled`` flag is a soft toggle - a disabled binding is preserved
+    but excluded from the effective control set at runtime.
+
+    Same-namespace integrity is enforced by the composite foreign key on
+    ``(namespace_key, control_id)``: a binding cannot reference a control
+    from another namespace.
+
+    Soft deletes on the parent control (``deleted_at IS NOT NULL``) do not
+    cascade to bindings; only hard deletes do. The runtime resolver is
+    responsible for excluding soft-deleted controls when computing the
+    effective control set.
+
+    Future evolution: per-agent overrides and exemptions within a target
+    are intentionally not modeled here. Two paths are possible if and when
+    they become a product requirement:
+
+    - re-introduce an ``agent_name`` column (with a partial-index pair on
+      ``agent_name IS NULL`` / ``IS NOT NULL``) and an ``enabled``-aware
+      most-specific-wins resolver. Supports both per-agent additions and
+      per-agent exemptions.
+    - or merge target-bearing resolution with the existing
+      ``agent_controls`` table at runtime. Supports per-agent additions
+      only; exemptions still require schema work because ``agent_controls``
+      has no ``enabled`` flag.
+    """
+
+    __tablename__ = "control_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["namespace_key", "control_id"],
