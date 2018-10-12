@@ -16,3 +16,22 @@ import {
   PaginationInfo$inboundSchema,
 } from "./pagination-info.js";
 
+/**
+ * Paginated/filtered list of control bindings.
+ */
+export type ListControlBindingsResponse = {
+  bindings?: Array<GetControlBindingResponse> | undefined;
+  /**
+   * Pagination metadata for cursor-based pagination.
+   */
+  pagination: PaginationInfo;
+};
+
+/** @internal */
+export const ListControlBindingsResponse$inboundSchema: z.ZodMiniType<
+  ListControlBindingsResponse,
+  unknown
+> = z.object({
+  bindings: types.optional(z.array(GetControlBindingResponse$inboundSchema)),
+  pagination: PaginationInfo$inboundSchema,
+});

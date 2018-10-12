@@ -336,3 +336,172 @@ async def test_on_model_error_clears_pending_request_state(plugin_module):
     with patch.object(
         plugin_module,
         "_evaluate_and_enforce",
+        AsyncMock(return_value=MagicMock()),
+    ):
+        await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    await plugin.on_model_error_callback(
+        callback_context=context,
+        llm_request=request,
+        error=RuntimeError("boom"),
+    )
+
+    assert plugin._request_text_by_call_key == {}
+    assert plugin._current_llm_call_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_tool_callbacks_scope_step_name_by_agent(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    tool = MockTool("get_weather")
+    tool_context = MockToolContext(agent_name="writer")
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(return_value=MagicMock()),
+    ) as mock_eval:
+        await plugin.before_tool_callback(
+            tool=tool,
+            tool_args={"city": "Rome"},
+            tool_context=tool_context,
+        )
+
+    assert mock_eval.await_args.args[1] == "writer.get_weather"
+
+
+@pytest.mark.asyncio
+async def test_tool_step_name_overrides_can_map_raw_name(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(
+        agent_name="test-agent01",
+        step_name_overrides={"get_weather": "weather-guard"},
+    )
+    tool = MockTool("get_weather")
+    tool_context = MockToolContext(agent_name="writer")
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(return_value=MagicMock()),
+    ) as mock_eval:
+        await plugin.before_tool_callback(
+            tool=tool,
+            tool_args={"city": "Rome"},
+            tool_context=tool_context,
+        )
+
+    assert mock_eval.await_args.args[1] == "weather-guard"
+
+
+@pytest.mark.asyncio
+async def test_before_tool_deny_returns_blocked_dict(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    tool = MockTool("get_weather", "Weather tool")
+    tool_context = MockToolContext()
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(side_effect=ControlViolationError(control_name="c1", message="Nope")),
+    ):
+        result = await plugin.before_tool_callback(
+            tool=tool,
+            tool_args={"city": "Pyongyang"},
+            tool_context=tool_context,
+        )
+
+    assert result == {"status": "blocked", "message": "Nope"}
+
+
+@pytest.mark.asyncio
+async def test_after_tool_unexpected_error_blocks(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(agent_name="test-agent01")
+    tool = MockTool("get_weather")
+    tool_context = MockToolContext()
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    ):
+        result = await plugin.after_tool_callback(
+            tool=tool,
+            tool_args={"city": "Paris"},
+            tool_context=tool_context,
+            result={"city": "Paris"},
+        )
+
+    assert result["status"] == "blocked"
+    assert "could not evaluate" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_enabled_hooks_skip_evaluation(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(
+        agent_name="test-agent01",
+        enabled_hooks={"before_tool"},
+    )
+    context = MockCallbackContext("writer")
+    request = MockLlmRequest("hello")
+
+    with patch.object(plugin_module, "_evaluate_and_enforce", AsyncMock()) as mock_eval:
+        result = await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    assert result is None
+    mock_eval.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_before_model_without_after_model_does_not_cache_request_state(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(
+        agent_name="test-agent01",
+        enabled_hooks={"before_model"},
+    )
+    context = MockCallbackContext("writer", invocation_id="inv-1")
+    request = MockLlmRequest("hello", request_id="call-1")
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(return_value=MagicMock()),
+    ):
+        await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    assert plugin._request_text_by_call_key == {}
+    assert plugin._current_llm_call_ids == {}
+
+
+@pytest.mark.asyncio
+async def test_step_name_overrides_apply(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(
+        agent_name="test-agent01",
+        step_name_overrides={"writer": "compliance-writer"},
+    )
+    context = MockCallbackContext("writer")
+    request = MockLlmRequest("hello")
+
+    with patch.object(
+        plugin_module,
+        "_evaluate_and_enforce",
+        AsyncMock(return_value=MagicMock()),
+    ) as mock_eval:
+        await plugin.before_model_callback(
+            callback_context=context,
+            llm_request=request,
+        )
+
+    assert mock_eval.await_args.args[1] == "compliance-writer"
+
+
+@pytest.mark.asyncio
+async def test_step_name_resolver_applies(plugin_module):
+    plugin = plugin_module.AgentControlPlugin(
