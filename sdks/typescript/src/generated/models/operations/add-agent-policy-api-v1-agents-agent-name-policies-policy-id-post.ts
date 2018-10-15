@@ -25,12 +25,3 @@ export const AddAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdPostRequest$outbo
   > = z.pipe(
     z.object({
       agentName: z.string(),
-      policyId: z.int(),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        agentName: "agent_name",
-        policyId: "policy_id",
-      });
-    }),
-  );
