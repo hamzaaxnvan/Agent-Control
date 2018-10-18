@@ -30,14 +30,3 @@ export const StepKey$inboundSchema: z.ZodMiniType<StepKey, unknown> = z.object({
 /** @internal */
 export type StepKey$Outbound = {
   name: string;
-  type: string;
-};
-
-/** @internal */
-export const StepKey$outboundSchema: z.ZodMiniType<StepKey$Outbound, StepKey> =
-  z.object({
-    name: z.string(),
-    type: z.string(),
-  });
-
-export function stepKeyToJSON(stepKey: StepKey): string {

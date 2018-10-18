@@ -46,3 +46,51 @@ export type ControlStats = {
   /**
    * Control name
    */
+  controlName: string;
+  /**
+   * Deny actions
+   */
+  denyCount: number;
+  /**
+   * Evaluation errors
+   */
+  errorCount: number;
+  /**
+   * Total executions
+   */
+  executionCount: number;
+  /**
+   * Total matches
+   */
+  matchCount: number;
+  /**
+   * Total non-matches
+   */
+  nonMatchCount: number;
+  /**
+   * Observe actions
+   */
+  observeCount: number;
+  /**
+   * Steer actions
+   */
+  steerCount: number;
+};
+
+/** @internal */
+export const ControlStats$inboundSchema: z.ZodMiniType<ControlStats, unknown> =
+  z.pipe(
+    z.object({
+      avg_confidence: types.number(),
+      avg_duration_ms: z.optional(z.nullable(types.number())),
+      control_id: types.number(),
+      control_name: types.string(),
+      deny_count: types.number(),
+      error_count: types.number(),
+      execution_count: types.number(),
+      match_count: types.number(),
+      non_match_count: types.number(),
+      observe_count: types.number(),
+      steer_count: types.number(),
+    }),
+    z.transform((v) => {
