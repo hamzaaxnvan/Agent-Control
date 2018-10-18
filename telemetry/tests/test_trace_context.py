@@ -28,3 +28,18 @@ def test_get_trace_context_from_provider_returns_registered_context() -> None:
     trace_context = get_trace_context_from_provider()
 
     # Then: the provider values are returned unchanged
+    assert trace_context == {
+        "trace_id": "trace-123",
+        "span_id": "span-456",
+    }
+
+
+@pytest.mark.parametrize(
+    ("provider_result"),
+    [
+        None,
+        {"trace_id": "trace-123"},
+        {"span_id": "span-456"},
+        {"trace_id": 123, "span_id": "span-456"},
+        {"trace_id": "trace-123", "span_id": object()},
+        {"trace_id": "", "span_id": "span-456"},

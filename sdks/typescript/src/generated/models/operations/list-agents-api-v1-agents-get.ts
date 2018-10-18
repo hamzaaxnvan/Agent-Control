@@ -10,16 +10,3 @@ export type ListAgentsApiV1AgentsGetRequest = {
   name?: string | null | undefined;
 };
 
-/** @internal */
-export type ListAgentsApiV1AgentsGetRequest$Outbound = {
-  cursor?: string | null | undefined;
-  limit: number;
-  name?: string | null | undefined;
-};
-
-/** @internal */
-export const ListAgentsApiV1AgentsGetRequest$outboundSchema: z.ZodMiniType<
-  ListAgentsApiV1AgentsGetRequest$Outbound,
-  ListAgentsApiV1AgentsGetRequest
-> = z.object({
-  cursor: z.optional(z.nullable(z.string())),
