@@ -9,26 +9,3 @@ export type AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest = {
   agentName: string;
   controlId: number;
 };
-
-/** @internal */
-export type AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest$Outbound =
-  {
-    agent_name: string;
-    control_id: number;
-  };
-
-/** @internal */
-export const AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest$outboundSchema:
-  z.ZodMiniType<
-    AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest$Outbound,
-    AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest
-  > = z.pipe(
-    z.object({
-      agentName: z.string(),
-      controlId: z.int(),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        agentName: "agent_name",
-        controlId: "control_id",
-      });

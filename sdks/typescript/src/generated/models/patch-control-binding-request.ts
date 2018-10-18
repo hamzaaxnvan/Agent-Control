@@ -10,3 +10,15 @@ import * as z from "zod/v4-mini";
 export type PatchControlBindingRequest = {
   /**
    * New enabled value for the binding.
+   */
+  enabled: boolean;
+};
+
+/** @internal */
+export type PatchControlBindingRequest$Outbound = {
+  enabled: boolean;
+};
+
+/** @internal */
+export const PatchControlBindingRequest$outboundSchema: z.ZodMiniType<
+  PatchControlBindingRequest$Outbound,
