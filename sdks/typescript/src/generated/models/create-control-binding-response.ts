@@ -25,12 +25,3 @@ export const CreateControlBindingResponse$inboundSchema: z.ZodMiniType<
   unknown
 > = z.pipe(
   z.object({
-    binding_id: types.number(),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
-      "binding_id": "bindingId",
-    });
-  }),
-);
-
