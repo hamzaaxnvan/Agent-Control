@@ -86,3 +86,92 @@ export const authApi = {
     const data = (await res.json()) as LoginResponse;
     return { status: res.status, data };
   },
+
+  logout: async (): Promise<void> => {
+    await fetch(`${authBaseUrl}/api/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  },
+};
+
+// ------------------------------------------------------------------
+// Typed API methods
+// ------------------------------------------------------------------
+
+export const api = {
+  agents: {
+    list: (params?: ListAgentsQueryParams) =>
+      apiClient.GET('/api/v1/agents', {
+        params: { query: params },
+      }),
+    get: (agentName: GetAgentPathParams['agent_name']) =>
+      apiClient.GET('/api/v1/agents/{agent_name}', {
+        params: { path: { agent_name: agentName } },
+      }),
+    initAgent: (data: InitAgentRequestBody) =>
+      apiClient.POST('/api/v1/agents/initAgent', { body: data }),
+    getControls: (agentName: GetAgentControlsPathParams['agent_name']) =>
+      apiClient.GET('/api/v1/agents/{agent_name}/controls', {
+        params: { path: { agent_name: agentName } },
+      }),
+    getPolicies: (agentName: GetAgentPathParams['agent_name']) =>
+      apiClient.GET('/api/v1/agents/{agent_name}/policies', {
+        params: { path: { agent_name: agentName } },
+      }),
+    addPolicy: (
+      agentName: GetAgentPathParams['agent_name'],
+      policyId: number
+    ) =>
+      apiClient.POST('/api/v1/agents/{agent_name}/policies/{policy_id}', {
+        params: { path: { agent_name: agentName, policy_id: policyId } },
+      }),
+    removePolicy: (
+      agentName: GetAgentPathParams['agent_name'],
+      policyId: number
+    ) =>
+      apiClient.DELETE('/api/v1/agents/{agent_name}/policies/{policy_id}', {
+        params: { path: { agent_name: agentName, policy_id: policyId } },
+      }),
+    clearPolicies: (agentName: GetAgentPathParams['agent_name']) =>
+      apiClient.DELETE('/api/v1/agents/{agent_name}/policies', {
+        params: { path: { agent_name: agentName } },
+      }),
+    addControl: (
+      agentName: GetAgentPathParams['agent_name'],
+      controlId: number
+    ) =>
+      apiClient.POST('/api/v1/agents/{agent_name}/controls/{control_id}', {
+        params: { path: { agent_name: agentName, control_id: controlId } },
+      }),
+    removeControl: (
+      agentName: GetAgentPathParams['agent_name'],
+      controlId: number
+    ) =>
+      apiClient.DELETE('/api/v1/agents/{agent_name}/controls/{control_id}', {
+        params: { path: { agent_name: agentName, control_id: controlId } },
+      }),
+  },
+  evaluators: {
+    list: () => apiClient.GET('/api/v1/evaluators'),
+  },
+  controls: {
+    list: (params?: {
+      cursor?: number;
+      limit?: number;
+      name?: string;
+      enabled?: boolean;
+      step_type?: string;
+      stage?: string;
+      execution?: string;
+      tag?: string;
+    }) =>
+      apiClient.GET('/api/v1/controls', {
+        params: params ? { query: params } : undefined,
+      }),
+    create: (data: CreateControlRequest) =>
+      apiClient.PUT('/api/v1/controls', { body: data }),
+    getSchema: () =>
+      apiClient.GET('/api/v1/controls/schema') as Promise<{
+        data?: GetControlSchemaResponse;
+        error?: unknown;

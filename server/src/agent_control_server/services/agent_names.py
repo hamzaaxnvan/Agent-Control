@@ -19,10 +19,3 @@ def normalize_agent_name_or_422(
             error_code=ErrorCode.VALIDATION_ERROR,
             detail="Invalid agent_name",
             resource="Agent",
-            hint=(
-                "Agent names must be at least 10 characters and may only contain "
-                "letters, digits, ':', '_' or '-'."
-            ),
-            errors=[
-                ValidationErrorItem(
-                    resource="Agent",
