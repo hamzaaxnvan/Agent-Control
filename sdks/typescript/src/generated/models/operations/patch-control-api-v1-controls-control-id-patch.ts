@@ -16,12 +16,3 @@ export type PatchControlApiV1ControlsControlIdPatchRequest$Outbound = {
   control_id: number;
   body: models.PatchControlRequest$Outbound;
 };
-
-/** @internal */
-export const PatchControlApiV1ControlsControlIdPatchRequest$outboundSchema:
-  z.ZodMiniType<
-    PatchControlApiV1ControlsControlIdPatchRequest$Outbound,
-    PatchControlApiV1ControlsControlIdPatchRequest
-  > = z.pipe(
-    z.object({
-      controlId: z.int(),
