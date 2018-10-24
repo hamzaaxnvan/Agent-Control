@@ -40,3 +40,45 @@ def test_resolve_ui_asset_path_serves_route_specific_index(tmp_path: Path) -> No
 
     assert resolve_ui_asset_path(ui_bundle, "/") == ui_bundle / "index.html"
     assert (
+        resolve_ui_asset_path(ui_bundle, "/agents")
+        == ui_bundle / "agents" / "index.html"
+    )
+    assert (
+        resolve_ui_asset_path(ui_bundle, "/_next/static/app.js")
+        == ui_bundle / "_next" / "static" / "app.js"
+    )
+    assert (
+        resolve_ui_asset_path(ui_bundle, "/site.webmanifest")
+        == ui_bundle / "site.webmanifest"
+    )
+
+
+def test_resolve_ui_asset_path_falls_back_to_root_index_for_unknown_routes(
+    tmp_path: Path,
+) -> None:
+    ui_bundle = _create_ui_bundle(tmp_path / "ui")
+
+    assert (
+        resolve_ui_asset_path(ui_bundle, "/does-not-exist")
+        == ui_bundle / "index.html"
+    )
+    assert resolve_ui_asset_path(ui_bundle, "/missing.js") is None
+
+
+def test_configure_ui_routes_preserves_api_404s(tmp_path: Path) -> None:
+    ui_bundle = _create_ui_bundle(tmp_path / "ui")
+    app = FastAPI()
+    configure_ui_routes(app, ui_bundle)
+
+    with TestClient(app) as client:
+        response = client.get("/api/not-found")
+
+    assert response.status_code == 404
+
+
+def test_configure_ui_routes_serves_exported_assets_and_pages(tmp_path: Path) -> None:
+    ui_bundle = _create_ui_bundle(tmp_path / "ui")
+    app = FastAPI()
+
+    @app.get("/health")
+    def health() -> dict[str, str]:

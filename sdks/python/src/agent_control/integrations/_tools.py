@@ -15,3 +15,20 @@ def normalized_tool_definition(
 ) -> JSONObject:
     """Return the framework-neutral available-tool representation."""
     definition: dict[str, JSONValue] = {
+        "name": name,
+        "description": description or "",
+        "input_schema": input_schema or {},
+    }
+    return definition
+
+
+def normalize_strands_tool_specs(specs: object) -> list[JSONObject] | None:
+    """Normalize a complete Strands tool-spec collection, if available."""
+    if not isinstance(specs, list):
+        return None
+
+    normalized: list[JSONObject] = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            return None
+        name = spec.get("name")

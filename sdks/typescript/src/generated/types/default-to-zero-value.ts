@@ -4,3 +4,16 @@
 
 import { type Unrecognized, unrecognized } from "./unrecognized.js";
 
+let globalCount = 0;
+let refCount = 0;
+
+export function defaultToZeroValue<T>(value: T): Unrecognized<T> {
+  globalCount++;
+  return unrecognized(value);
+}
+
+export function startCountingDefaultToZeroValue() {
+  refCount++;
+  const start = globalCount;
+  return {
+    /**
