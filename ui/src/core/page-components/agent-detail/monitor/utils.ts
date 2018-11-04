@@ -8,3 +8,8 @@ export function mapTimeRangeTypeToTimeRange(type: TimeRangeType): TimeRange {
   const mapping: Record<TimeRangeType, TimeRange> = {
     last5Mins: '5m',
     last15Mins: '15m',
+    last30Mins: '1h', // closest: 1h
+    lastHour: '1h',
+    last3Hours: '1h', // closest: 1h (no 3h in API)
+    last6Hours: '24h', // closest: 24h (no 6h in API)
+    last12Hours: '24h',
