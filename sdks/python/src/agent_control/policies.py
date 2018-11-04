@@ -106,39 +106,3 @@ async def remove_control_from_policy(
         HTTPException 500: Database error
 
     Example:
-        async with AgentControlClient() as client:
-            result = await remove_control_from_policy(client, policy_id=1, control_id=5)
-            print(f"Success: {result['success']}")
-    """
-    response = await client.http_client.delete(
-        f"/api/v1/policies/{policy_id}/controls/{control_id}"
-    )
-    response.raise_for_status()
-    return cast(dict[str, Any], response.json())
-
-
-async def list_policy_controls(
-    client: AgentControlClient,
-    policy_id: int
-) -> dict[str, Any]:
-    """
-    List all controls associated with a policy.
-
-    Args:
-        client: AgentControlClient instance
-        policy_id: ID of the policy
-
-    Returns:
-        Dictionary containing:
-            - control_ids: List of control IDs associated with the policy
-
-    Raises:
-        httpx.HTTPError: If request fails
-        HTTPException 404: Policy not found
-
-    Example:
-        async with AgentControlClient() as client:
-            result = await list_policy_controls(client, policy_id=1)
-            control_ids = result["control_ids"]
-            print(f"Policy has {len(control_ids)} controls: {control_ids}")
-    """

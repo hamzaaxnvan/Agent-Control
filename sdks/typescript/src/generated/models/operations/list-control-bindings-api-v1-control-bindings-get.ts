@@ -22,3 +22,16 @@ export type ListControlBindingsApiV1ControlBindingsGetRequest = {
 /** @internal */
 export type ListControlBindingsApiV1ControlBindingsGetRequest$Outbound = {
   cursor?: string | null | undefined;
+  limit: number;
+  target_type?: string | null | undefined;
+  target_id?: string | null | undefined;
+  control_id?: number | null | undefined;
+};
+
+/** @internal */
+export const ListControlBindingsApiV1ControlBindingsGetRequest$outboundSchema:
+  z.ZodMiniType<
+    ListControlBindingsApiV1ControlBindingsGetRequest$Outbound,
+    ListControlBindingsApiV1ControlBindingsGetRequest
+  > = z.pipe(
+    z.object({
