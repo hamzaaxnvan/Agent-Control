@@ -34,3 +34,112 @@ import { Result } from "../types/fp.js";
  * Compatibility endpoint that returns the first associated policy.
  */
 export function agentsGetPolicy(
+  client: AgentControlSDKCore,
+  request: operations.GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest,
+  options?: RequestOptions,
+): APIPromise<
+  Result<
+    models.GetPolicyResponse,
+    | errors.HTTPValidationError
+    | AgentControlSDKError
+    | ResponseValidationError
+    | ConnectionError
+    | RequestAbortedError
+    | RequestTimeoutError
+    | InvalidRequestError
+    | UnexpectedClientError
+    | SDKValidationError
+  >
+> {
+  return new APIPromise($do(
+    client,
+    request,
+    options,
+  ));
+}
+
+async function $do(
+  client: AgentControlSDKCore,
+  request: operations.GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest,
+  options?: RequestOptions,
+): Promise<
+  [
+    Result<
+      models.GetPolicyResponse,
+      | errors.HTTPValidationError
+      | AgentControlSDKError
+      | ResponseValidationError
+      | ConnectionError
+      | RequestAbortedError
+      | RequestTimeoutError
+      | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) =>
+      z.parse(
+        operations
+          .GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest$outboundSchema,
+        value,
+      ),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = null;
+
+  const pathParams = {
+    agent_name: encodeSimple("agent_name", payload.agent_name, {
+      explode: false,
+      charEncoding: "percent",
+    }),
+  };
+
+  const path = pathToFunc("/api/v1/agents/{agent_name}/policy")(pathParams);
+
+  const headers = new Headers(compactMap({
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID: "get_agent_policy_api_v1_agents__agent_name__policy_get",
+    oAuth2Scopes: null,
+
+    resolvedSecurity: requestSecurity,
+
+    securitySource: client._options.apiKeyHeader,
+    retryConfig: options?.retries
+      || client._options.retryConfig
+      || { strategy: "none" },
+    retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
+  };
+
+  const requestRes = client._createRequest(context, {
+    security: requestSecurity,
+    method: "GET",
+    baseURL: options?.serverURL,
+    path: path,
+    headers: headers,
+    body: body,
+    userAgent: client._options.userAgent,
+    timeoutMs: options?.timeoutMs || client._options.timeoutMs || -1,
+  }, options);
+  if (!requestRes.ok) {
+    return [requestRes, { status: "invalid" }];
+  }
+  const req = requestRes.value;
+
+  const doResult = await client._do(req, {

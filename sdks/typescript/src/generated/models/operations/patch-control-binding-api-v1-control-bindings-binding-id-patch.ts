@@ -13,18 +13,3 @@ export type PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest = {
 
 /** @internal */
 export type PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest$Outbound =
-  {
-    binding_id: number;
-    body: models.PatchControlBindingRequest$Outbound;
-  };
-
-/** @internal */
-export const PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest$outboundSchema:
-  z.ZodMiniType<
-    PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest$Outbound,
-    PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest
-  > = z.pipe(
-    z.object({
-      bindingId: z.int(),
-      body: models.PatchControlBindingRequest$outboundSchema,
-    }),

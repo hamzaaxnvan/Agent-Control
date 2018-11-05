@@ -51,3 +51,30 @@ async def _evaluate_and_enforce(
     input: Any | None = None,
     output: Any | None = None,
     context: dict[str, Any] | None = None,
+    tools: list[dict[str, JSONValue]] | None = None,
+    ground_truth: JSONValue | None = None,
+    step_type: str = "llm",
+    stage: Literal["pre", "post"] = "pre",
+) -> EvaluationResult:
+    """Evaluate controls and enforce fail-closed blocking semantics."""
+
+    result = await agent_control.evaluate_controls(
+        step_name=step_name,
+        input=input,
+        output=output,
+        context=context,
+        tools=tools,
+        ground_truth=ground_truth,
+        step_type=step_type,
+        stage=stage,
+        agent_name=agent_name,
+    )
+
+    if result.errors:
+        error_names = ", ".join(
+            e.control_name for e in result.errors if getattr(e, "control_name", None)
+        )
+        raise RuntimeError(
+            "Control evaluation failed; execution blocked for safety. "
+            f"Errors: {error_names or 'unknown'}"
+        )
