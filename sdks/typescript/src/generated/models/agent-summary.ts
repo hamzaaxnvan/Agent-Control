@@ -27,17 +27,3 @@ export type AgentSummary = {
   createdAt?: string | null | undefined;
   /**
    * Number of evaluators registered with the agent
-   */
-  evaluatorCount: number;
-  /**
-   * IDs of policies associated with the agent
-   */
-  policyIds?: Array<number> | undefined;
-  /**
-   * Number of steps registered with the agent
-   */
-  stepCount: number;
-};
-
-/** @internal */
-export const AgentSummary$inboundSchema: z.ZodMiniType<AgentSummary, unknown> =
