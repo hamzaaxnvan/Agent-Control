@@ -34,21 +34,3 @@ def upgrade() -> None:
         sa.Column("agent_name", sa.String(length=255), nullable=False),
         sa.Column("policy_id", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(["agent_name"], ["agents.name"]),
-        sa.ForeignKeyConstraint(["policy_id"], ["policies.id"]),
-        sa.PrimaryKeyConstraint("agent_name", "policy_id"),
-    )
-    op.create_index(op.f("ix_agent_policies_agent_name"), "agent_policies", ["agent_name"])
-    op.create_index(op.f("ix_agent_policies_policy_id"), "agent_policies", ["policy_id"])
-
-    op.execute(
-        sa.text(
-            """
-            INSERT INTO agent_policies (agent_name, policy_id)
-            SELECT name, policy_id
-            FROM agents
-            WHERE policy_id IS NOT NULL
-            ON CONFLICT (agent_name, policy_id) DO NOTHING
-            """
-        )
-    )
-
