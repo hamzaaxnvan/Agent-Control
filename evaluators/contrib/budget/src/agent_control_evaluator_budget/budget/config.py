@@ -58,3 +58,33 @@ class BudgetLimitRule(EvaluatorConfig):
     def validate_limit(cls, v: int) -> int:
         if v <= 0:
             raise ValueError("limit must be a positive integer")
+        return v
+
+    @field_validator("window_seconds")
+    @classmethod
+    def validate_window_seconds(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("window_seconds must be positive")
+        return v
+
+
+class BudgetEvaluatorConfig(EvaluatorConfig):
+    """Configuration for the budget evaluator.
+
+    Attributes:
+        limits: List of budget limit rules. Each is checked independently.
+        budget_id: Unique budget pool identifier. Same budget_id shares
+            accumulated spend. Different budget_id is fully isolated.
+        unknown_model_behavior: What to do when a model is not found in the
+            pricing table and a cost-based rule exists. block=fail closed,
+            warn=log warning and treat cost as 0.
+        pricing: Optional model pricing table. Maps model name to ModelPricing.
+            Required when any rule uses limit_unit="usd_cents". Used to
+            derive cost in USD from token counts and model name.
+        token_path: Dot-notation path to extract token usage from step
+            data (e.g. "usage.total_tokens"). If None, looks for standard
+            fields (input_tokens, output_tokens, total_tokens, usage).
+        model_path: Dot-notation path to extract model name (for pricing lookup).
+            Required when any rule uses limit_unit="usd_cents".
+        metadata_paths: Mapping of metadata field name to dot-notation path
+            in step data. Used to extract scope dimensions (channel, user_id, etc).
