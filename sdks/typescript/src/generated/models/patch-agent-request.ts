@@ -31,14 +31,3 @@ export type PatchAgentRequest$Outbound = {
 };
 
 /** @internal */
-export const PatchAgentRequest$outboundSchema: z.ZodMiniType<
-  PatchAgentRequest$Outbound,
-  PatchAgentRequest
-> = z.pipe(
-  z.object({
-    removeEvaluators: z.optional(z.array(z.string())),
-    removeSteps: z.optional(z.array(StepKey$outboundSchema)),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
-      removeEvaluators: "remove_evaluators",
