@@ -1489,3 +1489,1494 @@ export interface components {
       description?: string | null;
       /**
        * Enabled
+       * @description Whether this control is active
+       * @default true
+       */
+      enabled: boolean;
+      /**
+       * Execution
+       * @description Where this control executes
+       * @enum {string}
+       */
+      execution: 'server' | 'sdk';
+      /** @description Which steps and stages this control applies to */
+      scope?: components['schemas']['ControlScope'];
+      /**
+       * Tags
+       * @description Tags for categorization
+       */
+      tags?: string[];
+    };
+    /**
+     * ControlExecutionEvent
+     * @description Represents a single control execution event.
+     *
+     *     This is the core observability data model, capturing:
+     *     - Identity: control_execution_id, trace_id, span_id (OpenTelemetry-compatible)
+     *     - Context: agent, control, check stage, applies to
+     *     - Result: action taken, whether matched, confidence score
+     *     - Timing: when it happened, how long it took
+     *     - Optional details: evaluator name, selector path, errors, metadata
+     *
+     *     Attributes:
+     *         control_execution_id: Unique ID for this specific control execution
+     *         trace_id: OpenTelemetry-compatible trace ID (128-bit hex, 32 chars)
+     *         span_id: OpenTelemetry-compatible span ID (64-bit hex, 16 chars)
+     *         agent_name: Identifier of the agent that executed the control
+     *         control_id: Database ID of the control
+     *         control_name: Name of the control (denormalized for queries)
+     *         check_stage: "pre" (before execution) or "post" (after execution)
+     *         applies_to: "llm_call", "tool_call", or a custom call type
+     *         action: The action taken (deny, steer, observe)
+     *         matched: Whether the control evaluator matched
+     *         confidence: Confidence score from the evaluator (0.0-1.0)
+     *         timestamp: When the control was executed (UTC)
+     *         execution_duration_ms: How long the control evaluation took
+     *         evaluator_name: Name of the evaluator used
+     *         selector_path: The selector path used to extract data
+     *         error_message: Error message if evaluation failed
+     *         metadata: Additional metadata for extensibility
+     * @example {
+     *       "action": "deny",
+     *       "agent_name": "my-agent",
+     *       "applies_to": "llm_call",
+     *       "check_stage": "pre",
+     *       "confidence": 0.95,
+     *       "control_execution_id": "550e8400-e29b-41d4-a716-446655440000",
+     *       "control_id": 123,
+     *       "control_name": "sql-injection-check",
+     *       "evaluator_name": "regex",
+     *       "execution_duration_ms": 15.3,
+     *       "matched": true,
+     *       "selector_path": "input",
+     *       "span_id": "00f067aa0ba902b7",
+     *       "timestamp": "2025-01-09T10:30:00Z",
+     *       "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+     *     }
+     */
+    ControlExecutionEvent: {
+      /** @description Action taken by the control */
+      action: components['schemas']['ActionDecision'];
+      /**
+       * Agent Name
+       * @description Identifier of the agent
+       */
+      agent_name: string;
+      /**
+       * Applies To
+       * @description Type of call or custom call type
+       */
+      applies_to: string;
+      /**
+       * Check Stage
+       * @description Check stage: 'pre' or 'post'
+       * @enum {string}
+       */
+      check_stage: 'pre' | 'post';
+      /**
+       * Confidence
+       * @description Confidence score (0.0 to 1.0)
+       */
+      confidence: number;
+      /**
+       * Control Execution Id
+       * @description Unique ID for this control execution
+       */
+      control_execution_id?: string;
+      /**
+       * Control Id
+       * @description Database ID of the control
+       */
+      control_id: number;
+      /**
+       * Control Name
+       * @description Name of the control (denormalized)
+       */
+      control_name: string;
+      /**
+       * Error Message
+       * @description Error message if evaluation failed
+       */
+      error_message?: string | null;
+      /**
+       * Evaluator Name
+       * @description Name of the evaluator used
+       */
+      evaluator_name?: string | null;
+      /**
+       * Execution Duration Ms
+       * @description Execution duration in milliseconds
+       */
+      execution_duration_ms?: number | null;
+      /**
+       * Matched
+       * @description Whether the evaluator matched (True) or not (False)
+       */
+      matched: boolean;
+      /**
+       * Metadata
+       * @description Additional metadata
+       */
+      metadata?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Selector Path
+       * @description Selector path used to extract data
+       */
+      selector_path?: string | null;
+      /**
+       * Span Id
+       * @description Span ID for distributed tracing (SDK generates OTEL-compatible 16-char hex)
+       */
+      span_id: string;
+      /**
+       * Timestamp
+       * Format: date-time
+       * @description When the control was executed (UTC)
+       */
+      timestamp?: string;
+      /**
+       * Trace Id
+       * @description Trace ID for distributed tracing (SDK generates OTEL-compatible 32-char hex)
+       */
+      trace_id: string;
+    };
+    /**
+     * ControlMatch
+     * @description Represents a control evaluation result (match, non-match, or error).
+     */
+    ControlMatch: {
+      /** @description Action configured for this control */
+      action: components['schemas']['ActionDecision'];
+      /**
+       * Control Execution Id
+       * @description Unique ID for this control execution (generated by engine)
+       */
+      control_execution_id?: string;
+      /**
+       * Control Id
+       * @description Database ID of the control
+       */
+      control_id: number;
+      /**
+       * Control Name
+       * @description Name of the control
+       */
+      control_name: string;
+      /**
+       * Execution Duration Ms
+       * @description Control evaluation wall-clock duration in milliseconds, if executed
+       */
+      execution_duration_ms?: number | null;
+      /** @description Evaluator result (confidence, message, metadata) */
+      result: components['schemas']['EvaluatorResult'];
+      /** @description Steering context for steer actions if configured */
+      steering_context?: components['schemas']['SteeringContext'] | null;
+    };
+    /**
+     * ControlScope
+     * @description Defines when a control applies to a Step.
+     * @example {
+     *       "stages": [
+     *         "pre"
+     *       ],
+     *       "step_types": [
+     *         "tool"
+     *       ]
+     *     }
+     * @example {
+     *       "step_names": [
+     *         "search_db",
+     *         "fetch_user"
+     *       ]
+     *     }
+     * @example {
+     *       "step_name_regex": "^db_.*"
+     *     }
+     * @example {
+     *       "stages": [
+     *         "post"
+     *       ],
+     *       "step_types": [
+     *         "llm"
+     *       ]
+     *     }
+     */
+    ControlScope: {
+      /**
+       * Stages
+       * @description Evaluation stages this control applies to
+       */
+      stages?: ('pre' | 'post')[] | null;
+      /**
+       * Step Name Regex
+       * @description RE2 pattern matched with search() against step name
+       */
+      step_name_regex?: string | null;
+      /**
+       * Step Names
+       * @description Exact step names this control applies to
+       */
+      step_names?: string[] | null;
+      /**
+       * Step Types
+       * @description Step types this control applies to (omit to apply to all types). Built-in types are 'tool' and 'llm'.
+       */
+      step_types?: string[] | null;
+    };
+    /**
+     * ControlSelector
+     * @description Selects data from a Step payload.
+     *
+     *     - path: which slice of the Step to feed into the evaluator. Optional, defaults to "*"
+     *       meaning the entire Step object.
+     * @example {
+     *       "path": "output"
+     *     }
+     * @example {
+     *       "path": "context.user_id"
+     *     }
+     * @example {
+     *       "path": "input"
+     *     }
+     * @example {
+     *       "path": "*"
+     *     }
+     * @example {
+     *       "path": "name"
+     *     }
+     * @example {
+     *       "path": "output"
+     *     }
+     */
+    ControlSelector: {
+      /**
+       * Path
+       * @description Path to data using dot notation. Examples: 'input', 'output', 'context.user_id', 'name', 'type', '*'
+       * @default *
+       */
+      path: string | null;
+    };
+    /**
+     * ControlStats
+     * @description Aggregated statistics for a single control.
+     *
+     *     Attributes:
+     *         control_id: Database ID of the control
+     *         control_name: Name of the control
+     *         execution_count: Total number of executions
+     *         match_count: Number of times the control matched
+     *         non_match_count: Number of times the control did not match
+     *         deny_count: Number of deny actions
+     *         steer_count: Number of steer actions
+     *         observe_count: Number of observe actions
+     *         error_count: Number of errors during evaluation
+     *         avg_confidence: Average confidence score
+     *         avg_duration_ms: Average execution duration in milliseconds
+     */
+    ControlStats: {
+      /**
+       * Avg Confidence
+       * @description Average confidence
+       */
+      avg_confidence: number;
+      /**
+       * Avg Duration Ms
+       * @description Average duration (ms)
+       */
+      avg_duration_ms?: number | null;
+      /**
+       * Control Id
+       * @description Control ID
+       */
+      control_id: number;
+      /**
+       * Control Name
+       * @description Control name
+       */
+      control_name: string;
+      /**
+       * Deny Count
+       * @description Deny actions
+       */
+      deny_count: number;
+      /**
+       * Error Count
+       * @description Evaluation errors
+       */
+      error_count: number;
+      /**
+       * Execution Count
+       * @description Total executions
+       */
+      execution_count: number;
+      /**
+       * Match Count
+       * @description Total matches
+       */
+      match_count: number;
+      /**
+       * Non Match Count
+       * @description Total non-matches
+       */
+      non_match_count: number;
+      /**
+       * Observe Count
+       * @description Observe actions
+       */
+      observe_count: number;
+      /**
+       * Steer Count
+       * @description Steer actions
+       */
+      steer_count: number;
+    };
+    /**
+     * ControlStatsResponse
+     * @description Response model for control-level statistics.
+     *
+     *     Contains stats for a single control (with optional timeseries).
+     *
+     *     Attributes:
+     *         agent_name: Agent identifier
+     *         time_range: Time range used
+     *         control_id: Control ID
+     *         control_name: Control name
+     *         stats: Control statistics (includes timeseries when requested)
+     */
+    ControlStatsResponse: {
+      /**
+       * Agent Name
+       * @description Agent identifier
+       */
+      agent_name: string;
+      /**
+       * Control Id
+       * @description Control ID
+       */
+      control_id: number;
+      /**
+       * Control Name
+       * @description Control name
+       */
+      control_name: string;
+      /** @description Control statistics */
+      stats: components['schemas']['StatsTotals'];
+      /**
+       * Time Range
+       * @description Time range used
+       */
+      time_range: string;
+    };
+    /**
+     * ControlSummary
+     * @description Summary of a control for list responses.
+     */
+    ControlSummary: {
+      /**
+       * Description
+       * @description Control description
+       */
+      description?: string | null;
+      /**
+       * Enabled
+       * @description Whether control is enabled
+       * @default true
+       */
+      enabled: boolean;
+      /**
+       * Execution
+       * @description 'server' or 'sdk'
+       */
+      execution?: string | null;
+      /**
+       * Id
+       * @description Control ID
+       */
+      id: number;
+      /**
+       * Name
+       * @description Control name
+       */
+      name: string;
+      /**
+       * Stages
+       * @description Evaluation stages in scope
+       */
+      stages?: string[] | null;
+      /**
+       * Step Types
+       * @description Step types in scope
+       */
+      step_types?: string[] | null;
+      /**
+       * Tags
+       * @description Control tags
+       */
+      tags?: string[];
+      /** @description Agent using this control */
+      used_by_agent?: components['schemas']['AgentRef'] | null;
+      /**
+       * Used By Agents Count
+       * @description Number of unique agents using this control
+       * @default 0
+       */
+      used_by_agents_count: number;
+    };
+    /** CreateControlRequest */
+    CreateControlRequest: {
+      /** @description Control definition to validate and store during creation */
+      data: components['schemas']['ControlDefinition-Input'];
+      /**
+       * Name
+       * @description Unique control name (letters, numbers, hyphens, underscores)
+       */
+      name: string;
+    };
+    /** CreateControlResponse */
+    CreateControlResponse: {
+      /**
+       * Control Id
+       * @description Identifier of the created control
+       */
+      control_id: number;
+    };
+    /** CreatePolicyRequest */
+    CreatePolicyRequest: {
+      /**
+       * Name
+       * @description Unique policy name (letters, numbers, hyphens, underscores)
+       */
+      name: string;
+    };
+    /** CreatePolicyResponse */
+    CreatePolicyResponse: {
+      /**
+       * Policy Id
+       * @description Identifier of the created policy
+       */
+      policy_id: number;
+    };
+    /**
+     * DeleteControlResponse
+     * @description Response for deleting a control.
+     */
+    DeleteControlResponse: {
+      /**
+       * Dissociated From
+       * @description Deprecated: policy IDs the control was removed from before deletion
+       */
+      dissociated_from?: number[];
+      /**
+       * Dissociated From Agents
+       * @description Agent names the control was removed from before deletion
+       */
+      dissociated_from_agents?: string[];
+      /**
+       * Dissociated From Policies
+       * @description Policy IDs the control was removed from before deletion
+       */
+      dissociated_from_policies?: number[];
+      /**
+       * Success
+       * @description Whether the control was deleted
+       */
+      success: boolean;
+    };
+    /**
+     * DeletePolicyResponse
+     * @description Compatibility response for singular policy deletion endpoint.
+     */
+    DeletePolicyResponse: {
+      /**
+       * Success
+       * @description Whether the request succeeded
+       */
+      success: boolean;
+    };
+    /**
+     * EvaluationRequest
+     * @description Request model for evaluation analysis.
+     *
+     *     Used to analyze agent interactions for safety violations,
+     *     policy compliance, and control rules.
+     *
+     *     Attributes:
+     *         agent_name: Unique identifier of the agent making the request
+     *         step: Step payload for evaluation
+     *         stage: 'pre' (before execution) or 'post' (after execution)
+     * @example {
+     *       "agent_name": "customer-service-bot",
+     *       "stage": "pre",
+     *       "step": {
+     *         "context": {
+     *           "session_id": "abc123",
+     *           "user_id": "user123"
+     *         },
+     *         "input": "What is the customer's credit card number?",
+     *         "name": "support-answer",
+     *         "type": "llm"
+     *       }
+     *     }
+     * @example {
+     *       "agent_name": "customer-service-bot",
+     *       "stage": "post",
+     *       "step": {
+     *         "context": {
+     *           "session_id": "abc123",
+     *           "user_id": "user123"
+     *         },
+     *         "input": "What is the customer's credit card number?",
+     *         "name": "support-answer",
+     *         "output": "I cannot share sensitive payment information.",
+     *         "type": "llm"
+     *       }
+     *     }
+     * @example {
+     *       "agent_name": "customer-service-bot",
+     *       "stage": "pre",
+     *       "step": {
+     *         "context": {
+     *           "user_id": "user123"
+     *         },
+     *         "input": {
+     *           "query": "SELECT * FROM users"
+     *         },
+     *         "name": "search_database",
+     *         "type": "tool"
+     *       }
+     *     }
+     * @example {
+     *       "agent_name": "customer-service-bot",
+     *       "stage": "post",
+     *       "step": {
+     *         "context": {
+     *           "user_id": "user123"
+     *         },
+     *         "input": {
+     *           "query": "SELECT * FROM users"
+     *         },
+     *         "name": "search_database",
+     *         "output": {
+     *           "results": []
+     *         },
+     *         "type": "tool"
+     *       }
+     *     }
+     */
+    EvaluationRequest: {
+      /**
+       * Agent Name
+       * @description Identifier of the agent making the evaluation request
+       */
+      agent_name: string;
+      /**
+       * Stage
+       * @description Evaluation stage: 'pre' or 'post'
+       * @enum {string}
+       */
+      stage: 'pre' | 'post';
+      /** @description Agent step payload to evaluate */
+      step: components['schemas']['Step'];
+    };
+    /**
+     * EvaluationResponse
+     * @description Response model from evaluation analysis (server-side).
+     *
+     *     This is what the server returns. The SDK may transform this
+     *     into an EvaluationResult for client convenience.
+     *
+     *     Attributes:
+     *         is_safe: Whether the content is considered safe
+     *         confidence: Confidence score between 0.0 and 1.0
+     *         reason: Optional explanation for the decision
+     *         matches: List of controls that matched/triggered (if any)
+     *         errors: List of controls that failed during evaluation (if any)
+     *         non_matches: List of controls that were evaluated but did not match (if any)
+     */
+    EvaluationResponse: {
+      /**
+       * Confidence
+       * @description Confidence score (0.0 to 1.0)
+       */
+      confidence: number;
+      /**
+       * Errors
+       * @description List of controls that failed during evaluation (if any)
+       */
+      errors?: components['schemas']['ControlMatch'][] | null;
+      /**
+       * Is Safe
+       * @description Whether content is safe
+       */
+      is_safe: boolean;
+      /**
+       * Matches
+       * @description List of controls that matched/triggered (if any)
+       */
+      matches?: components['schemas']['ControlMatch'][] | null;
+      /**
+       * Non Matches
+       * @description List of controls that were evaluated but did not match (if any)
+       */
+      non_matches?: components['schemas']['ControlMatch'][] | null;
+      /**
+       * Reason
+       * @description Explanation for the decision
+       */
+      reason?: string | null;
+    };
+    /**
+     * EvaluatorInfo
+     * @description Information about a registered evaluator.
+     */
+    EvaluatorInfo: {
+      /**
+       * Config Schema
+       * @description JSON Schema for config
+       */
+      config_schema: {
+        [key: string]: unknown;
+      };
+      /**
+       * Description
+       * @description Evaluator description
+       */
+      description: string;
+      /**
+       * Name
+       * @description Evaluator name
+       */
+      name: string;
+      /**
+       * Requires Api Key
+       * @description Whether evaluator requires API key
+       */
+      requires_api_key: boolean;
+      /**
+       * Timeout Ms
+       * @description Default timeout in milliseconds
+       */
+      timeout_ms: number;
+      /**
+       * Version
+       * @description Evaluator version
+       */
+      version: string;
+    };
+    /**
+     * EvaluatorResult
+     * @description Result from a control evaluator.
+     *
+     *     The `error` field indicates evaluator failures, NOT validation failures:
+     *     - Set `error` for: evaluator crashes, timeouts, missing dependencies, external service errors
+     *     - Do NOT set `error` for: invalid input, syntax errors, schema violations, constraint failures
+     *
+     *     When `error` is set, `matched` must be False (fail-open on evaluator errors).
+     *     When `error` is None, `matched` reflects the actual validation result.
+     *
+     *     This distinction allows:
+     *     - Clients to distinguish "data violated rules" from "evaluator is broken"
+     *     - Observability systems to monitor evaluator health separately from validation outcomes
+     */
+    EvaluatorResult: {
+      /**
+       * Confidence
+       * @description Confidence in the evaluation
+       */
+      confidence: number;
+      /**
+       * Error
+       * @description Error message if evaluation failed internally. When set, matched=False is due to error, not actual evaluation.
+       */
+      error?: string | null;
+      /**
+       * Matched
+       * @description Whether the pattern matched
+       */
+      matched: boolean;
+      /**
+       * Message
+       * @description Explanation of the result
+       */
+      message?: string | null;
+      /**
+       * Metadata
+       * @description Additional result metadata
+       */
+      metadata?: {
+        [key: string]: unknown;
+      } | null;
+    };
+    /**
+     * EvaluatorSchema
+     * @description Schema for a custom evaluator registered with an agent.
+     *
+     *     Custom evaluators are Evaluator classes deployed with the engine.
+     *     This schema is registered via initAgent for validation and UI purposes.
+     */
+    EvaluatorSchema: {
+      /**
+       * Config Schema
+       * @description JSON Schema for evaluator config validation
+       */
+      config_schema?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Description
+       * @description Optional description
+       */
+      description?: string | null;
+      /**
+       * Name
+       * @description Unique evaluator name
+       */
+      name: string;
+    };
+    /**
+     * EvaluatorSchemaItem
+     * @description Evaluator schema summary for list response.
+     */
+    EvaluatorSchemaItem: {
+      /** Config Schema */
+      config_schema: {
+        [key: string]: unknown;
+      };
+      /** Description */
+      description: string | null;
+      /** Name */
+      name: string;
+    };
+    /**
+     * EvaluatorSpec
+     * @description Evaluator specification. See GET /evaluators for available evaluators and schemas.
+     *
+     *     Evaluator reference formats:
+     *     - Built-in: "regex", "list", "json", "sql"
+     *     - External: "galileo.luna" (requires agent-control-evaluators[galileo])
+     *     - Agent-scoped: "my-agent:my-evaluator" (validated in endpoint, not here)
+     */
+    EvaluatorSpec: {
+      /**
+       * Config
+       * @description Evaluator-specific configuration
+       * @example {
+       *       "pattern": "\\d{3}-\\d{2}-\\d{4}"
+       *     }
+       * @example {
+       *       "logic": "any",
+       *       "values": [
+       *         "admin"
+       *       ]
+       *     }
+       */
+      config: {
+        [key: string]: unknown;
+      };
+      /**
+       * Name
+       * @description Evaluator name or agent-scoped reference (agent:evaluator)
+       * @example regex
+       * @example list
+       * @example my-agent:pii-detector
+       */
+      name: string;
+    };
+    /**
+     * EventQueryRequest
+     * @description Request model for querying raw events.
+     *
+     *     Supports filtering by various criteria and pagination.
+     *
+     *     Attributes:
+     *         trace_id: Filter by trace ID (get all events for a request)
+     *         span_id: Filter by span ID (get all events for a function call)
+     *         control_execution_id: Filter by specific event ID
+     *         agent_name: Filter by agent identifier
+     *         control_ids: Filter by control IDs
+     *         actions: Filter by actions (deny, steer, observe)
+     *         matched: Filter by matched status
+     *         check_stages: Filter by check stages (pre, post)
+     *         applies_to: Filter by call type or custom call type
+     *         start_time: Filter events after this time
+     *         end_time: Filter events before this time
+     *         limit: Maximum number of events to return
+     *         offset: Offset for pagination
+     * @example {
+     *       "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+     *     }
+     * @example {
+     *       "actions": [
+     *         "deny",
+     *         "observe"
+     *       ],
+     *       "agent_name": "my-agent",
+     *       "limit": 50,
+     *       "start_time": "2025-01-09T00:00:00Z"
+     *     }
+     */
+    EventQueryRequest: {
+      /**
+       * Actions
+       * @description Filter by actions
+       */
+      actions?: components['schemas']['ActionDecision'][] | null;
+      /**
+       * Agent Name
+       * @description Filter by agent identifier
+       */
+      agent_name?: string | null;
+      /**
+       * Applies To
+       * @description Filter by call types or custom call types
+       */
+      applies_to?: string[] | null;
+      /**
+       * Check Stages
+       * @description Filter by check stages
+       */
+      check_stages?: ('pre' | 'post')[] | null;
+      /**
+       * Control Execution Id
+       * @description Filter by specific event ID
+       */
+      control_execution_id?: string | null;
+      /**
+       * Control Ids
+       * @description Filter by control IDs
+       */
+      control_ids?: number[] | null;
+      /**
+       * End Time
+       * @description Filter events before this time
+       */
+      end_time?: string | null;
+      /**
+       * Limit
+       * @description Maximum events
+       * @default 100
+       */
+      limit: number;
+      /**
+       * Matched
+       * @description Filter by matched status
+       */
+      matched?: boolean | null;
+      /**
+       * Offset
+       * @description Pagination offset
+       * @default 0
+       */
+      offset: number;
+      /**
+       * Span Id
+       * @description Filter by span ID (all events for a function)
+       */
+      span_id?: string | null;
+      /**
+       * Start Time
+       * @description Filter events after this time
+       */
+      start_time?: string | null;
+      /**
+       * Trace Id
+       * @description Filter by trace ID (all events for a request)
+       */
+      trace_id?: string | null;
+    };
+    /**
+     * EventQueryResponse
+     * @description Response model for event queries.
+     *
+     *     Attributes:
+     *         events: List of matching events
+     *         total: Total number of matching events (for pagination)
+     *         limit: Limit used in query
+     *         offset: Offset used in query
+     */
+    EventQueryResponse: {
+      /**
+       * Events
+       * @description Matching events
+       */
+      events: components['schemas']['ControlExecutionEvent'][];
+      /**
+       * Limit
+       * @description Limit used in query
+       */
+      limit: number;
+      /**
+       * Offset
+       * @description Offset used in query
+       */
+      offset: number;
+      /**
+       * Total
+       * @description Total matching events
+       */
+      total: number;
+    };
+    /** GetAgentPoliciesResponse */
+    GetAgentPoliciesResponse: {
+      /**
+       * Policy Ids
+       * @description IDs of policies associated with the agent
+       */
+      policy_ids?: number[];
+    };
+    /**
+     * GetAgentResponse
+     * @description Response containing agent details and registered steps.
+     */
+    GetAgentResponse: {
+      /** @description Agent metadata */
+      agent: components['schemas']['Agent'];
+      /**
+       * Evaluators
+       * @description Custom evaluators registered with this agent
+       */
+      evaluators?: components['schemas']['EvaluatorSchema'][];
+      /**
+       * Steps
+       * @description Steps registered with this agent
+       */
+      steps: components['schemas']['StepSchema'][];
+    };
+    /** GetControlDataResponse */
+    GetControlDataResponse: {
+      /** @description Control data payload */
+      data: components['schemas']['ControlDefinition-Output'];
+    };
+    /**
+     * GetControlResponse
+     * @description Response containing control details.
+     */
+    GetControlResponse: {
+      /** @description Control configuration data (None if not yet configured) */
+      data?: components['schemas']['ControlDefinition-Output'] | null;
+      /**
+       * Id
+       * @description Control ID
+       */
+      id: number;
+      /**
+       * Name
+       * @description Control name
+       */
+      name: string;
+    };
+    /** GetControlSchemaResponse */
+    GetControlSchemaResponse: {
+      /**
+       * Schema
+       * @description JSON Schema for a full ControlDefinition payload
+       */
+      schema: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * GetPolicyControlsResponse
+     * @description Response containing control IDs associated with a policy.
+     */
+    GetPolicyControlsResponse: {
+      /**
+       * Control Ids
+       * @description List of control IDs associated with the policy
+       */
+      control_ids: number[];
+    };
+    /**
+     * GetPolicyResponse
+     * @description Compatibility response for singular policy retrieval endpoint.
+     */
+    GetPolicyResponse: {
+      /**
+       * Policy Id
+       * @description Associated policy ID
+       */
+      policy_id: number;
+    };
+    /** HTTPValidationError */
+    HTTPValidationError: {
+      /** Detail */
+      detail?: components['schemas']['ValidationError'][];
+    };
+    /**
+     * HealthResponse
+     * @description Health check response model.
+     *
+     *     Attributes:
+     *         status: Current health status (e.g., "healthy", "degraded", "unhealthy")
+     *         version: Application version
+     */
+    HealthResponse: {
+      /** Status */
+      status: string;
+      /** Version */
+      version: string;
+    };
+    /**
+     * InitAgentEvaluatorRemoval
+     * @description Details for an evaluator removed during overwrite mode.
+     */
+    InitAgentEvaluatorRemoval: {
+      /**
+       * Control Ids
+       * @description IDs of active controls referencing this evaluator
+       */
+      control_ids?: number[];
+      /**
+       * Control Names
+       * @description Names of active controls referencing this evaluator
+       */
+      control_names?: string[];
+      /**
+       * Name
+       * @description Evaluator name removed by overwrite
+       */
+      name: string;
+      /**
+       * Referenced By Active Controls
+       * @description Whether this evaluator is still referenced by active controls
+       * @default false
+       */
+      referenced_by_active_controls: boolean;
+    };
+    /**
+     * InitAgentOverwriteChanges
+     * @description Detailed change summary for initAgent overwrite mode.
+     */
+    InitAgentOverwriteChanges: {
+      /**
+       * Evaluator Removals
+       * @description Per-evaluator removal details, including active control references
+       */
+      evaluator_removals?: components['schemas']['InitAgentEvaluatorRemoval'][];
+      /**
+       * Evaluators Added
+       * @description Evaluator names added by overwrite
+       */
+      evaluators_added?: string[];
+      /**
+       * Evaluators Removed
+       * @description Evaluator names removed by overwrite
+       */
+      evaluators_removed?: string[];
+      /**
+       * Evaluators Updated
+       * @description Existing evaluator names updated by overwrite
+       */
+      evaluators_updated?: string[];
+      /**
+       * Metadata Changed
+       * @description Whether agent metadata changed
+       * @default false
+       */
+      metadata_changed: boolean;
+      /**
+       * Steps Added
+       * @description Steps added by overwrite
+       */
+      steps_added?: components['schemas']['StepKey'][];
+      /**
+       * Steps Removed
+       * @description Steps removed by overwrite
+       */
+      steps_removed?: components['schemas']['StepKey'][];
+      /**
+       * Steps Updated
+       * @description Existing steps updated by overwrite
+       */
+      steps_updated?: components['schemas']['StepKey'][];
+    };
+    /**
+     * InitAgentRequest
+     * @description Request to initialize or update an agent registration.
+     * @example {
+     *       "agent": {
+     *         "agent_description": "Handles customer inquiries",
+     *         "agent_name": "customer-service-bot",
+     *         "agent_version": "1.0.0"
+     *       },
+     *       "evaluators": [
+     *         {
+     *           "config_schema": {
+     *             "properties": {
+     *               "sensitivity": {
+     *                 "type": "string"
+     *               }
+     *             },
+     *             "type": "object"
+     *           },
+     *           "description": "Detects PII in text",
+     *           "name": "pii-detector"
+     *         }
+     *       ],
+     *       "steps": [
+     *         {
+     *           "input_schema": {
+     *             "query": {
+     *               "type": "string"
+     *             }
+     *           },
+     *           "name": "search_kb",
+     *           "output_schema": {
+     *             "results": {
+     *               "type": "array"
+     *             }
+     *           },
+     *           "type": "tool"
+     *         }
+     *       ]
+     *     }
+     */
+    InitAgentRequest: {
+      /** @description Agent metadata including ID, name, and version */
+      agent: components['schemas']['Agent'];
+      /**
+       * @description Conflict handling mode for init registration updates. 'strict' preserves existing compatibility checks. 'overwrite' applies latest-init-wins replacement for steps and evaluators.
+       * @default strict
+       */
+      conflict_mode: components['schemas']['ConflictMode'];
+      /**
+       * Evaluators
+       * @description Custom evaluator schemas for config validation
+       */
+      evaluators?: components['schemas']['EvaluatorSchema'][];
+      /**
+       * Force Replace
+       * @description If true, replace corrupted agent data instead of failing. Use only when agent data is corrupted and cannot be parsed.
+       * @default false
+       */
+      force_replace: boolean;
+      /**
+       * Steps
+       * @description List of steps available to the agent
+       */
+      steps?: components['schemas']['StepSchema'][];
+    };
+    /**
+     * InitAgentResponse
+     * @description Response from agent initialization.
+     */
+    InitAgentResponse: {
+      /**
+       * Controls
+       * @description Active protection controls for the agent
+       */
+      controls?: components['schemas']['Control'][];
+      /**
+       * Created
+       * @description True if agent was newly created, False if updated
+       */
+      created: boolean;
+      /**
+       * Overwrite Applied
+       * @description True if overwrite mode changed registration data on an existing agent
+       * @default false
+       */
+      overwrite_applied: boolean;
+      /** @description Detailed list of changes applied in overwrite mode */
+      overwrite_changes?: components['schemas']['InitAgentOverwriteChanges'];
+    };
+    JSONObject: {
+      [key: string]: components['schemas']['JSONValue'];
+    };
+    /** @description Any JSON value */
+    JSONValue: unknown;
+    /**
+     * ListAgentsResponse
+     * @description Response for listing agents.
+     */
+    ListAgentsResponse: {
+      /**
+       * Agents
+       * @description List of agent summaries
+       */
+      agents: components['schemas']['AgentSummary'][];
+      /** @description Pagination metadata */
+      pagination: components['schemas']['PaginationInfo'];
+    };
+    /**
+     * ListControlsResponse
+     * @description Response for listing controls.
+     */
+    ListControlsResponse: {
+      /**
+       * Controls
+       * @description List of control summaries
+       */
+      controls: components['schemas']['ControlSummary'][];
+      /** @description Pagination metadata */
+      pagination: components['schemas']['PaginationInfo'];
+    };
+    /**
+     * ListEvaluatorsResponse
+     * @description Response for listing agent's evaluator schemas.
+     */
+    ListEvaluatorsResponse: {
+      /** Evaluators */
+      evaluators: components['schemas']['EvaluatorSchemaItem'][];
+      pagination: components['schemas']['PaginationInfo'];
+    };
+    /**
+     * LoginRequest
+     * @description Request body for the /login endpoint.
+     */
+    LoginRequest: {
+      /** Api Key */
+      api_key: string;
+    };
+    /**
+     * LoginResponse
+     * @description Response body for the /login endpoint.
+     */
+    LoginResponse: {
+      /** Authenticated */
+      authenticated: boolean;
+      /** Is Admin */
+      is_admin: boolean;
+    };
+    /**
+     * PaginationInfo
+     * @description Pagination metadata for cursor-based pagination.
+     */
+    PaginationInfo: {
+      /**
+       * Has More
+       * @description Whether there are more pages available
+       */
+      has_more: boolean;
+      /**
+       * Limit
+       * @description Number of items per page
+       */
+      limit: number;
+      /**
+       * Next Cursor
+       * @description Cursor for fetching the next page (null if no more pages)
+       */
+      next_cursor?: string | null;
+      /**
+       * Total
+       * @description Total number of items
+       */
+      total: number;
+    };
+    /**
+     * PatchAgentRequest
+     * @description Request to modify an agent (remove steps/evaluators).
+     */
+    PatchAgentRequest: {
+      /**
+       * Remove Evaluators
+       * @description Evaluator names to remove from the agent
+       */
+      remove_evaluators?: string[];
+      /**
+       * Remove Steps
+       * @description Step identifiers to remove from the agent
+       */
+      remove_steps?: components['schemas']['StepKey'][];
+    };
+    /**
+     * PatchAgentResponse
+     * @description Response from agent modification.
+     */
+    PatchAgentResponse: {
+      /**
+       * Evaluators Removed
+       * @description Evaluator names that were removed
+       */
+      evaluators_removed?: string[];
+      /**
+       * Steps Removed
+       * @description Step identifiers that were removed
+       */
+      steps_removed?: components['schemas']['StepKey'][];
+    };
+    /**
+     * PatchControlRequest
+     * @description Request to update control metadata (name, enabled status).
+     */
+    PatchControlRequest: {
+      /**
+       * Enabled
+       * @description Enable or disable the control
+       */
+      enabled?: boolean | null;
+      /**
+       * Name
+       * @description New control name (letters, numbers, hyphens, underscores)
+       */
+      name?: string | null;
+    };
+    /**
+     * PatchControlResponse
+     * @description Response from control metadata update.
+     */
+    PatchControlResponse: {
+      /**
+       * Enabled
+       * @description Current enabled status (if control has data configured)
+       */
+      enabled?: boolean | null;
+      /**
+       * Name
+       * @description Current control name (may have changed)
+       */
+      name: string;
+      /**
+       * Success
+       * @description Whether the update succeeded
+       */
+      success: boolean;
+    };
+    /**
+     * RemoveAgentControlResponse
+     * @description Response for removing a direct agent-control association.
+     */
+    RemoveAgentControlResponse: {
+      /**
+       * Control Still Active
+       * @description True if the control remains active via policy association(s)
+       */
+      control_still_active: boolean;
+      /**
+       * Removed Direct Association
+       * @description True if a direct agent-control link was removed
+       */
+      removed_direct_association: boolean;
+      /**
+       * Success
+       * @description Whether the request succeeded
+       */
+      success: boolean;
+    };
+    /**
+     * SetControlDataRequest
+     * @description Request to update control configuration data.
+     */
+    SetControlDataRequest: {
+      /** @description Control configuration data (replaces existing) */
+      data: components['schemas']['ControlDefinition-Input'];
+    };
+    /** SetControlDataResponse */
+    SetControlDataResponse: {
+      /**
+       * Success
+       * @description Whether the control data was updated
+       */
+      success: boolean;
+    };
+    /**
+     * SetPolicyResponse
+     * @description Compatibility response for singular policy assignment endpoint.
+     */
+    SetPolicyResponse: {
+      /**
+       * Old Policy Id
+       * @description Previously associated policy ID, if any
+       */
+      old_policy_id?: number | null;
+      /**
+       * Success
+       * @description Whether the request succeeded
+       */
+      success: boolean;
+    };
+    /**
+     * StatsResponse
+     * @description Response model for agent-level aggregated statistics.
+     *
+     *     Contains agent-level totals (with optional timeseries) and per-control breakdown.
+     *
+     *     Attributes:
+     *         agent_name: Agent identifier
+     *         time_range: Time range used
+     *         totals: Agent-level aggregate statistics (includes timeseries)
+     *         controls: Per-control breakdown for discovery and detail
+     */
+    StatsResponse: {
+      /**
+       * Agent Name
+       * @description Agent identifier
+       */
+      agent_name: string;
+      /**
+       * Controls
+       * @description Per-control breakdown
+       */
+      controls: components['schemas']['ControlStats'][];
+      /**
+       * Time Range
+       * @description Time range used
+       */
+      time_range: string;
+      /** @description Agent-level aggregate statistics */
+      totals: components['schemas']['StatsTotals'];
+    };
+    /**
+     * StatsTotals
+     * @description Agent-level aggregate statistics.
+     *
+     *     Invariant: execution_count = match_count + non_match_count + error_count
+     *
+     *     Matches have actions (deny, steer, observe) tracked in action_counts.
+     *     sum(action_counts.values()) == match_count
+     *
+     *     Attributes:
+     *         execution_count: Total executions across all controls
+     *         match_count: Total matches across all controls (evaluator matched)
+     *         non_match_count: Total non-matches across all controls (evaluator didn't match)
+     *         error_count: Total errors across all controls (evaluation failed)
+     *         action_counts: Breakdown of actions for matched executions
+     *         timeseries: Time-series data points (only when include_timeseries=true)
+     */
+    StatsTotals: {
+      /**
+       * Action Counts
+       * @description Action breakdown for matches: {deny, steer, observe}
+       */
+      action_counts?: {
+        [key: string]: number;
+      };
+      /**
+       * Error Count
+       * @description Total errors
+       * @default 0
+       */
+      error_count: number;
+      /**
+       * Execution Count
+       * @description Total executions
+       */
+      execution_count: number;
+      /**
+       * Match Count
+       * @description Total matches
+       * @default 0
+       */
+      match_count: number;
+      /**
+       * Non Match Count
+       * @description Total non-matches
+       * @default 0
+       */
+      non_match_count: number;
+      /**
+       * Timeseries
+       * @description Time-series data points (only when include_timeseries=true)
+       */
+      timeseries?: components['schemas']['TimeseriesBucket'][] | null;
+    };
+    /**
+     * SteeringContext
+     * @description Steering context for steer actions.
+     *
+     *     This model provides an extensible structure for steering guidance.
+     *     Future fields could include severity, categories, suggested_actions, etc.
+     * @example {

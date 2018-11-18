@@ -333,3 +333,338 @@ class AgentControlPlugin(BasePlugin):
         if "after_tool" not in self.enabled_hooks:
             return None
 
+        step_name = self._resolve_tool_step_name(tool, tool_context=tool_context)
+        self._ensure_step_known(self._build_tool_step_schema(tool, step_name))
+        context = self._safe_context(
+            step_type="tool",
+            stage="post",
+            tool=tool,
+            tool_args=tool_args,
+            tool_context=tool_context,
+            result=result,
+        )
+
+        try:
+            await _evaluate_and_enforce(
+                self.agent_name,
+                step_name,
+                input=tool_args,
+                output=result,
+                context=context,
+                step_type="tool",
+                stage="post",
+            )
+        except Exception as exc:
+            return self._handle_tool_exception(
+                exc,
+                tool=tool,
+                tool_args=tool_args,
+                tool_context=tool_context,
+                step_name=step_name,
+                stage="post",
+            )
+        return None
+
+    def _resolve_llm_step_name(self, callback_context: CallbackContext) -> str:
+        raw_name = resolve_agent_name(callback_context)
+        return self._resolve_step_name(
+            raw_name,
+            step_type="llm",
+            callback_context=callback_context,
+        )
+
+    def _resolve_tool_step_name(
+        self,
+        tool: BaseTool,
+        *,
+        tool_context: ToolContext | None = None,
+        agent_step_name: str | None = None,
+    ) -> str:
+        raw_name = resolve_tool_name(tool)
+        resolved_agent_step_name = agent_step_name
+        if resolved_agent_step_name is None:
+            resolved_agent_step_name = self._resolve_tool_agent_step_name(tool_context)
+        default_name = (
+            f"{resolved_agent_step_name}.{raw_name}" if resolved_agent_step_name else raw_name
+        )
+        return self._resolve_step_name(
+            default_name,
+            step_type="tool",
+            override_keys=(raw_name,),
+            tool=tool,
+            tool_context=tool_context,
+            raw_name=raw_name,
+            agent_step_name=resolved_agent_step_name,
+        )
+
+    def _resolve_step_name(
+        self,
+        default_name: str,
+        *,
+        step_type: Literal["llm", "tool"],
+        override_keys: Iterable[str] = (),
+        **kwargs: Any,
+    ) -> str:
+        candidate_names = [default_name, *override_keys]
+        for candidate_name in candidate_names:
+            override = self.step_name_overrides.get(candidate_name)
+            if override:
+                return override
+
+        if self.step_name_resolver is not None:
+            resolved = self.step_name_resolver(
+                step_type=step_type,
+                default_name=default_name,
+                override_keys=tuple(candidate_names),
+                **kwargs,
+            )
+            if isinstance(resolved, str) and resolved:
+                return resolved
+
+        return default_name
+
+    def _resolve_tool_agent_step_name(self, tool_context: ToolContext | None) -> str | None:
+        if tool_context is None:
+            return None
+
+        callback_context = getattr(tool_context, "callback_context", None)
+        if callback_context is not None:
+            return self._resolve_llm_step_name(callback_context)
+
+        raw_agent_name = resolve_tool_agent_name(tool_context)
+        if raw_agent_name is None:
+            return None
+
+        return self._resolve_step_name(
+            raw_agent_name,
+            step_type="llm",
+            agent_name=raw_agent_name,
+            tool_context=tool_context,
+        )
+
+    def _safe_context(
+        self,
+        *,
+        step_type: Literal["llm", "tool"],
+        stage: Literal["pre", "post"],
+        **kwargs: Any,
+    ) -> dict[str, Any] | None:
+        if self.context_extractor is None:
+            return None
+        try:
+            return self.context_extractor(step_type=step_type, stage=stage, **kwargs)
+        except Exception:
+            logger.warning("Google ADK context_extractor failed", exc_info=True)
+            return None
+
+    def _format_message(self, reason: str) -> str:
+        if not self.blocked_message_template:
+            return reason
+        try:
+            return self.blocked_message_template.format(reason=reason)
+        except Exception:
+            logger.warning("Invalid blocked_message_template; using raw reason", exc_info=True)
+            return reason
+
+    def _handle_llm_exception(
+        self,
+        exc: Exception,
+        *,
+        callback_context: CallbackContext,
+        step_name: str,
+        stage: Literal["pre", "post"],
+        llm_request: LlmRequest | None = None,
+        llm_response: LlmResponse | None = None,
+    ) -> LlmResponse | None:
+        self._invoke_callback(step_name, "llm", stage, exc)
+
+        if (
+            isinstance(exc, agent_control.ControlSteerError)
+            and stage == "pre"
+            and llm_request is not None
+        ):
+            if self._inject_steering_guidance(llm_request, exc.steering_context):
+                return None
+
+        if isinstance(exc, agent_control.ControlSteerError):
+            message = exc.steering_context or exc.message
+        elif isinstance(exc, agent_control.ControlViolationError):
+            message = exc.message
+        else:
+            logger.error("Google ADK model control evaluation failed", exc_info=True)
+            message = f"Agent Control could not evaluate the request safely: {exc}"
+
+        return build_blocked_llm_response(self._format_message(message))
+
+    def _handle_tool_exception(
+        self,
+        exc: Exception,
+        *,
+        tool: BaseTool,
+        tool_args: dict[str, Any],
+        tool_context: ToolContext,
+        step_name: str,
+        stage: Literal["pre", "post"],
+    ) -> dict[str, Any]:
+        self._invoke_callback(step_name, "tool", stage, exc)
+
+        if isinstance(exc, agent_control.ControlSteerError):
+            message = exc.steering_context or exc.message
+        elif isinstance(exc, agent_control.ControlViolationError):
+            message = exc.message
+        else:
+            logger.error("Google ADK tool control evaluation failed", exc_info=True)
+            message = f"Agent Control could not evaluate the request safely: {exc}"
+
+        return build_blocked_tool_response(self._format_message(message))
+
+    def _invoke_callback(
+        self,
+        step_name: str,
+        step_type: Literal["llm", "tool"],
+        stage: Literal["pre", "post"],
+        exc: Exception,
+    ) -> None:
+        if self.on_violation_callback is None:
+            return
+        if not isinstance(
+            exc,
+            (agent_control.ControlViolationError, agent_control.ControlSteerError),
+        ):
+            return
+
+        result_like = {
+            "action": "steer" if isinstance(exc, agent_control.ControlSteerError) else "deny",
+            "message": exc.message,
+            "steering_context": (
+                exc.steering_context if isinstance(exc, agent_control.ControlSteerError) else None
+            ),
+        }
+        try:
+            self.on_violation_callback(
+                {
+                    "agent": self.agent_name,
+                    "step_name": step_name,
+                    "step_type": step_type,
+                    "stage": stage,
+                },
+                result_like,
+            )
+        except Exception:
+            logger.warning("Google ADK on_violation_callback failed", exc_info=True)
+
+    def _inject_steering_guidance(self, llm_request: LlmRequest, guidance: str | None) -> bool:
+        if not guidance:
+            return False
+
+        config = getattr(llm_request, "config", None)
+        if config is None:
+            return False
+
+        current_instruction = getattr(config, "system_instruction", None)
+        if isinstance(current_instruction, str) and current_instruction:
+            new_instruction = f"{current_instruction}\n\nAgent Control guidance: {guidance}"
+        else:
+            new_instruction = f"Agent Control guidance: {guidance}"
+
+        try:
+            setattr(config, "system_instruction", new_instruction)
+        except Exception:
+            logger.debug("Could not inject steering guidance into ADK request", exc_info=True)
+            return False
+        return True
+
+    def _build_llm_step_schema(
+        self,
+        step_name: str,
+        *,
+        callback_context: CallbackContext | None = None,
+    ) -> StepSchemaDict:
+        description = None
+        if callback_context is not None:
+            callback_agent = getattr(callback_context, "agent", None)
+            description = getattr(callback_agent, "description", None)
+        step: StepSchemaDict = {
+            "type": "llm",
+            "name": step_name,
+            "input_schema": {"text": {"type": "string"}},
+            "output_schema": {"text": {"type": "string"}},
+            "metadata": {"framework": "google_adk"},
+        }
+        if isinstance(description, str) and description:
+            step["description"] = description
+        return step
+
+    def _build_tool_step_schema(self, tool: Any, step_name: str) -> StepSchemaDict:
+        description = getattr(tool, "description", None)
+        schema_source = self._resolve_schema_source(tool)
+        if schema_source is not None:
+            schemas = derive_schemas(schema_source)
+            input_schema = schemas.input_schema
+            output_schema = schemas.output_schema
+        else:
+            input_schema = {"type": "object", "additionalProperties": True}
+            output_schema = {}
+
+        step: StepSchemaDict = {
+            "type": "tool",
+            "name": step_name,
+            "input_schema": input_schema,
+            "output_schema": output_schema,
+            "metadata": {"framework": "google_adk"},
+        }
+        if isinstance(description, str) and description:
+            step["description"] = description
+        return step
+
+    def _resolve_schema_source(self, tool: Any) -> Callable[..., Any] | None:
+        if callable(tool):
+            return cast(Callable[..., Any], tool)
+
+        for attr_name in ("run_async", "run", "func", "callback"):
+            candidate = getattr(tool, attr_name, None)
+            if callable(candidate):
+                return cast(Callable[..., Any], candidate)
+        return None
+
+    def _discover_steps(self, agent: Any) -> list[StepSchemaDict]:
+        steps: list[StepSchemaDict] = []
+        for current_agent in self._iter_agents(agent):
+            resolved_agent_name: str | None = None
+            agent_name = getattr(current_agent, "name", None)
+            if isinstance(agent_name, str) and agent_name:
+                resolved_agent_name = self._resolve_step_name(
+                    agent_name,
+                    step_type="llm",
+                    callback_context=None,
+                    agent=current_agent,
+                )
+                steps.append(
+                    self._build_llm_step_schema(resolved_agent_name),
+                )
+
+            for tool in self._iter_tools(current_agent):
+                tool_name = self._resolve_tool_step_name(
+                    tool,
+                    agent_step_name=resolved_agent_name,
+                )
+                steps.append(self._build_tool_step_schema(tool, tool_name))
+
+        deduped: dict[tuple[str, str], StepSchemaDict] = {}
+        for step in steps:
+            deduped[(step["type"], step["name"])] = step
+        return list(deduped.values())
+
+    def _iter_agents(self, root_agent: Any) -> Iterable[Any]:
+        seen: set[int] = set()
+        stack = [root_agent]
+        while stack:
+            current = stack.pop()
+            identity = id(current)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            yield current
+
+            # ADK composite agents are not guaranteed to expose one uniform
+            # child-agent attribute, so traverse a small set of observed names.
