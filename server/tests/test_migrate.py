@@ -65,3 +65,36 @@ def test_bundled_config_omits_injected_version_init(
         encoding="utf-8",
     )
     (package_dir / "_alembic" / "env.py").write_text("", encoding="utf-8")
+    (versions_dir / "__init__.py").write_text("", encoding="utf-8")
+    (versions_dir / "abc123_example.py").write_text("revision = 'abc123'\n", encoding="utf-8")
+
+    monkeypatch.setattr(agent_control_server, "__file__", str(package_dir / "__init__.py"))
+
+    with migrate._runtime_bundled_config() as cfg:
+        script_location = Path(cfg.get_main_option("script_location"))
+        assert script_location.exists()
+        assert (script_location / "versions" / "abc123_example.py").exists()
+        assert not (script_location / "versions" / "__init__.py").exists()
+
+    assert not script_location.exists()
+
+
+def test_serialized_migration_skips_lock_for_non_postgres_url(monkeypatch) -> None:
+    cfg = Config()
+    cfg.set_main_option("sqlalchemy.url", "sqlite:///agent-control.db")
+
+    def fail_create_engine(*args: object, **kwargs: object) -> object:
+        raise AssertionError("non-postgres migrations should not create a lock connection")
+
+    monkeypatch.setattr(migrate, "create_engine", fail_create_engine)
+
+    with migrate._serialized_migration(cfg, enabled=True):
+        pass
+
+
+def test_serialized_migration_acquires_and_releases_postgres_lock(monkeypatch) -> None:
+    cfg = Config()
+    cfg.set_main_option("sqlalchemy.url", "postgresql+psycopg://user:pass@postgres/db")
+    connection = _FakeConnection([False, True])
+    engine = _FakeEngine(connection)
+    sleeps: list[float] = []
