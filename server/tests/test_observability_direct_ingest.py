@@ -34,3 +34,76 @@ class FailingStore(EventStore):
 
     async def query_events(self, query, *, namespace_key):  # pragma: no cover - not used
         raise NotImplementedError
+
+
+class CountingStore(EventStore):
+    def __init__(self) -> None:
+        self.calls: list[list[ControlExecutionEvent]] = []
+
+    async def store(
+        self,
+        events: list[ControlExecutionEvent],
+        *,
+        namespace_key: str,
+    ) -> int:
+        self.calls.append(events)
+        return len(events)
+
+    async def query_stats(
+        self,
+        agent_name,
+        time_range,
+        *,
+        control_id=None,
+        include_timeseries=False,
+        bucket_size=None,
+        namespace_key,
+    ):  # pragma: no cover - not used
+        raise NotImplementedError
+
+    async def query_events(self, query, *, namespace_key):  # pragma: no cover - not used
+        raise NotImplementedError
+
+
+class CountingSink:
+    def __init__(self) -> None:
+        self.calls: list[list[ControlExecutionEvent]] = []
+
+    async def write_events(self, events: list[ControlExecutionEvent]) -> SinkResult:
+        self.calls.append(events)
+        return SinkResult(accepted=len(events), dropped=0)
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_drops_on_store_error() -> None:
+    # Given: an ingestor with a failing store
+    ingestor = DirectEventIngestor(store=FailingStore())
+    events = [
+        ControlExecutionEvent(
+            trace_id="a" * 32,
+            span_id="b" * 16,
+                agent_name="agent-test-01",
+            control_id=1,
+            control_name="c",
+            check_stage="pre",
+            applies_to="llm_call",
+            action="observe",
+            matched=True,
+            confidence=0.9,
+        )
+    ]
+
+    # When: ingesting events
+    result = await ingestor.ingest(events, namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: all events are dropped
+    assert result.received == 1
+    assert result.processed == 0
+    assert result.dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_logs_when_enabled(caplog: pytest.LogCaptureFixture) -> None:
+    # Given: an ingestor with logging enabled
+    store = CountingStore()
+    ingestor = DirectEventIngestor(store=store, log_to_stdout=True)

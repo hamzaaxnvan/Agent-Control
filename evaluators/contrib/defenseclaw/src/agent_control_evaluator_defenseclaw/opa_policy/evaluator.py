@@ -12,10 +12,3 @@ from ..common import no_op_result
 from .config import DefenseClawOpaPolicyConfig
 
 
-def _resolve_package_version() -> str:
-    try:
-        return version("agent-control-evaluator-defenseclaw")
-    except PackageNotFoundError:
-        return "0.0.0.dev"
-
-
