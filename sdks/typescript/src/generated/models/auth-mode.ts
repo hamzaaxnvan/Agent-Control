@@ -7,12 +7,3 @@ import * as openEnums from "../types/enums.js";
 import { OpenEnum } from "../types/enums.js";
 
 /**
- * Authentication mode advertised to the UI.
- */
-export const AuthMode = {
-  None: "none",
-  ApiKey: "api-key",
-} as const;
-/**
- * Authentication mode advertised to the UI.
- */

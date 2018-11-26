@@ -15,3 +15,12 @@ from .config import DefenseClawRulePackConfig
 def _resolve_package_version() -> str:
     try:
         return version("agent-control-evaluator-defenseclaw")
+    except PackageNotFoundError:
+        return "0.0.0.dev"
+
+
+@register_evaluator
+class DefenseClawRulePackEvaluator(Evaluator[DefenseClawRulePackConfig]):
+    """Evaluate selected data with a typed DefenseClaw rule pack."""
+
+    metadata = EvaluatorMetadata(
