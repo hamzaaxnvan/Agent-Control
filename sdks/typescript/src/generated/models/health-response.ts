@@ -12,17 +12,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  * Health check response model.
  *
  * @remarks
- *
- * Attributes:
- *     status: Current health status (e.g., "healthy", "degraded", "unhealthy")
- *     version: Application version
- */
-export type HealthResponse = {
-  status: string;
-  version: string;
-};
-
-/** @internal */
-export const HealthResponse$inboundSchema: z.ZodMiniType<
-  HealthResponse,
-  unknown

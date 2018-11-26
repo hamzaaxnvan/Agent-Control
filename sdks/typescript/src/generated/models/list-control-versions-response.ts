@@ -14,19 +14,3 @@ import {
   PaginationInfo,
   PaginationInfo$inboundSchema,
 } from "./pagination-info.js";
-
-/**
- * Response for listing control versions.
- */
-export type ListControlVersionsResponse = {
-  /**
-   * Pagination metadata for cursor-based pagination.
-   */
-  pagination: PaginationInfo;
-  /**
-   * Control versions ordered newest-first
-   */
-  versions: Array<ControlVersionSummary>;
-};
-
-/** @internal */

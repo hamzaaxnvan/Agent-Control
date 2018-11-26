@@ -105,3 +105,56 @@ DEEPEVAL_CONTROLS = [
                 },
             },
             "action": {"decision": "deny"},
+        },
+    },
+    {
+        "name": "check-correctness",
+        "description": "Validates factual correctness against expected answers (when available)",
+        "definition": {
+            "description": "Validates factual correctness against expected answers (when available)",
+            "enabled": False,  # Disabled by default - enable when you have expected outputs
+            "execution": "server",
+            "scope": {"step_types": ["llm"], "stages": ["post"]},
+            "condition": {
+                "selector": {"path": "*"},
+                "evaluator": {
+                    "name": "deepeval-geval",
+                    "config": {
+                        "name": "Correctness",
+                        "evaluation_steps": [
+                            "Check whether facts in actual output contradict expected output",
+                            "Heavily penalize omission of critical details",
+                            "Minor wording differences are acceptable",
+                            "Focus on factual accuracy, not style",
+                        ],
+                        "evaluation_params": ["actual_output", "expected_output"],
+                        "threshold": 0.8,
+                        "model": "gpt-4o",
+                    },
+                },
+            },
+            "action": {"decision": "observe"},
+        },
+    },
+]
+
+
+async def setup_demo(quiet: bool = False):
+    """Set up the demo agent with DeepEval controls."""
+    agent_name = AGENT_NAME
+
+    print(f"Setting up agent: {AGENT_DESCRIPTION}")
+    print(f"Agent name: {agent_name}")
+    print(f"Server URL: {SERVER_URL}")
+    print()
+
+    async with httpx.AsyncClient(base_url=SERVER_URL, timeout=30.0) as client:
+        # Check server health
+        try:
+            resp = await client.get("/health")
+            resp.raise_for_status()
+            print("✓ Server is healthy")
+        except httpx.HTTPError as e:
+            print(f"❌ Error: Cannot connect to server at {SERVER_URL}")
+            print(f"   {e}")
+            print("\nMake sure the server is running")
