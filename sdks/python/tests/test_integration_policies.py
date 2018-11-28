@@ -82,3 +82,45 @@ async def test_control_association_workflow(
 
     assert result["success"] is True
     print("✓ Idempotent add verified")
+
+    # List controls to verify
+    controls_result = await agent_control.policies.list_policy_controls(
+        client,
+        policy_id
+    )
+
+    assert control_id in controls_result["control_ids"]
+    print("✓ Control appears in policy controls list")
+
+    # Remove control from policy
+    result = await agent_control.policies.remove_control_from_policy(
+        client,
+        policy_id,
+        control_id
+    )
+
+    assert result["success"] is True
+    print("✓ Control removed from policy")
+
+    # Remove again (should be idempotent)
+    result = await agent_control.policies.remove_control_from_policy(
+        client,
+        policy_id,
+        control_id
+    )
+
+    assert result["success"] is True
+    print("✓ Idempotent remove verified")
+
+    # Verify control is no longer in list
+    controls_result = await agent_control.policies.list_policy_controls(
+        client,
+        policy_id
+    )
+
+    assert control_id not in controls_result["control_ids"]
+    print("✓ Control no longer in policy controls list")
+
+
+@pytest.mark.asyncio
+async def test_list_policy_controls_workflow(

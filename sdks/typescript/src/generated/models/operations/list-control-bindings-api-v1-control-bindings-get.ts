@@ -35,3 +35,15 @@ export const ListControlBindingsApiV1ControlBindingsGetRequest$outboundSchema:
     ListControlBindingsApiV1ControlBindingsGetRequest
   > = z.pipe(
     z.object({
+      cursor: z.optional(z.nullable(z.string())),
+      limit: z._default(z.int(), 20),
+      targetType: z.optional(z.nullable(z.string())),
+      targetId: z.optional(z.nullable(z.string())),
+      controlId: z.optional(z.nullable(z.int())),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        targetType: "target_type",
+        targetId: "target_id",
+        controlId: "control_id",
+      });
