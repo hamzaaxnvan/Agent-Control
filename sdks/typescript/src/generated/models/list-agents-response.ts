@@ -13,3 +13,18 @@ import {
 } from "./pagination-info.js";
 
 /**
+ * Response for listing agents.
+ */
+export type ListAgentsResponse = {
+  /**
+   * List of agent summaries
+   */
+  agents: Array<AgentSummary>;
+  /**
+   * Pagination metadata for cursor-based pagination.
+   */
+  pagination: PaginationInfo;
+};
+
+/** @internal */
+export const ListAgentsResponse$inboundSchema: z.ZodMiniType<

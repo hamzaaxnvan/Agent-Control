@@ -1,6 +1,2 @@
 data_analyst:
   role: >
-    Data Analyst
-  goal: >
-    Execute data queries and analysis while respecting all data governance controls
-  backstory: >
