@@ -107,3 +107,40 @@ async def test_direct_ingestor_logs_when_enabled(caplog: pytest.LogCaptureFixtur
     # Given: an ingestor with logging enabled
     store = CountingStore()
     ingestor = DirectEventIngestor(store=store, log_to_stdout=True)
+    event = ControlExecutionEvent(
+        trace_id="a" * 32,
+        span_id="b" * 16,
+                agent_name="agent-test-01",
+        control_id=1,
+        control_name="c",
+        check_stage="pre",
+        applies_to="llm_call",
+        action="observe",
+        matched=True,
+        confidence=0.9,
+    )
+
+    # When: ingesting events
+    with caplog.at_level(logging.INFO):
+        result = await ingestor.ingest([event], namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: event is stored and a log line is emitted
+    assert result.processed == 1
+    assert store.calls
+    assert any("control_execution" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_empty_events_returns_zeroes() -> None:
+    # Given: an ingestor with any store
+    ingestor = DirectEventIngestor(store=CountingStore())
+
+    # When: ingesting an empty list
+    result = await ingestor.ingest([], namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: counts are zeroed
+    assert result.received == 0
+    assert result.processed == 0
+    assert result.dropped == 0
+
+

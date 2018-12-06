@@ -22,11 +22,3 @@ def _ensure_postgres_database_exists() -> None:
         if not exists:
             database_name = db_config.database.replace('"', '""')
             conn.execute(text(f'CREATE DATABASE "{database_name}"'))
-
-    admin_engine.dispose()
-
-
-def reset_database() -> None:
-    if db_config.url is None:
-        _ensure_postgres_database_exists()
-
