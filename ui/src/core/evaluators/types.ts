@@ -24,29 +24,3 @@ export type EvaluatorDefinition<TFormValues = any> = {
 
   /** Execution environment selected when creating a control for this evaluator. */
   defaultExecution?: ControlExecution;
-
-  /** Execution environments supported by this evaluator. */
-  supportedExecutions?: readonly ControlExecution[];
-
-  /**
-   * Validation rules for the form.
-   * Uses Mantine form validation format.
-   * @see https://mantine.dev/form/validation/
-   */
-  validate?: Record<
-    string,
-    (value: unknown, values: TFormValues) => string | null
-  >;
-
-  /**
-   * Convert form values to API config format.
-   * Called when saving the control.
-   */
-  toConfig: (values: TFormValues) => Record<string, unknown>;
-
-  /**
-   * Convert API config to form values.
-   * Called when loading an existing control.
-   */
-  fromConfig: (config: Record<string, unknown>) => TFormValues;
-
