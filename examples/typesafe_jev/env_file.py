@@ -9,3 +9,25 @@ Real environment variables always win, so an export still overrides the file.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
+DEFAULT_PATH = Path(__file__).parent / ".env"
+
+
+def load(path: Path | str = DEFAULT_PATH) -> list[str]:
+    """Read KEY=value lines into os.environ without overwriting what is set.
+
+    Args:
+        path: The file to read. Missing files are ignored.
+
+    Returns:
+        The names that were loaded from the file.
+    """
+    file_path = Path(path)
+    if not file_path.is_file():
+        return []
+
+    loaded: list[str] = []
+    for raw_line in file_path.read_text().splitlines():
+        line = raw_line.strip()

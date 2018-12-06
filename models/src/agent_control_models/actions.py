@@ -31,3 +31,19 @@ def validate_action(action: str) -> ActionDecision:
 
 def validate_action_list(actions: Sequence[str]) -> list[ActionDecision]:
     """Validate a list of actions, preserving order and removing duplicates."""
+    validated: list[ActionDecision] = []
+    seen: set[ActionDecision] = set()
+    for action in actions:
+        canonical = validate_action(action)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        validated.append(canonical)
+    return validated
+
+
+def normalize_action(action: str) -> ActionDecision:
+    """Normalize a stored or legacy action name to the canonical action.
+
+    Use this on internal read paths (deserializing DB rows, server responses)
+    where historical data may contain legacy values.
