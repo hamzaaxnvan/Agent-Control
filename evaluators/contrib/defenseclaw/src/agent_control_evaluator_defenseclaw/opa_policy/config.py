@@ -15,11 +15,3 @@ class OpaPolicy(BaseModel):
 
     See https://cisco-ai-defense.github.io/docs/defenseclaw/policy for the policy contract.
     """
-
-    model_config = STRICT_PROVIDER_CONFIG
-
-    domain: Literal["guardrail"] = "guardrail"
-    block_at: Severity = "HIGH"
-    alert_at: Severity = "MEDIUM"
-    cisco_trust_level: Literal["full"] = "full"
-
