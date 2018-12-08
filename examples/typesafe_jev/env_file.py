@@ -20,14 +20,3 @@ def load(path: Path | str = DEFAULT_PATH) -> list[str]:
 
     Args:
         path: The file to read. Missing files are ignored.
-
-    Returns:
-        The names that were loaded from the file.
-    """
-    file_path = Path(path)
-    if not file_path.is_file():
-        return []
-
-    loaded: list[str] = []
-    for raw_line in file_path.read_text().splitlines():
-        line = raw_line.strip()

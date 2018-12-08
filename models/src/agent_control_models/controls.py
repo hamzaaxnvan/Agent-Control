@@ -192,3 +192,392 @@ class EvaluatorSpec(BaseModel):
     @classmethod
     def validate_name(cls, value: str) -> str:
         if not isinstance(value, str):
+            return value
+
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Evaluator name cannot be empty or whitespace-only.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_evaluator_config(self) -> Self:
+        """Validate config against evaluator's schema if evaluator is registered.
+
+        Agent-scoped evaluators (format: agent:evaluator) are validated in the
+        endpoint where we have database access to look up the agent's schema.
+        """
+        # Agent-scoped evaluators: defer validation to endpoint (needs DB access)
+        if ":" in self.name:
+            return self
+
+        # Built-in evaluators: validate config against evaluator's config_model
+        # This import is optional - evaluators package may not be installed
+        try:
+            from agent_control_evaluators import ensure_evaluators_discovered, get_evaluator
+
+            # Ensure entry points are loaded before looking up evaluator
+            ensure_evaluators_discovered()
+            evaluator_cls = get_evaluator(self.name)
+            if evaluator_cls:
+                evaluator_cls.config_model(**self.config)
+        except ImportError:
+            # Evaluators package not installed - skip validation
+            pass
+
+        # If evaluator not found, allow it (might be a server-side registered evaluator)
+        return self
+
+
+type ConditionLeafParts = tuple[ControlSelector, EvaluatorSpec]
+
+
+@dataclass(frozen=True)
+class ControlObservabilityIdentity:
+    """Stable selector/evaluator identity derived from a condition tree."""
+
+    selector_path: str | None
+    evaluator_name: str | None
+    leaf_count: int
+    all_evaluators: list[str]
+    all_selector_paths: list[str]
+
+
+class SteeringContext(BaseModel):
+    """Steering context for steer actions.
+
+    This model provides an extensible structure for steering guidance.
+    Future fields could include severity, categories, suggested_actions, etc.
+    """
+
+    message: str = Field(
+        ...,
+        description="Guidance message explaining what needs to be corrected and how"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "message": (
+                        "This large transfer requires user verification. "
+                        "Request 2FA code from user, verify it, then retry "
+                        "the transaction with verified_2fa=True."
+                    )
+                },
+                {
+                    "message": (
+                        "Transfer exceeds daily limit. Steps: "
+                        "1) Ask user for business justification, "
+                        "2) Request manager approval with amount and justification, "
+                        "3) If approved, retry with manager_approved=True and "
+                        "justification filled in."
+                    )
+                }
+            ]
+        }
+    }
+
+
+type TemplateValue = str | bool | list[str]
+type JsonValue = JSONValue
+
+MAX_CONDITION_DEPTH = 12
+_TEMPLATE_PARAMETER_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+MAX_TEMPLATE_DEFINITION_DEPTH = MAX_CONDITION_DEPTH
+MAX_TEMPLATE_DEFINITION_NODES = 1000
+
+
+def _validate_re2_value(value: str, *, field_name: str) -> str:
+    """Validate that a string is a valid RE2 expression."""
+    try:
+        re2.compile(value)
+    except re2.error as exc:
+        raise ValueError(f"Invalid {field_name}: {exc}") from exc
+    return value
+
+
+def _validate_template_definition_structure(value: JsonValue) -> JsonValue:
+    """Validate template definition nesting and overall size."""
+    stack: list[tuple[JsonValue, int]] = [(value, 1)]
+    node_count = 0
+
+    while stack:
+        node, depth = stack.pop()
+        node_count += 1
+
+        if depth > MAX_TEMPLATE_DEFINITION_DEPTH:
+            raise ValueError(
+                "definition_template nesting depth exceeds maximum of "
+                f"{MAX_TEMPLATE_DEFINITION_DEPTH}"
+            )
+
+        if node_count > MAX_TEMPLATE_DEFINITION_NODES:
+            raise ValueError(
+                "definition_template size exceeds maximum of "
+                f"{MAX_TEMPLATE_DEFINITION_NODES} JSON nodes"
+            )
+
+        if isinstance(node, dict):
+            stack.extend((nested_value, depth + 1) for nested_value in node.values())
+        elif isinstance(node, list):
+            # List elements inherit parent depth — a flat array of strings is
+            # not structurally deeper than a single value.
+            stack.extend((nested_value, depth) for nested_value in node)
+
+    return value
+
+
+class TemplateParameterBase(BaseModel):
+    """Base definition for a template parameter."""
+
+    label: str = Field(..., min_length=1, description="Human-readable parameter label")
+    description: str | None = Field(
+        None,
+        description="Optional description of what the parameter controls",
+    )
+    required: bool = Field(
+        True,
+        description="Whether the caller must provide a value when no default exists",
+    )
+    ui_hint: str | None = Field(
+        None,
+        description="Optional UI hint for rendering the parameter input",
+    )
+
+
+class StringTemplateParameter(TemplateParameterBase):
+    """String-valued template parameter."""
+
+    type: Literal["string"] = "string"
+    default: str | None = Field(None, description="Optional default value")
+    placeholder: str | None = Field(None, description="Optional placeholder text")
+
+
+class StringListTemplateParameter(TemplateParameterBase):
+    """List-of-strings template parameter."""
+
+    type: Literal["string_list"] = "string_list"
+    default: list[str] | None = Field(None, description="Optional default value")
+    placeholder: list[str] | None = Field(
+        None,
+        description="Optional placeholder/example list",
+    )
+
+    @field_validator("default", "placeholder")
+    @classmethod
+    def validate_string_lists(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return value
+        if any((not isinstance(item, str)) for item in value):
+            raise ValueError("Values must be strings")
+        return value
+
+
+class EnumTemplateParameter(TemplateParameterBase):
+    """String enum template parameter."""
+
+    type: Literal["enum"] = "enum"
+    allowed_values: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Allowed string values for the parameter",
+    )
+    default: str | None = Field(None, description="Optional default value")
+
+    @field_validator("allowed_values")
+    @classmethod
+    def validate_allowed_values(cls, value: list[str]) -> list[str]:
+        if not value:
+            raise ValueError("allowed_values must not be empty")
+        if any(not item for item in value):
+            raise ValueError("allowed_values must contain non-empty strings")
+        if len(set(value)) != len(value):
+            raise ValueError("allowed_values must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def validate_default(self) -> Self:
+        if self.default is not None and self.default not in self.allowed_values:
+            raise ValueError("Default must be one of allowed_values")
+        return self
+
+
+class BooleanTemplateParameter(TemplateParameterBase):
+    """Boolean template parameter."""
+
+    type: Literal["boolean"] = "boolean"
+    default: bool | None = Field(None, description="Optional default value")
+
+
+class RegexTemplateParameter(TemplateParameterBase):
+    """RE2 regex template parameter."""
+
+    type: Literal["regex_re2"] = "regex_re2"
+    default: str | None = Field(None, description="Optional default regex pattern")
+    placeholder: str | None = Field(None, description="Optional placeholder regex")
+
+    @field_validator("default", "placeholder")
+    @classmethod
+    def validate_regex_values(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _validate_re2_value(value, field_name="regex pattern")
+
+
+type TemplateParameterDefinition = Annotated[
+    StringTemplateParameter
+    | StringListTemplateParameter
+    | EnumTemplateParameter
+    | BooleanTemplateParameter
+    | RegexTemplateParameter,
+    Field(discriminator="type"),
+]
+
+
+class TemplateDefinition(BaseModel):
+    """Reusable template with typed parameters and a JSON definition template."""
+
+    description: str | None = Field(
+        None,
+        description="Metadata describing the template itself",
+    )
+    parameters: dict[str, TemplateParameterDefinition] = Field(
+        default_factory=dict,
+        description="Typed parameter definitions keyed by parameter name",
+    )
+    definition_template: JsonValue = Field(
+        ...,
+        description="Template payload containing $param binding objects",
+    )
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameter_names(
+        cls, value: dict[str, TemplateParameterDefinition]
+    ) -> dict[str, TemplateParameterDefinition]:
+        for name in value:
+            if not _TEMPLATE_PARAMETER_NAME_RE.fullmatch(name):
+                raise ValueError(
+                    "Parameter names must match [a-zA-Z_][a-zA-Z0-9_]*"
+                )
+        return value
+
+    @field_validator("definition_template")
+    @classmethod
+    def validate_definition_template_structure(cls, value: JsonValue) -> JsonValue:
+        """Limit template nesting and size to keep rendering bounded."""
+        return _validate_template_definition_structure(value)
+
+
+class TemplateControlInput(BaseModel):
+    """Template-backed input payload for control create/update requests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template: TemplateDefinition = Field(..., description="Template definition to render")
+    template_values: dict[str, TemplateValue] = Field(
+        default_factory=dict,
+        description="Template parameter values keyed by parameter name",
+    )
+
+
+class UnrenderedTemplateControl(BaseModel):
+    """Stored state of a template control that hasn't been rendered yet.
+
+    An unrendered template has a template definition and possibly partial
+    parameter values, but no concrete condition/action/execution fields.
+    It is always ``enabled=False`` and excluded from evaluation.
+    """
+
+    template: TemplateDefinition = Field(
+        ..., description="Template definition awaiting parameter values"
+    )
+    template_values: dict[str, TemplateValue] = Field(
+        default_factory=dict,
+        description="Partial or empty parameter values",
+    )
+    enabled: Literal[False] = Field(
+        False,
+        description="Unrendered templates are always disabled",
+    )
+
+
+class ControlAction(BaseModel):
+    """What to do when control matches."""
+
+    decision: ActionDecision = Field(
+        ..., description="Action to take when control is triggered"
+    )
+    steering_context: SteeringContext | None = Field(
+        None,
+        description=(
+            "Steering context object for steer actions. Strongly recommended when "
+            "decision='steer' to provide correction suggestions. If not provided, the "
+            "evaluator result message will be used as fallback."
+        )
+    )
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def validate_decision(cls, value: str) -> ActionDecision:
+        return validate_action(value)
+
+
+def _validate_common_control_constraints(
+    condition: ConditionNode,
+    action: ControlAction,
+) -> None:
+    """Validate control constraints shared by authoring and runtime models."""
+    if condition.max_depth() > MAX_CONDITION_DEPTH:
+        raise ValueError(
+            f"Condition nesting depth exceeds maximum of {MAX_CONDITION_DEPTH}"
+        )
+
+    if (
+        action.decision == "steer"
+        and not condition.is_leaf()
+        and action.steering_context is None
+    ):
+        raise ValueError("Composite steer controls require action.steering_context")
+
+
+class ConditionNode(BaseModel):
+    """Recursive boolean condition tree for control evaluation."""
+
+    selector: ControlSelector | None = Field(
+        default=None,
+        description="Leaf selector. Must be provided together with evaluator.",
+    )
+    evaluator: EvaluatorSpec | None = Field(
+        default=None,
+        description="Leaf evaluator. Must be provided together with selector.",
+    )
+    and_: list[ConditionNode] | None = Field(
+        default=None,
+        alias="and",
+        serialization_alias="and",
+        description="Logical AND over child conditions.",
+    )
+    or_: list[ConditionNode] | None = Field(
+        default=None,
+        alias="or",
+        serialization_alias="or",
+        description="Logical OR over child conditions.",
+    )
+    not_: ConditionNode | None = Field(
+        default=None,
+        alias="not",
+        serialization_alias="not",
+        description="Logical NOT over a single child condition.",
+    )
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        use_enum_values=True,
+        validate_assignment=True,
+        extra="ignore",
+        serialize_by_alias=True,
+    )
+
