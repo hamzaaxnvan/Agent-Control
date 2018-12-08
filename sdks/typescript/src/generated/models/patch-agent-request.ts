@@ -9,25 +9,3 @@ import {
   StepKey$Outbound,
   StepKey$outboundSchema,
 } from "./step-key.js";
-
-/**
- * Request to modify an agent (remove steps/evaluators).
- */
-export type PatchAgentRequest = {
-  /**
-   * Evaluator names to remove from the agent
-   */
-  removeEvaluators?: Array<string> | undefined;
-  /**
-   * Step identifiers to remove from the agent
-   */
-  removeSteps?: Array<StepKey> | undefined;
-};
-
-/** @internal */
-export type PatchAgentRequest$Outbound = {
-  remove_evaluators?: Array<string> | undefined;
-  remove_steps?: Array<StepKey$Outbound> | undefined;
-};
-
-/** @internal */
