@@ -50,29 +50,3 @@ def test_evaluation_response_preserves_duration_for_each_result_category(
         errors=[
             ControlMatch(
                 control_id=2,
-                control_name="failed-control",
-                action="observe",
-                execution_duration_ms=3.25,
-                result=EvaluatorResult(
-                    matched=False,
-                    confidence=0.0,
-                    error="RuntimeError: private evaluator detail",
-                ),
-            )
-        ],
-        non_matches=[
-            ControlMatch(
-                control_id=3,
-                control_name="non-matched-control",
-                action="observe",
-                execution_duration_ms=0.0,
-                result=EvaluatorResult(matched=False, confidence=0.9),
-            )
-        ],
-    )
-
-    # When: a caller evaluates a step through the public HTTP endpoint.
-    response = client.post(
-        "/api/v1/evaluation",
-        json={
-            "agent_name": "duration-contract-agent",
