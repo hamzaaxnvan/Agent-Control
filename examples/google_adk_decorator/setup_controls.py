@@ -79,30 +79,3 @@ async def _ensure_control(
     """Create the control or update the existing definition."""
     try:
         result = await controls.create_control(client, name=name, data=data)
-        return int(result["control_id"])
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 409:
-            raise
-
-    control_list = await controls.list_controls(client, name=name, limit=1)
-    existing = control_list.get("controls", [])
-    if not existing:
-        raise RuntimeError(f"Control '{name}' already exists but could not be listed.")
-
-    control_id = int(existing[0]["id"])
-    await controls.set_control_data(client, control_id, data)
-    return control_id
-
-
-async def main(execution: str) -> None:
-    """Register the example agent and create its controls."""
-    async with AgentControlClient(base_url=SERVER_URL) as client:
-        await client.health_check()
-
-        agent = Agent(
-            agent_name=AGENT_NAME,
-            agent_description="Google ADK example using Agent Control decorators",
-        )
-        await agents.register_agent(client, agent, steps=[])
-
-        control_ids: list[int] = []
