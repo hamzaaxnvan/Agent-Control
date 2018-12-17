@@ -13,3 +13,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+evaluator_showcase = "evaluator_showcase.main:run"
+run_crew = "evaluator_showcase.main:run"
+
+[build-system]
