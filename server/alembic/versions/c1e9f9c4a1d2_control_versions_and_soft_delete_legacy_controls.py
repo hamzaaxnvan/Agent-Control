@@ -111,3 +111,60 @@ def upgrade() -> None:
     bind = op.get_bind()
     db_inspector = inspect(bind)
 
+    controls = sa.table(
+        "controls",
+        sa.column("id", sa.Integer()),
+        sa.column("name", sa.String()),
+        sa.column("data", postgresql.JSONB(astext_type=sa.Text())),
+        sa.column("deleted_at", sa.DateTime(timezone=True)),
+    )
+    control_versions = sa.table(
+        "control_versions",
+        sa.column("control_id", sa.Integer()),
+        sa.column("version_num", sa.Integer()),
+        sa.column("event_type", sa.String()),
+        sa.column("snapshot", postgresql.JSONB(astext_type=sa.Text())),
+        sa.column("note", sa.Text()),
+    )
+    policy_controls = sa.table(
+        "policy_controls",
+        sa.column("policy_id", sa.Integer()),
+        sa.column("control_id", sa.Integer()),
+    )
+    agent_controls = sa.table(
+        "agent_controls",
+        sa.column("agent_name", sa.String()),
+        sa.column("control_id", sa.Integer()),
+    )
+
+    store_publications = None
+    if db_inspector.has_table("control_stores_controls"):
+        store_publications = sa.table(
+            "control_stores_controls",
+            sa.column("store_id", sa.Integer()),
+            sa.column("control_id", sa.Integer()),
+        )
+
+    rows = bind.execute(
+        sa.select(
+            controls.c.id,
+            controls.c.name,
+            controls.c.data,
+        ).order_by(controls.c.id)
+    ).mappings()
+
+    auto_deleted_controls: list[str] = []
+    for row in rows:
+        control_id = int(row["id"])
+        control_name = str(row["name"])
+        control_data = row["data"]
+        usable, reason = _classify_control_payload(control_data)
+
+        bind.execute(
+            sa.insert(control_versions).values(
+                control_id=control_id,
+                version_num=1,
+                event_type="migration_backfill",
+                snapshot=_snapshot_payload(
+                    name=control_name,
+                    data=control_data,
