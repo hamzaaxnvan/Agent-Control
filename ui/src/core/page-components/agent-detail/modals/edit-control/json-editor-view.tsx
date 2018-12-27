@@ -206,3 +206,419 @@ function shouldAutoTriggerSuggest(
     openIdx >= 0 && closeIdx >= 0
       ? beforeCursor.length - openIdx - 1 + closeIdx
       : 999;
+
+  // Short strings: always trigger (browsing options)
+  if (contentLen <= 2) return true;
+
+  // Longer strings: trigger if our provider has suggestions (enum values,
+  // evaluator names, selector paths). This covers all domain fields
+  // including evaluator config enums (logic, match_on, mode, etc.)
+  // without hardcoding field names.
+  return hasSuggestions();
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export const JsonEditorView = ({
+  jsonText,
+  handleJsonChange,
+  jsonError,
+  setJsonError,
+  validationError,
+  setValidationError,
+  onValidateConfig,
+  onValidationStatusChange,
+  validateDebounceMs = DEFAULT_VALIDATE_DEBOUNCE_MS,
+  height = DEFAULT_HEIGHT,
+  label = DEFAULT_LABEL,
+  tooltip = DEFAULT_TOOLTIP,
+  helperText,
+  testId = DEFAULT_TEST_ID,
+  editorMode = DEFAULT_EDITOR_MODE,
+  schema,
+  evaluators,
+  activeEvaluatorId,
+  steps,
+  templateParameterNames,
+}: JsonEditorViewProps) => {
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [debouncedJsonText] = useDebouncedValue(jsonText, validateDebounceMs);
+  const [mounted, setMounted] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const editorRef = useRef<MonacoEditorInstance | null>(null);
+  const monacoRef = useRef<MonacoModule | null>(null);
+  const editorRootRef = useRef<JsonEditorTestElement | null>(null);
+  const cleanupLanguageRef = useRef<(() => void) | null>(null);
+
+  const definitionPrefix =
+    editorMode === 'template' ? TEMPLATE_DEFINITION_PREFIX : undefined;
+
+  const modelUri = useMemo(
+    () => `inmemory://agent-control/${testId}.json`,
+    [testId]
+  );
+  const autocompleteContext = useMemo(
+    () => ({
+      mode: editorMode,
+      modelUri,
+      schema,
+      evaluators,
+      activeEvaluatorId,
+      steps,
+      definitionPrefix,
+      templateParameterNames,
+    }),
+    [
+      activeEvaluatorId,
+      definitionPrefix,
+      editorMode,
+      evaluators,
+      modelUri,
+      schema,
+      steps,
+      templateParameterNames,
+    ]
+  );
+
+  const clipboard = useClipboard({ timeout: 1500 });
+
+  // --- Dark mode ---
+  useEffect(() => {
+    const detect = () =>
+      setIsDarkMode(
+        document.documentElement.getAttribute('data-mantine-color-scheme') ===
+          'dark'
+      );
+    detect();
+    const obs = new MutationObserver(detect);
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-mantine-color-scheme'],
+    });
+    return () => obs.disconnect();
+  }, []);
+
+  // --- Toolbar ---
+  const formatDocument = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const commaFixed = fixJsonCommas(editor.getValue());
+    const formatted = tryFormat(commaFixed);
+    if (formatted && formatted !== editor.getValue()) {
+      replaceAllContent(editor, formatted, 'format');
+      handleJsonChange(formatted);
+    } else if (commaFixed !== editor.getValue()) {
+      replaceAllContent(editor, commaFixed, 'comma-fix');
+      handleJsonChange(commaFixed);
+    }
+  }, [handleJsonChange]);
+
+  const copyToClipboard = useCallback(() => {
+    clipboard.copy(editorRef.current?.getValue() ?? jsonText);
+  }, [clipboard, jsonText]);
+
+  // --- Mount ---
+  const handleEditorMount = useCallback(
+    (editor: MonacoEditorInstance, monaco: MonacoModule) => {
+      editorRef.current = editor;
+      monacoRef.current = monaco;
+      setMounted(true);
+    },
+    []
+  );
+
+  // --- Language support ---
+  useEffect(() => {
+    if (!mounted || !monacoRef.current) return;
+    cleanupLanguageRef.current?.();
+    cleanupLanguageRef.current = setupJsonEditorLanguageSupport(
+      monacoRef.current,
+      autocompleteContext
+    );
+    return () => {
+      cleanupLanguageRef.current?.();
+      cleanupLanguageRef.current = null;
+    };
+  }, [mounted, autocompleteContext]);
+
+  // --- Unified content-change listener ---
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco || !mounted) return;
+
+    let decorationIds: string[] = [];
+    const updateHints = () => {
+      const model = editor.getModel();
+      if (!model) return;
+      try {
+        decorationIds = editor.deltaDecorations(
+          decorationIds,
+          getEmptyValueHints(monaco, model, autocompleteContext).map((h) => ({
+            range: h.range,
+            options: {
+              afterContentClassName: getHintClassName(h.hint),
+            },
+          }))
+        );
+      } catch {
+        decorationIds = editor.deltaDecorations(decorationIds, []);
+      }
+    };
+    updateHints();
+
+    let prevEvalNames = extractEvaluatorNames(
+      editor.getValue(),
+      definitionPrefix
+    );
+    let prevDecision: string | null = null;
+    try {
+      const initTree = parseTree(editor.getValue());
+      const initSubtree =
+        definitionPrefix && initTree
+          ? findNodeAtLocation(initTree, definitionPrefix)
+          : initTree;
+      const decisionNode = initSubtree
+        ? findNodeAtLocation(initSubtree, ['action', 'decision'])
+        : null;
+      prevDecision =
+        typeof decisionNode?.value === 'string' ? decisionNode.value : null;
+    } catch {
+      /* ignore */
+    }
+    let isProgrammaticEdit = false;
+    let hintTimer: number | null = null;
+    let commaTimer: number | null = null;
+
+    const applyEdit = (
+      edit: { offset: number; length: number; newText: string },
+      source: string
+    ) => {
+      const model = editor.getModel();
+      if (!model) return;
+      const start = model.getPositionAt(edit.offset);
+      const end = model.getPositionAt(edit.offset + edit.length);
+      // NOTE: This async boundary (queueMicrotask) means the auto-edit
+      // creates a separate undo group from the user's keystroke. This breaks
+      // redo after undo when auto-edits fire (e.g. evaluator config fill).
+      // Synchronous alternatives (model.applyEdits) crash Monaco's worker.
+      // This is a known Monaco limitation — undo still works correctly.
+      queueMicrotask(() => {
+        isProgrammaticEdit = true;
+        editor.executeEdits(source, [
+          {
+            range: {
+              startLineNumber: start.lineNumber,
+              startColumn: start.column,
+              endLineNumber: end.lineNumber,
+              endColumn: end.column,
+            },
+            text: edit.newText,
+          },
+        ]);
+        const formatted = tryFormat(editor.getValue());
+        if (formatted && formatted !== editor.getValue()) {
+          replaceAllContent(editor, formatted, 'reformat');
+          handleJsonChange(formatted);
+        } else {
+          handleJsonChange(editor.getValue());
+        }
+      });
+    };
+
+    const disposable = editor.onDidChangeModelContent((_e) => {
+      if (isProgrammaticEdit) {
+        isProgrammaticEdit = false;
+        return;
+      }
+
+      const text = editor.getValue();
+
+      // No auto-reformat here — code actions produce formatted JSON by replacing
+      // the full document (see buildNodeTransformAction). Auto-reformatting would
+      // create a second undo entry that breaks Ctrl+Z.
+
+      // Debounced hints
+      if (hintTimer) window.clearTimeout(hintTimer);
+      hintTimer = window.setTimeout(updateHints, HINT_DEBOUNCE_MS);
+
+      // Debounced comma fix (only on blur, only if result is valid)
+      if (commaTimer) window.clearTimeout(commaTimer);
+      commaTimer = window.setTimeout(() => {
+        if (isSuggestWidgetVisible(editor) || editor.hasTextFocus()) return;
+        const current = editor.getValue();
+        const fixed = fixJsonCommas(current);
+        if (fixed !== current && tryFormat(fixed)) {
+          isProgrammaticEdit = true;
+          replaceAllContent(editor, fixed, 'auto-comma-fix');
+          handleJsonChange(fixed);
+        }
+      }, COMMA_FIX_DEBOUNCE_MS);
+
+      // Immediate: dependent field updates (control & template modes)
+      if (editorMode === 'control' || editorMode === 'template') {
+        const evalEdit = findEvaluatorConfigEdit(
+          text,
+          prevEvalNames,
+          evaluators,
+          definitionPrefix
+        );
+        prevEvalNames = extractEvaluatorNames(text, definitionPrefix);
+        if (evalEdit) {
+          applyEdit(evalEdit, 'evaluator-config-update');
+          return;
+        }
+
+        const steerEdit = findSteeringContextEdit(
+          text,
+          prevDecision,
+          definitionPrefix
+        );
+        try {
+          const steerTree = parseTree(text);
+          const steerSubtree =
+            definitionPrefix && steerTree
+              ? findNodeAtLocation(steerTree, definitionPrefix)
+              : steerTree;
+          const decNode = steerSubtree
+            ? findNodeAtLocation(steerSubtree, ['action', 'decision'])
+            : null;
+          prevDecision =
+            typeof decNode?.value === 'string' ? decNode.value : null;
+        } catch {
+          /* ignore */
+        }
+        if (steerEdit) {
+          applyEdit(steerEdit, 'steering-context-update');
+        }
+      }
+    });
+
+    return () => {
+      if (hintTimer) window.clearTimeout(hintTimer);
+      if (commaTimer) window.clearTimeout(commaTimer);
+      disposable.dispose();
+      editor.deltaDecorations(decorationIds, []);
+    };
+  }, [
+    mounted,
+    autocompleteContext,
+    definitionPrefix,
+    editorMode,
+    evaluators,
+    handleJsonChange,
+  ]);
+
+  // --- Cursor auto-trigger ---
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !mounted) return;
+
+    // Track content changes to suppress string-value auto-trigger after typing.
+    // Blank line triggers still fire (Enter creates a new line → want suggestions).
+    let contentJustChanged = false;
+    const contentDisposable = editor.onDidChangeModelContent((e) => {
+      // Only flag as "typing" for small single-char edits, not large replacements
+      // (setValue, code actions, reformat). This prevents suppressing auto-trigger
+      // after programmatic content changes.
+      const isSmallEdit =
+        e.changes.length === 1 &&
+        e.changes[0].text.length <= 2 &&
+        !e.changes[0].text.includes('\n');
+      contentJustChanged = isSmallEdit;
+    });
+
+    let timeout: number | null = null;
+    const disposable = editor.onDidChangeCursorPosition(() => {
+      if (timeout) window.clearTimeout(timeout);
+      timeout = window.setTimeout(() => {
+        try {
+          const pos = editor.getPosition();
+          const model = editor.getModel();
+          if (!pos || !model) return;
+          if (pos.lineNumber < 1 || pos.lineNumber > model.getLineCount())
+            return;
+
+          const wasTyping = contentJustChanged;
+          contentJustChanged = false;
+
+          const trigger = shouldAutoTriggerSuggest(
+            model.getLineContent(pos.lineNumber),
+            pos.column,
+            wasTyping,
+            () =>
+              monacoRef.current
+                ? getJsonEditorCompletionItems(
+                    monacoRef.current,
+                    model,
+                    pos,
+                    autocompleteContext
+                  ).length > 0
+                : false
+          );
+          if (trigger) {
+            editor.trigger('cursor', 'editor.action.triggerSuggest', {});
+          }
+        } catch {
+          // Ignore — stale cursor during undo
+        }
+      }, CURSOR_TRIGGER_DEBOUNCE_MS);
+    });
+
+    return () => {
+      if (timeout) window.clearTimeout(timeout);
+      disposable.dispose();
+      contentDisposable.dispose();
+    };
+  }, [mounted, autocompleteContext]);
+
+  // --- Test harness ---
+  useEffect(() => {
+    const root = editorRootRef.current;
+    if (!root) return;
+    root.__getJsonEditorValue = () => editorRef.current?.getValue() ?? '';
+    root.__getJsonEditorLanguageId = () =>
+      editorRef.current?.getModel()?.getLanguageId() ?? null;
+    root.__isJsonEditorReady = () =>
+      Boolean(editorRef.current && monacoRef.current);
+    root.__focusJsonEditorAt = (l, c) => {
+      if (!editorRef.current || !monacoRef.current) return;
+      editorRef.current.setPosition(new monacoRef.current.Position(l, c));
+      editorRef.current.focus();
+    };
+    root.__setJsonEditorValue = (v) => {
+      editorRef.current?.setValue(v);
+      editorRef.current?.focus();
+      handleJsonChange(v);
+    };
+    root.__triggerJsonEditorSuggest = () => {
+      editorRef.current?.focus();
+      editorRef.current?.trigger(
+        'keyboard',
+        'editor.action.triggerSuggest',
+        {}
+      );
+    };
+    root.__getJsonEditorSuggestions = (l, c) => {
+      if (!editorRef.current || !monacoRef.current) return [];
+      const model = editorRef.current.getModel();
+      if (!model) return [];
+      return getJsonEditorCompletionItems(
+        monacoRef.current,
+        model,
+        new monacoRef.current.Position(l, c),
+        autocompleteContext
+      ).map((item) => ({
+        label: typeof item.label === 'string' ? item.label : item.label.label,
+        detail: typeof item.detail === 'string' ? item.detail : undefined,
+      }));
+    };
+    return () => {
+      delete root.__getJsonEditorValue;
+      delete root.__getJsonEditorLanguageId;
+      delete root.__isJsonEditorReady;
+      delete root.__focusJsonEditorAt;
+      delete root.__setJsonEditorValue;
+      delete root.__triggerJsonEditorSuggest;
