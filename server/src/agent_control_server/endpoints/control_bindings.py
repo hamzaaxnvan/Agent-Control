@@ -201,3 +201,105 @@ async def list_control_bindings(
     """
     parsed_cursor: int | None
     if cursor is None:
+        parsed_cursor = None
+    else:
+        try:
+            parsed_cursor = int(cursor)
+        except ValueError as exc:
+            raise BadRequestError(
+                error_code=ErrorCode.VALIDATION_ERROR,
+                detail="cursor must be a value returned by next_cursor.",
+                hint="Pass the cursor returned in the previous response unchanged.",
+            ) from exc
+    service = ControlBindingsService(db)
+    page = await service.list_bindings(
+        namespace_key=principal.namespace_key,
+        cursor=parsed_cursor,
+        limit=limit,
+        target_type=target_type,
+        target_id=target_id,
+        control_id=control_id,
+    )
+    return ListControlBindingsResponse(
+        bindings=[_to_response(b) for b in page.bindings],
+        pagination=PaginationInfo(
+            limit=limit,
+            total=page.total,
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        ),
+    )
+
+
+@router.get(
+    "/{binding_id}",
+    response_model=GetControlBindingResponse,
+    summary="Get a control binding",
+    response_description="The requested binding",
+)
+async def get_control_binding(
+    binding_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(_require_binding_operation(Operation.CONTROL_BINDINGS_READ)),
+) -> GetControlBindingResponse:
+    """Read a single control binding by surrogate ID.
+
+    Target-aware authorizers use the binding's stored target identifiers.
+    Other authorizers retain namespace-wide authorization. The row is loaded
+    using the authorized namespace before any binding data is returned.
+    """
+    service = ControlBindingsService(db)
+    binding = await service.get_binding_or_404(
+        namespace_key=principal.namespace_key, binding_id=binding_id
+    )
+    return _to_response(binding)
+
+
+@router.patch(
+    "/by-key",
+    response_model=PatchControlBindingResponse,
+    summary="Update a control binding by natural key",
+    response_description="Updated enabled flag",
+)
+async def patch_control_binding_by_key(
+    request: PatchControlBindingByKeyRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(
+        require_operation(
+            Operation.CONTROL_BINDINGS_WRITE,
+            context_builder=_binding_body_context,
+        )
+    ),
+) -> PatchControlBindingResponse:
+    """Update an existing binding using ``(target_type, target_id, control_id)``.
+
+    This route is target-scoped because the request body includes the target
+    identifiers before authorization runs. Unlike ``PUT /by-key``, it never
+    creates a missing binding.
+    """
+    service = ControlBindingsService(db)
+    binding = await service.set_enabled_by_natural_key(
+        namespace_key=principal.namespace_key,
+        target_type=request.target_type,
+        target_id=request.target_id,
+        control_id=request.control_id,
+        enabled=request.enabled,
+    )
+    await db.commit()
+    return PatchControlBindingResponse(success=True, enabled=binding.enabled)
+
+
+@router.patch(
+    "/{binding_id}",
+    response_model=PatchControlBindingResponse,
+    summary="Update a control binding",
+    response_description="Updated enabled flag",
+)
+async def patch_control_binding(
+    binding_id: int,
+    request: PatchControlBindingRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(_require_binding_operation(Operation.CONTROL_BINDINGS_WRITE)),
+) -> PatchControlBindingResponse:
+    """Update the ``enabled`` flag on a control binding.
+
