@@ -10,15 +10,3 @@ import {
 } from "./control-execution-event.js";
 
 /**
- * Request model for batch event ingestion.
- *
- * @remarks
- *
- * SDKs batch events and send them to the server periodically.
- * This reduces HTTP overhead significantly (100x reduction).
- *
- * Attributes:
- *     events: List of control execution events to ingest
- */
-export type BatchEventsRequest = {
-  /**
