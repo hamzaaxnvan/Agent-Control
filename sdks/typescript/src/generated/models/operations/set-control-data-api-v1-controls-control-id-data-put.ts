@@ -7,30 +7,3 @@ import { remap as remap$ } from "../../lib/primitives.js";
 import * as models from "../index.js";
 
 export type SetControlDataApiV1ControlsControlIdDataPutRequest = {
-  controlId: number;
-  body: models.SetControlDataRequest;
-};
-
-/** @internal */
-export type SetControlDataApiV1ControlsControlIdDataPutRequest$Outbound = {
-  control_id: number;
-  body: models.SetControlDataRequest$Outbound;
-};
-
-/** @internal */
-export const SetControlDataApiV1ControlsControlIdDataPutRequest$outboundSchema:
-  z.ZodMiniType<
-    SetControlDataApiV1ControlsControlIdDataPutRequest$Outbound,
-    SetControlDataApiV1ControlsControlIdDataPutRequest
-  > = z.pipe(
-    z.object({
-      controlId: z.int(),
-      body: models.SetControlDataRequest$outboundSchema,
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        controlId: "control_id",
-      });
-    }),
-  );
-

@@ -59,34 +59,3 @@ export function evaluatorsList(
   return new APIPromise($do(
     client,
     options,
-  ));
-}
-
-async function $do(
-  client: AgentControlSDKCore,
-  options?: RequestOptions,
-): Promise<
-  [
-    Result<
-      { [k: string]: models.EvaluatorInfo },
-      | AgentControlSDKError
-      | ResponseValidationError
-      | ConnectionError
-      | RequestAbortedError
-      | RequestTimeoutError
-      | InvalidRequestError
-      | UnexpectedClientError
-      | SDKValidationError
-    >,
-    APICall,
-  ]
-> {
-  const path = pathToFunc("/api/v1/evaluators")();
-
-  const headers = new Headers(compactMap({
-    Accept: "application/json",
-  }));
-
-  const secConfig = await extractSecurity(client._options.apiKeyHeader);
-  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
-  const requestSecurity = resolveGlobalSecurity(securityInput);
