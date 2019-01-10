@@ -17,13 +17,3 @@ revision = "5f2b5f4e1a90"
 down_revision = "8b23d645f86d"
 branch_labels = None
 depends_on = None
-
-
-def upgrade() -> None:
-    op.execute(
-        sa.text(
-            """
-            UPDATE controls
-            SET data = jsonb_set(data, '{action,decision}', '"observe"'::jsonb, false)
-            WHERE jsonb_typeof(data) = 'object'
-              AND jsonb_typeof(data->'action') = 'object'
