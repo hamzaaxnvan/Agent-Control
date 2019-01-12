@@ -3,9 +3,3 @@ import json
 from agent_control import control
 
 
-async def _legal_review(content: str) -> str:
-    """Legal review of content. Returns JSON with disclaimer and approval."""
-    # The JSON control checks output for required fields: disclaimer, legal_reviewed.
-    return json.dumps({
-        "disclaimer": (
-            "This content has been reviewed for legal compliance. "
