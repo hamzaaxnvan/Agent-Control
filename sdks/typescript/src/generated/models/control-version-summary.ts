@@ -13,3 +13,19 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  * Summary of a single control version.
  */
 export type ControlVersionSummary = {
+  /**
+   * ISO 8601 timestamp when this version was created
+   */
+  createdAt: string;
+  /**
+   * Machine-readable event type for this version
+   */
+  eventType: string;
+  /**
+   * Human-readable note describing the change
+   */
+  note?: string | null | undefined;
+  /**
+   * Monotonic version number for the control
+   */
+  versionNum: number;

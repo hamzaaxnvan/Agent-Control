@@ -34,3 +34,39 @@ def upgrade() -> None:
         sa.Column("agent_name", sa.String(length=255), nullable=False),
         sa.Column("policy_id", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(["agent_name"], ["agents.name"]),
+        sa.ForeignKeyConstraint(["policy_id"], ["policies.id"]),
+        sa.PrimaryKeyConstraint("agent_name", "policy_id"),
+    )
+    op.create_index(op.f("ix_agent_policies_agent_name"), "agent_policies", ["agent_name"])
+    op.create_index(op.f("ix_agent_policies_policy_id"), "agent_policies", ["policy_id"])
+
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO agent_policies (agent_name, policy_id)
+            SELECT name, policy_id
+            FROM agents
+            WHERE policy_id IS NOT NULL
+            ON CONFLICT (agent_name, policy_id) DO NOTHING
+            """
+        )
+    )
+
+    op.drop_index(op.f("ix_agents_policy_id"), table_name="agents")
+    op.drop_constraint(op.f("agents_policy_id_fkey"), "agents", type_="foreignkey")
+    op.drop_column("agents", "policy_id")
+
+
+def downgrade() -> None:
+    # NOTE: Downgrade can only restore one policy per agent via agents.policy_id.
+    # If multiple policies are associated to an agent, all but MIN(policy_id) are lost.
+    op.add_column("agents", sa.Column("policy_id", sa.Integer(), nullable=True))
+
+    op.execute(
+        sa.text(
+            """
+            UPDATE agents AS a
+            SET policy_id = ap.policy_id
+            FROM (
+                SELECT agent_name, MIN(policy_id) AS policy_id
+                FROM agent_policies
