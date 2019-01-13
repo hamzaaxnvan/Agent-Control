@@ -52,30 +52,3 @@ def _control_specs(execution: str) -> list[tuple[str, dict[str, Any]]]:
                 "enabled": True,
                 "execution": execution,
                 "scope": {
-                    "step_types": ["tool"],
-                    "step_names": ["get_current_time", "get_weather"],
-                    "stages": ["post"],
-                },
-                "condition": {
-                    "selector": {"path": "output.note"},
-                    "evaluator": {
-                        "name": "regex",
-                        "config": {
-                            "pattern": r"support@internal\.example|123-45-6789",
-                        },
-                    },
-                },
-                "action": {"decision": "deny"},
-            },
-        ),
-    ]
-
-
-async def _ensure_control(
-    client: AgentControlClient,
-    name: str,
-    data: dict[str, Any],
-) -> int:
-    """Create the control or update the existing definition."""
-    try:
-        result = await controls.create_control(client, name=name, data=data)
