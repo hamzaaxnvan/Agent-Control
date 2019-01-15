@@ -7,21 +7,3 @@ import { remap as remap$ } from "../../lib/primitives.js";
 import * as models from "../index.js";
 
 export type PatchAgentApiV1AgentsAgentNamePatchRequest = {
-  agentName: string;
-  body: models.PatchAgentRequest;
-};
-
-/** @internal */
-export type PatchAgentApiV1AgentsAgentNamePatchRequest$Outbound = {
-  agent_name: string;
-  body: models.PatchAgentRequest$Outbound;
-};
-
-/** @internal */
-export const PatchAgentApiV1AgentsAgentNamePatchRequest$outboundSchema:
-  z.ZodMiniType<
-    PatchAgentApiV1AgentsAgentNamePatchRequest$Outbound,
-    PatchAgentApiV1AgentsAgentNamePatchRequest
-  > = z.pipe(
-    z.object({
-      agentName: z.string(),
