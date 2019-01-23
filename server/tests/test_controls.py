@@ -191,3 +191,67 @@ def test_set_control_data_with_empty_dict_fails(client: TestClient) -> None:
     # Then: Fails 422 because strict schema is enforced
     assert resp_put.status_code == 422
 
+
+def test_set_control_data_validates_nested_schema(client: TestClient) -> None:
+    # Given: a control
+    control_id = create_control(client)
+
+    # When: setting invalid data (missing required fields)
+    invalid_data = {"conditions": "test"}
+    r = client.put(f"/api/v1/controls/{control_id}/data", json={"data": invalid_data})
+
+    # Then: 422 Validation Error
+    assert r.status_code == 422
+
+    # Given: a non-existent control id
+    missing = "99999999"
+    # When: fetching data
+    r = client.get(f"/api/v1/controls/{missing}/data")
+    # Then: 404
+    assert r.status_code == 404
+
+
+def test_set_control_data_round_trip_preserves_scope_step_names(client: TestClient) -> None:
+    # Given: a control and a payload with step_names set (and other optional scope fields null)
+    control_id = create_control(client)
+    payload: dict[str, Any] = dict(VALID_CONTROL_DATA)
+    payload["scope"] = {
+        "step_names": ["step-a", "step-b"],
+        "step_types": None,
+        "stages": None,
+        "step_name_regex": None,
+    }
+
+    # When: saving then reloading the control data
+    put_resp = client.put(f"/api/v1/controls/{control_id}/data", json={"data": payload})
+    assert put_resp.status_code == 200, put_resp.text
+
+    get_resp = client.get(f"/api/v1/controls/{control_id}/data")
+    assert get_resp.status_code == 200, get_resp.text
+
+    # Then: step_names are preserved across the round-trip
+    data = get_resp.json()["data"]
+    assert data["scope"]["step_names"] == ["step-a", "step-b"]
+
+
+def test_set_control_data_not_found(client: TestClient) -> None:
+    # Given: a non-existent control id
+    missing = "99999999"
+    # When: setting data
+    r = client.put(f"/api/v1/controls/{missing}/data", json={"data": VALID_CONTROL_DATA})
+    # Then: 404
+    assert r.status_code == 404
+
+
+def test_set_control_data_requires_body_with_data_key(client: TestClient) -> None:
+    # Given: a control id
+    control_id = create_control(client)
+
+    # When: body is missing
+    r1 = client.put(f"/api/v1/controls/{control_id}/data", json=None)
+    # Then: 422 validation error
+    assert r1.status_code == 422
+
+    # When: body without 'data'
+    r2 = client.put(f"/api/v1/controls/{control_id}/data", json={})
+    # Then: 422 validation error

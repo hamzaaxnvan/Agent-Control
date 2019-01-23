@@ -29,3 +29,18 @@ export type ControlVersionSummary = {
    * Monotonic version number for the control
    */
   versionNum: number;
+};
+
+/** @internal */
+export const ControlVersionSummary$inboundSchema: z.ZodMiniType<
+  ControlVersionSummary,
+  unknown
+> = z.pipe(
+  z.object({
+    created_at: types.string(),
+    event_type: types.string(),
+    note: z.optional(z.nullable(types.string())),
+    version_num: types.number(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {

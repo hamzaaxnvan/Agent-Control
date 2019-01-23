@@ -68,38 +68,3 @@ class ListEvaluator(Evaluator[ListEvaluatorConfig]):
     async def evaluate(self, data: Any) -> EvaluatorResult:
         """Evaluate data against the value list.
 
-        Args:
-            data: Data to check (string or list of strings)
-
-        Returns:
-            EvaluatorResult based on matching logic
-        """
-        # Normalize input
-        if data is None:
-            input_values: list[str] = []
-        elif isinstance(data, list):
-            input_values = [str(item) for item in data]
-        else:
-            input_values = [str(data)]
-
-        # Short-circuit if input is empty
-        if not input_values:
-            return EvaluatorResult(
-                matched=False,
-                confidence=1.0,
-                message="Empty input - control ignored",
-                metadata={"input_count": 0},
-            )
-
-        # Short-circuit if control values are empty
-        if self._regex is None:
-            return EvaluatorResult(
-                matched=False,
-                confidence=1.0,
-                message="Empty control values - control ignored",
-                metadata={"input_count": len(input_values)},
-            )
-
-        # Perform matching
-        matches = [val for val in input_values if self._regex.search(val)]
-        match_count = len(matches)
