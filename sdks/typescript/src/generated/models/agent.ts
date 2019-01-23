@@ -20,25 +20,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 export type Agent = {
   /**
    * ISO 8601 timestamp when agent was created
-   */
-  agentCreatedAt?: string | null | undefined;
-  /**
-   * Optional description of the agent's purpose
-   */
-  agentDescription?: string | null | undefined;
-  /**
-   * Free-form metadata dictionary for custom properties
-   */
-  agentMetadata?: { [k: string]: any } | null | undefined;
-  /**
-   * Unique immutable identifier for the agent
-   */
-  agentName: string;
-  /**
-   * ISO 8601 timestamp when agent was last updated
-   */
-  agentUpdatedAt?: string | null | undefined;
-  /**
-   * Semantic version string (e.g. '1.0.0')
-   */
-  agentVersion?: string | null | undefined;
