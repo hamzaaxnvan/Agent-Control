@@ -11,3 +11,16 @@ export class AgentControlSDKDefaultError extends AgentControlSDKError {
     httpMeta: {
       response: Response;
       request: Request;
+      body: string;
+    },
+  ) {
+    if (message) {
+      message += `: `;
+    }
+    message += `Status ${httpMeta.response.status}`;
+    const contentType = httpMeta.response.headers.get("content-type") || `""`;
+    if (contentType !== "application/json") {
+      message += ` Content-Type ${
+        contentType.includes(" ") ? `"${contentType}"` : contentType
+      }`;
+    }

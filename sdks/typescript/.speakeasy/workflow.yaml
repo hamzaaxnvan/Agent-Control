@@ -5,3 +5,6 @@ sources:
     inputs:
       - location: ../../server/openapi.json
 targets:
+  agent-control-typescript:
+    target: typescript
+    source: agent-control-openapi
