@@ -74,3 +74,42 @@ class Agent(BaseModel):
                 }
             ]
         }
+    }
+
+    @field_validator("agent_name", mode="before")
+    @classmethod
+    def validate_and_normalize_agent_name(cls, value: str) -> str:
+        return normalize_agent_name(str(value))
+
+
+class StepSchema(BaseModel):
+    """Schema for a registered agent step."""
+
+    type: str = Field(
+        ...,
+        min_length=1,
+        description="Step type for this schema (e.g., 'tool', 'llm')",
+    )
+    name: str = Field(..., description="Unique name for the step", min_length=1)
+    description: str | None = Field(
+        None, description="Optional description of the step"
+    )
+    input_schema: dict[str, Any] | None = Field(
+        default=None, description="JSON schema describing step input"
+    )
+    output_schema: dict[str, Any] | None = Field(
+        default=None, description="JSON schema describing step output"
+    )
+    metadata: dict[str, Any] | None = Field(
+        default=None, description="Additional metadata for the step"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "type": "tool",
+                    "name": "search_knowledge_base",
+                    "description": "Search the internal knowledge base",
+                    "input_schema": {
+                        "query": {"type": "string", "description": "Search query"}
