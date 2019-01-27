@@ -63,3 +63,36 @@ def parse_evaluator_ref_full(evaluator_ref: str) -> ParsedEvaluatorRef:
         # Agent-scoped: "my-agent:pii-detector"
         agent, local_name = evaluator_ref.split(":", 1)
         return ParsedEvaluatorRef(
+            type="agent",
+            name=evaluator_ref,
+            namespace=agent,
+            local_name=local_name,
+        )
+    elif "." in evaluator_ref:
+        # External: "galileo.luna"
+        provider, local_name = evaluator_ref.split(".", 1)
+        return ParsedEvaluatorRef(
+            type="external",
+            name=evaluator_ref,
+            namespace=provider,
+            local_name=local_name,
+        )
+    else:
+        # Built-in: "regex"
+        return ParsedEvaluatorRef(
+            type="builtin",
+            name=evaluator_ref,
+            namespace=None,
+            local_name=evaluator_ref,
+        )
+
+
+def is_agent_scoped(evaluator_ref: str) -> bool:
+    """Check if an evaluator reference is agent-scoped.
+
+    Agent-scoped evaluators use the "agent:name" format and reference
+    custom implementations deployed with a specific agent.
+
+    Args:
+        evaluator_ref: Evaluator reference string
+
