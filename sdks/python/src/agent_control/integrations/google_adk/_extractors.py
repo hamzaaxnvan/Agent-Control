@@ -107,39 +107,3 @@ def resolve_agent_name(callback_context: Any) -> str:
     """Resolve the currently executing ADK agent name."""
 
     callback_agent = getattr(callback_context, "agent", None)
-    agent_name = getattr(callback_agent, "name", None)
-    if isinstance(agent_name, str) and agent_name:
-        return agent_name
-
-    fallback = getattr(callback_context, "agent_name", None)
-    if isinstance(fallback, str) and fallback:
-        return fallback
-
-    return "root_agent"
-
-
-def resolve_tool_name(tool: Any) -> str:
-    """Resolve an ADK tool name."""
-
-    tool_name = getattr(tool, "name", None)
-    if isinstance(tool_name, str) and tool_name:
-        return tool_name
-    class_name = getattr(tool.__class__, "__name__", None)
-    if isinstance(class_name, str) and class_name:
-        return class_name
-    return "tool"
-
-
-def resolve_tool_agent_name(tool_context: Any) -> str | None:
-    """Resolve the currently executing ADK agent name for a tool callback."""
-
-    callback_context = getattr(tool_context, "callback_context", None)
-    if callback_context is not None:
-        agent_name = resolve_agent_name(callback_context)
-        if agent_name:
-            return agent_name
-
-    fallback = getattr(tool_context, "agent_name", None)
-    if isinstance(fallback, str) and fallback:
-        return fallback
-
