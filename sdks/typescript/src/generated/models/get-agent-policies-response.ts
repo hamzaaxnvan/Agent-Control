@@ -14,3 +14,12 @@ export type GetAgentPoliciesResponse = {
    * IDs of policies associated with the agent
    */
   policyIds?: Array<number> | undefined;
+};
+
+/** @internal */
+export const GetAgentPoliciesResponse$inboundSchema: z.ZodMiniType<
+  GetAgentPoliciesResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    policy_ids: types.optional(z.array(types.number())),
