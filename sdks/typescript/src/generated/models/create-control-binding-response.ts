@@ -7,21 +7,3 @@ import { remap as remap$ } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
-import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-/**
- * Response from creating a control binding.
- */
-export type CreateControlBindingResponse = {
-  /**
-   * Identifier of the created binding.
-   */
-  bindingId: number;
-};
-
-/** @internal */
-export const CreateControlBindingResponse$inboundSchema: z.ZodMiniType<
-  CreateControlBindingResponse,
-  unknown
-> = z.pipe(
-  z.object({
