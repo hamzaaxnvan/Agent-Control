@@ -25,30 +25,3 @@ from agent_control import control
 
 @control()
 async def reply_with_potentially_unsafe_output(message: str) -> str:
-    # Input asks for contact info; simulate a model leaking PII (email)
-    # which should be blocked by a POST (output) control.
-    if "john" in message.lower() and "email" in message.lower():
-        return "John Smith's email is jsmith@gmail.com."
-    return "All good. Nothing sensitive here."
-
-
-async def main() -> int:
-    parser = argparse.ArgumentParser(description="Cisco AI Defense POST-check example")
-    parser.add_argument("--agent-name", default="ai-defense-demo", help="Agent name")
-    args = parser.parse_args()
-
-    url = os.getenv("AGENT_CONTROL_URL", "http://localhost:8000")
-    api_key = os.getenv("AGENT_CONTROL_API_KEY", "")
-    if not api_key:
-        print("Error: Missing AGENT_CONTROL_API_KEY")
-        return 2
-
-    try:
-        agent_control.init(
-            agent_name=args.agent_name,
-            server_url=url,
-            api_key=api_key,
-        )
-    except httpx.HTTPStatusError as e:
-        # Allow already-registered agent IDs to proceed (idempotent runs)
-        status = getattr(e.response, "status_code", None)
