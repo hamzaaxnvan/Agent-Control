@@ -12,17 +12,3 @@ from secure_research_crew.tools.write_report import write_report
 class SecureResearchCrew:
     """Multi-agent research crew with per-agent Agent Control policies."""
 
-    agents_config = "config/agents.yaml"
-    tasks_config = "config/tasks.yaml"
-
-    @agent
-    def researcher(self) -> Agent:
-        return Agent(
-            config=self.agents_config["researcher"],  # type: ignore[index]
-            tools=[query_database],
-            verbose=True,
-        )
-
-    @agent
-    def analyst(self) -> Agent:
-        return Agent(

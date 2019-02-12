@@ -14,20 +14,3 @@ export type DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest$Outbound =
   {
     agent_name: string;
   };
-
-/** @internal */
-export const DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest$outboundSchema:
-  z.ZodMiniType<
-    DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest$Outbound,
-    DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest
-  > = z.pipe(
-    z.object({
-      agentName: z.string(),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        agentName: "agent_name",
-      });
-    }),
-  );
-

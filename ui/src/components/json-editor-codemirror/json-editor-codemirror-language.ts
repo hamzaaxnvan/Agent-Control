@@ -8,3 +8,7 @@ export {
   caretAfterPrettyJsonReplace,
   computeAutoEdit,
   extractEvaluatorNames,
+  fixJsonCommas,
+  getCodeMirrorCompletionItems,
+  normalizeOnBlur,
+  setInlineServerValidationErrorsEffect,
