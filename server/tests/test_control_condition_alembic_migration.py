@@ -152,3 +152,80 @@ def test_upgrade_noops_when_no_legacy_rows_exist(
 ) -> None:
     upgrade_to(PRE_MIGRATION_REVISION)
     _insert_control(temp_engine, name="canonical", data=deepcopy(VALID_CONTROL_PAYLOAD))
+    _insert_control(temp_engine, name="draft", data={})
+
+    before = _fetch_controls(temp_engine)
+
+    upgrade_to(MIGRATION_REVISION)
+
+    assert _fetch_controls(temp_engine) == before
+    assert _current_revision(temp_engine) == MIGRATION_REVISION
+
+
+def test_upgrade_rewrites_valid_legacy_rows(
+    upgrade_to,
+    temp_engine: Engine,
+) -> None:
+    upgrade_to(PRE_MIGRATION_REVISION)
+    legacy_payload = _legacy_control_payload()
+    control_id = _insert_control(temp_engine, name="legacy", data=legacy_payload)
+
+    upgrade_to(MIGRATION_REVISION)
+
+    migrated = _fetch_control_data(temp_engine, control_id)
+    assert "selector" not in migrated
+    assert "evaluator" not in migrated
+    assert migrated["condition"]["selector"] == legacy_payload["selector"]
+    assert migrated["condition"]["evaluator"] == legacy_payload["evaluator"]
+    for field in ("description", "enabled", "execution", "scope", "action"):
+        assert migrated[field] == legacy_payload[field]
+
+
+def test_upgrade_rewrites_multiple_valid_legacy_rows(
+    upgrade_to,
+    temp_engine: Engine,
+) -> None:
+    upgrade_to(PRE_MIGRATION_REVISION)
+    first_legacy = _legacy_control_payload()
+    second_legacy = _legacy_control_payload()
+    second_legacy["description"] = "second legacy control"
+    second_legacy["scope"] = {"step_types": ["tool"], "stages": ["post"]}
+
+    first_id = _insert_control(temp_engine, name="legacy-one", data=first_legacy)
+    second_id = _insert_control(temp_engine, name="legacy-two", data=second_legacy)
+
+    upgrade_to(MIGRATION_REVISION)
+
+    first_migrated = _fetch_control_data(temp_engine, first_id)
+    second_migrated = _fetch_control_data(temp_engine, second_id)
+
+    for migrated, original in (
+        (first_migrated, first_legacy),
+        (second_migrated, second_legacy),
+    ):
+        assert "selector" not in migrated
+        assert "evaluator" not in migrated
+        assert migrated["condition"]["selector"] == original["selector"]
+        assert migrated["condition"]["evaluator"] == original["evaluator"]
+        for field in ("description", "enabled", "execution", "scope", "action"):
+            assert migrated[field] == original[field]
+
+
+def test_upgrade_preserves_empty_draft_rows(
+    upgrade_to,
+    temp_engine: Engine,
+) -> None:
+    upgrade_to(PRE_MIGRATION_REVISION)
+    control_id = _insert_control(temp_engine, name="draft", data={})
+
+    upgrade_to(MIGRATION_REVISION)
+
+    assert _fetch_control_data(temp_engine, control_id) == {}
+
+
+def test_upgrade_preserves_existing_composite_condition_trees(
+    upgrade_to,
+    temp_engine: Engine,
+) -> None:
+    upgrade_to(PRE_MIGRATION_REVISION)
+    composite_payload = _composite_control_payload()
