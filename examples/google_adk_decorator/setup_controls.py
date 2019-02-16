@@ -25,30 +25,3 @@ def _control_specs(execution: str) -> list[tuple[str, dict[str, Any]]]:
                 "enabled": True,
                 "execution": execution,
                 "scope": {
-                    "step_types": ["tool"],
-                    "step_names": ["get_current_time", "get_weather"],
-                    "stages": ["pre"],
-                },
-                "condition": {
-                    "selector": {"path": "input.city"},
-                    "evaluator": {
-                        "name": "list",
-                        "config": {
-                            "values": ["Pyongyang", "Tehran", "Damascus"],
-                            "logic": "any",
-                            "match_on": "match",
-                            "match_mode": "exact",
-                            "case_sensitive": False,
-                        },
-                    },
-                },
-                "action": {"decision": "deny"},
-            },
-        ),
-        (
-            "adk-decorator-block-internal-contact-output",
-            {
-                "description": "Block internal contact details in decorated tool output",
-                "enabled": True,
-                "execution": execution,
-                "scope": {
