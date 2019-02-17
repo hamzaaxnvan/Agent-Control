@@ -6,3 +6,7 @@
     {
       "src": "/ac-icon.jpg",
       "sizes": "192x192",
+      "type": "image/jpeg"
+    }
+  ],
+  "theme_color": "#644DF9",

@@ -39,3 +39,44 @@ class BudgetSnapshot:
     utilization: float
     exceeded: bool
     limit_unit: str = "usd_cents"
+
+
+def round_spent(value: float) -> int:
+    """Truncate accumulated float spend to integer cents for display.
+
+    Uses floor truncation (not rounding) so that the displayed spent
+    value never exceeds the actual float. This prevents a contradictory
+    snapshot where spent >= limit but exceeded is False.
+    """
+    if not math.isfinite(value) or value < 0:
+        return 0
+    return int(value)
+
+
+class BudgetStore(ABC):
+    """Abstract base class for budget storage backends.
+
+    The store owns bucket state and derives period keys internally from
+    window_seconds + current time. Callers pass the rules to evaluate for
+    each record operation along with usage data: scope dict, input_tokens,
+    output_tokens, cost.
+
+    Negative `cost` values are permitted and reduce accumulated spend (refund
+    semantics). `round_spent()` floors the displayed snapshot spend to 0 for
+    negative accumulators, but the internal float accumulator may go negative
+    so that a subsequent positive charge cancels correctly. Validation of
+    cost >= 0 is NOT performed at the store boundary; it is the caller's
+    responsibility if strict positive accounting is required.
+
+    Implementations should be safe to call from async contexts.
+    InMemoryBudgetStore wraps a sync critical section under threading.Lock
+    because the work is CPU-bound and brief; distributed backends
+    (Redis/Postgres) should use native async I/O.
+
+    Subclasses must override `record_and_check` with a coroutine function
+    (`async def`). A sync override is rejected at class creation time rather
+    than failing silently at the first `await` site in production.
+    """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
