@@ -6,11 +6,3 @@ import * as z from "zod/v4-mini";
 import { remap as remap$ } from "../../lib/primitives.js";
 
 export type DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest = {
-  agentName: string;
-};
-
-/** @internal */
-export type DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest$Outbound =
-  {
-    agent_name: string;
-  };
