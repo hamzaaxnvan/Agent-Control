@@ -5,10 +5,3 @@ export interface EvaluationResult {
   reason?: string;
 }
 
-export class ControlViolationError extends Error {
-  readonly controlName: string;
-  readonly controlId: string;
-  readonly action: ControlAction;
-  readonly evaluationResult: EvaluationResult;
-
-  constructor(params: {
