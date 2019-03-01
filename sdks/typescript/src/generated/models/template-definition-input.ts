@@ -19,3 +19,25 @@ export type TemplateDefinitionInput = {
    */
   definitionTemplate: any;
   /**
+   * Metadata describing the template itself
+   */
+  description?: string | null | undefined;
+  /**
+   * Typed parameter definitions keyed by parameter name
+   */
+  parameters?: { [k: string]: TemplateParameterDefinition } | undefined;
+};
+
+/** @internal */
+export type TemplateDefinitionInput$Outbound = {
+  definition_template: any;
+  description?: string | null | undefined;
+  parameters?:
+    | { [k: string]: TemplateParameterDefinition$Outbound }
+    | undefined;
+};
+
+/** @internal */
+export const TemplateDefinitionInput$outboundSchema: z.ZodMiniType<
+  TemplateDefinitionInput$Outbound,
+  TemplateDefinitionInput

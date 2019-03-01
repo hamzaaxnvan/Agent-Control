@@ -7,3 +7,13 @@ requires-python = ">=3.12"
 dependencies = [
     "agent-control-engine",
     "agent-control-evaluators",
+    "agent-control-models",
+    "agent-control-telemetry",
+    "agent-control-sdk",
+    "agent-control-evaluator-galileo",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+

@@ -27,18 +27,3 @@ export type GetControlStatsApiV1ObservabilityStatsControlsControlIdGetRequest =
     includeTimeseries?: boolean | undefined;
   };
 
-/** @internal */
-export const QueryParamTimeRange$outboundSchema: z.ZodMiniEnum<
-  typeof QueryParamTimeRange
-> = z.enum(QueryParamTimeRange);
-
-/** @internal */
-export type GetControlStatsApiV1ObservabilityStatsControlsControlIdGetRequest$Outbound =
-  {
-    control_id: number;
-    agent_name: string;
-    time_range: string;
-    include_timeseries: boolean;
-  };
-
-/** @internal */
