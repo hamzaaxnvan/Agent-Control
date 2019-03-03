@@ -26,13 +26,3 @@ export const DefenseClawOpaPolicyForm = ({
     <Select
       label="Block at"
       data={severityOptions}
-      allowDeselect={false}
-      required
-      {...form.getInputProps('block_at')}
-    />
-    <Select
-      label="Alert at"
-      data={severityOptions}
-      allowDeselect={false}
-      required
-      {...form.getInputProps('alert_at')}

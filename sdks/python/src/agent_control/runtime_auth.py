@@ -162,3 +162,85 @@ class RuntimeTokenCache:
             raise ValueError("ttl_seconds must be >= 0.")
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         with self._lock:
+            self._prune_expired_unavailable_markers_locked()
+            if globally:
+                if server_url is None:
+                    self._jwt_unavailable_until = expires_at
+                    self._tokens.clear()
+                    self._jwt_unavailable_servers.clear()
+                    self._jwt_unavailable_targets.clear()
+                    return
+
+                if (
+                    server_url not in self._jwt_unavailable_servers
+                    and len(self._jwt_unavailable_servers) >= self._max_entries
+                ):
+                    self._jwt_unavailable_servers.pop(next(iter(self._jwt_unavailable_servers)))
+                self._jwt_unavailable_servers[server_url] = expires_at
+                self._drop_server_entries_locked(server_url)
+                return
+            if server_url is not None and target_type is not None and target_id is not None:
+                key = (server_url, cache_identity, target_type, target_id)
+                if (
+                    key not in self._jwt_unavailable_targets
+                    and len(self._jwt_unavailable_targets) >= self._max_entries
+                ):
+                    self._jwt_unavailable_targets.pop(next(iter(self._jwt_unavailable_targets)))
+                self._jwt_unavailable_targets[key] = expires_at
+                self._tokens.pop(key, None)
+
+    def is_jwt_unavailable(
+        self,
+        server_url: str,
+        target_type: str,
+        target_id: str,
+        *,
+        cache_identity: str = "",
+    ) -> bool:
+        """Return whether JWT exchange is known unavailable for the target."""
+        key = (server_url, cache_identity, target_type, target_id)
+        with self._lock:
+            self._prune_expired_unavailable_markers_locked()
+            if self._jwt_unavailable_until is not None:
+                return True
+            if server_url in self._jwt_unavailable_servers:
+                return True
+            expires_at = self._jwt_unavailable_targets.get(key)
+            return expires_at is not None
+
+    def clear(self) -> None:
+        """Clear every cached token and fallback marker."""
+        with self._lock:
+            self._tokens.clear()
+            self._jwt_unavailable_until = None
+            self._jwt_unavailable_servers.clear()
+            self._jwt_unavailable_targets.clear()
+
+    def exchange_lock(
+        self,
+        server_url: str,
+        target_type: str,
+        target_id: str,
+        *,
+        cache_identity: str = "",
+    ) -> asyncio.Lock:
+        """Return the async exchange lock for one server and target."""
+        key = (server_url, cache_identity, target_type, target_id, asyncio.get_running_loop())
+        with self._lock:
+            lock = self._exchange_locks.get(key)
+            if lock is None:
+                if len(self._exchange_locks) >= self._max_entries:
+                    self._evict_idle_exchange_lock_locked()
+                lock = asyncio.Lock()
+                self._exchange_locks[key] = lock
+            else:
+                # Preserve insertion order as a simple LRU for idle-lock eviction.
+                self._exchange_locks.pop(key)
+                self._exchange_locks[key] = lock
+            return lock
+
+    def _drop_server_entries_locked(self, server_url: str) -> None:
+        for key in list(self._tokens):
+            if key[0] == server_url:
+                self._tokens.pop(key, None)
+        for key in list(self._jwt_unavailable_targets):
