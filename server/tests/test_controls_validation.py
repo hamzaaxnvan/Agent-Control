@@ -236,3 +236,122 @@ def test_get_control_data_rejects_stored_blank_nested_evaluator_name(client: Tes
         err.get("field") == "condition.or[1].evaluator.name"
         for err in body.get("errors", [])
     )
+    assert any(
+        "empty or whitespace-only" in err.get("message", "").lower()
+        for err in body.get("errors", [])
+    )
+
+
+def test_list_agent_controls_rejects_stored_blank_nested_evaluator_name(client: TestClient):
+    """Agent control listing rejects persisted blank evaluator names with the same validator."""
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    init_resp = client.post(
+        "/api/v1/agents/initAgent",
+        json={
+            "agent": {"agent_name": agent_name},
+            "steps": [],
+            "evaluators": [],
+        },
+    )
+    assert init_resp.status_code == 200
+
+    control_id = create_control(client)
+    assoc_resp = client.post(f"/api/v1/agents/{agent_name}/controls/{control_id}")
+    assert assoc_resp.status_code == 200
+
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["condition"] = {
+        "or": [
+            deepcopy(VALID_CONTROL_PAYLOAD["condition"]),
+            {
+                "selector": {"path": "input"},
+                "evaluator": {"name": "", "config": {"pattern": "x"}},
+            },
+        ]
+    }
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE controls SET data = CAST(:data AS JSONB) WHERE id = :id"),
+            {"data": json.dumps(payload), "id": control_id},
+        )
+
+    resp = client.get(f"/api/v1/agents/{agent_name}/controls")
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_code"] == "CORRUPTED_DATA"
+    assert any(
+        err.get("field") == "data.condition.or[1].evaluator.name"
+        for err in body.get("errors", [])
+    )
+    assert any(
+        "empty or whitespace-only" in err.get("message", "").lower()
+        for err in body.get("errors", [])
+    )
+
+
+def test_validation_none_path_defaults_to_star(client: TestClient):
+    """Test that None/missing path defaults to '*'."""
+    # Given: a control and payload without path in selector (None)
+    control_id = create_control(client)
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["condition"]["selector"] = {}  # No path specified
+
+    # When: setting control data
+    resp = client.put(f"/api/v1/controls/{control_id}/data", json={"data": payload})
+
+    # Then: succeeds
+    assert resp.status_code == 200, resp.text
+
+    # When: reading back
+    get_resp = client.get(f"/api/v1/controls/{control_id}/data")
+
+    # Then: reading back the control succeeds
+    assert get_resp.status_code == 200
+
+    # Then: path should default to '*'
+    data = get_resp.json()["data"]
+    assert data["condition"]["selector"]["path"] == "*"
+
+
+def test_get_control_data_returns_typed_response(client: TestClient):
+    """Test that GET control data returns a typed ControlDefinition."""
+    # Given: a control shell
+    control_id = create_control(client)
+
+    # When: setting valid control data
+    resp_put = client.put(
+        f"/api/v1/controls/{control_id}/data", json={"data": VALID_CONTROL_PAYLOAD}
+    )
+
+    # Then: the control data is stored successfully
+    assert resp_put.status_code == 200
+
+    # When: getting control data
+    resp_get = client.get(f"/api/v1/controls/{control_id}/data")
+
+    # Then: response should be typed with all expected fields
+    assert resp_get.status_code == 200
+    data = resp_get.json()["data"]
+
+    # Then: the response includes required ControlDefinition fields
+    assert "condition" in data
+    assert "action" in data
+    assert "execution" in data
+    assert "scope" in data
+
+
+def test_validation_empty_step_names_rejected(client: TestClient):
+    """Test that empty step_names list is rejected."""
+    # Given: a control and payload with empty step_names list
+    control_id = create_control(client)
+    payload = deepcopy(VALID_CONTROL_PAYLOAD)
+    payload["scope"] = {"step_names": []}
+
+    # When: setting control data
+    resp = client.put(f"/api/v1/controls/{control_id}/data", json={"data": payload})
+
+    # Then: 422 Unprocessable Entity (RFC 7807 format)
+    assert resp.status_code == 422
+
