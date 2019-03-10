@@ -88,3 +88,33 @@ async def test_evaluate_and_enforce_fails_closed_on_errors():
     errored.matches = []
     errored.errors = [_match(action="deny", control_name="bad-control")]
 
+    with patch(
+        "agent_control.integrations._core.agent_control.evaluate_controls",
+        AsyncMock(return_value=errored),
+    ):
+        with pytest.raises(RuntimeError, match="Control evaluation failed"):
+            await _evaluate_and_enforce("test-agent01", "writer")
+
+
+@pytest.mark.asyncio
+async def test_evaluate_and_enforce_raises_deny_first():
+    result = MagicMock(spec=EvaluationResult)
+    result.is_safe = False
+    result.matches = [
+        _match(action="steer", control_name="steer-control", steering_context="Rewrite"),
+        _match(action="deny", control_name="deny-control", message="Nope"),
+    ]
+    result.errors = []
+    result.reason = None
+
+    with patch(
+        "agent_control.integrations._core.agent_control.evaluate_controls",
+        AsyncMock(return_value=result),
+    ):
+        with pytest.raises(ControlViolationError) as exc_info:
+            await _evaluate_and_enforce("test-agent01", "writer")
+
+    assert exc_info.value.control_name == "deny-control"
+
+
+@pytest.mark.asyncio
