@@ -33,38 +33,3 @@ const CT_EVALUATORS: JsonEditorEvaluatorOption[] = [
     label: 'JSON',
     source: 'global',
     configSchema: {
-      type: 'object',
-      properties: {
-        json_schema: { type: 'object', additionalProperties: true },
-      },
-    },
-  },
-];
-
-/** Host for Playwright component tests only (see `tests/ct/json-editor-codemirror.spec.tsx`). */
-export function JsonEditorCodeMirrorCtHost({ mode }: { mode: JsonEditorMode }) {
-  const [jsonText, setJsonText] = useState(() =>
-    mode === 'control' ? DEFAULT_CONTROL_JSON : '{}'
-  );
-  const [jsonError, setJsonError] = useState<string | null>(null);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      setJsonText(mode === 'control' ? DEFAULT_CONTROL_JSON : '{}');
-      setJsonError(null);
-    });
-  }, [mode]);
-
-  const handleJsonChange = useCallback((next: string) => {
-    setJsonText(next);
-  }, []);
-
-  return (
-    <Box data-testid="json-editor-codemirror-ct-host">
-      <Group mb="sm">
-        <Button
-          type="button"
-          variant="subtle"
-          data-testid="ct-toggle-json-error"
-          onClick={() =>
-            setJsonError((prev) =>
