@@ -59,3 +59,65 @@ test.describe('Step Name Input', () => {
     // Toggle off to names mode
     await modal.getByText('Regex', { exact: true }).click();
     await expect(
+      modal.getByPlaceholder('No steps registered via SDK')
+    ).toBeVisible();
+
+    // Toggle back to regex mode – value should still be there
+    await modal.getByText('Regex', { exact: true }).click();
+    await expect(modal.getByPlaceholder('^db_.*')).toHaveValue('^db_.*');
+  });
+
+  test('does not render free-text step name input', async ({ mockedPage }) => {
+    await openEvaluatorForm(mockedPage, 'Regex');
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Create Control' });
+    await expect(
+      modal.getByPlaceholder('No steps registered via SDK')
+    ).toBeVisible();
+    await expect(modal.getByPlaceholder('search_db, fetch_user')).toHaveCount(
+      0
+    );
+  });
+
+  test('toggling Regex off shows names input and hides regex input', async ({
+    mockedPage,
+  }) => {
+    await openEvaluatorForm(mockedPage, 'Regex');
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Create Control' });
+    await modal.getByText('Regex', { exact: true }).click();
+    await expect(modal.getByPlaceholder('^db_.*')).toBeVisible();
+
+    await modal.getByText('Regex', { exact: true }).click();
+
+    await expect(
+      modal.getByPlaceholder('No steps registered via SDK')
+    ).toBeVisible();
+    await expect(modal.getByPlaceholder('^db_.*')).not.toBeVisible();
+  });
+
+  test('with populated steps: select, deselect, and summary rendering', async ({
+    mockedPage,
+  }) => {
+    await mockedPage.unroute('**/api/v1/agents/*');
+    await mockedPage.unroute('**/api/v1/agents/*/controls');
+    await mockRoutes.agent(mockedPage, {
+      agent: { data: mockData.agentWithSteps },
+    });
+
+    await openEvaluatorForm(mockedPage, 'Regex');
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Create Control' });
+    const stepSelect = modal.getByTestId('step-name-select');
+
+    // No placeholder when steps exist; overlay shows "All steps" when none selected
+    await expect(modal.getByText('All steps')).toBeVisible();
+
+    // Open dropdown and select one step
+    await stepSelect.click();
+    await mockedPage.getByText('search_db', { exact: true }).click();
+    await expect(
+      modal.getByRole('paragraph').filter({ hasText: 'search_db' })
+    ).toBeVisible();
+
+    // Select another step – summary shows "first" (ellipsized if long) and "+N" badge

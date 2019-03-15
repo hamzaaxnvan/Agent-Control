@@ -19,10 +19,3 @@ export type SqlFormValues = {
   // Column Presence
   required_columns: string; // Comma-separated
   column_presence_logic: 'any' | 'all';
-  column_context: 'select' | 'where' | '';
-  column_context_scope: 'top_level' | 'all';
-  // Limits
-  require_limit: boolean;
-  max_limit: number | '';
-  max_result_window: number | '';
-  // Options
