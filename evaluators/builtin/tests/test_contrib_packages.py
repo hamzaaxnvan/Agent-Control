@@ -19,3 +19,25 @@ def load_contrib_packages_module() -> ModuleType:
     if module is not None:
         return module
 
+    spec = importlib.util.spec_from_file_location(MODULE_NAME, SCRIPT_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[MODULE_NAME] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_discover_contrib_packages_returns_expected_metadata() -> None:
+    """Test that real contrib packages are discovered with stable metadata."""
+
+    module = load_contrib_packages_module()
+
+    packages = module.discover_contrib_packages()
+
+    assert [(package.name, package.package, package.extra) for package in packages] == [
+        ("budget", "agent-control-evaluator-budget", "budget"),
+        ("cisco", "agent-control-evaluator-cisco", "cisco"),
+        ("defenseclaw", "agent-control-evaluator-defenseclaw", "defenseclaw"),
+        ("galileo", "agent-control-evaluator-galileo", "galileo"),
