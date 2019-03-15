@@ -12,18 +12,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 /**
  * Response body for the /login endpoint.
  */
-export type LoginResponse = {
-  authenticated: boolean;
-  isAdmin: boolean;
-};
-
-/** @internal */
-export const LoginResponse$inboundSchema: z.ZodMiniType<
-  LoginResponse,
-  unknown
-> = z.pipe(
-  z.object({
-    authenticated: types.boolean(),
-    is_admin: types.boolean(),
-  }),
-  z.transform((v) => {

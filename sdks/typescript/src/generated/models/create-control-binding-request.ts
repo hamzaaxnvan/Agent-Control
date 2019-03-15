@@ -14,36 +14,3 @@ export type CreateControlBindingRequest = {
    */
   controlId: number;
   /**
-   * Whether the binding is active. Disabled bindings are preserved but excluded from the effective control set at runtime.
-   */
-  enabled?: boolean | undefined;
-  /**
-   * Opaque external identifier within the target_type.
-   */
-  targetId: string;
-  /**
-   * Opaque attachment kind (caller-defined; e.g. 'environment', 'session').
-   */
-  targetType: string;
-};
-
-/** @internal */
-export type CreateControlBindingRequest$Outbound = {
-  control_id: number;
-  enabled: boolean;
-  target_id: string;
-  target_type: string;
-};
-
-/** @internal */
-export const CreateControlBindingRequest$outboundSchema: z.ZodMiniType<
-  CreateControlBindingRequest$Outbound,
-  CreateControlBindingRequest
-> = z.pipe(
-  z.object({
-    controlId: z.int(),
-    enabled: z._default(z.boolean(), true),
-    targetId: z.string(),
-    targetType: z.string(),
-  }),
-  z.transform((v) => {
