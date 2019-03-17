@@ -22,28 +22,3 @@ export class HTTPClientError extends Error {
       this.cause = opts?.cause;
     }
   }
-}
-
-/**
- * An error to capture unrecognised or unexpected errors when making HTTP calls.
- */
-export class UnexpectedClientError extends HTTPClientError {
-  override name = "UnexpectedClientError";
-}
-
-/**
- * An error that is raised when any inputs used to create a request are invalid.
- */
-export class InvalidRequestError extends HTTPClientError {
-  override name = "InvalidRequestError";
-}
-
-/**
- * An error that is raised when a HTTP request was aborted by the client error.
- */
-export class RequestAbortedError extends HTTPClientError {
-  override readonly name = "RequestAbortedError";
-}
-
-/**
- * An error that is raised when a HTTP request timed out due to an AbortSignal
