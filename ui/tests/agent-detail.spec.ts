@@ -671,3 +671,340 @@ test.describe('Agent Detail Page', () => {
               },
             },
           ],
+        },
+        action: { decision: 'deny' },
+        tags: ['risk'],
+      },
+    };
+    const compositeControls: AgentControlsResponse = {
+      controls: [compositeControl],
+    };
+    const updatedCondition = {
+      or: [
+        {
+          selector: { path: 'context.risk_level' },
+          evaluator: {
+            name: 'list',
+            config: {
+              values: ['critical'],
+              logic: 'any',
+              match_on: 'match',
+            },
+          },
+        },
+        {
+          selector: { path: 'output' },
+          evaluator: {
+            name: 'regex',
+            config: { pattern: 'urgent' },
+          },
+        },
+      ],
+    };
+
+    let updateRequestBody: Record<string, unknown> | null = null;
+
+    await mockRoutes.agent(mockedPage, {
+      controls: { data: compositeControls },
+    });
+    await mockedPage.route(
+      '**/api/v1/controls/77/data',
+      async (route, request) => {
+        if (request.method() === 'GET') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ data: compositeControl.control }),
+          });
+          return;
+        }
+
+        if (request.method() === 'PUT') {
+          updateRequestBody = (await request.postDataJSON()) as Record<
+            string,
+            unknown
+          >;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true }),
+          });
+          return;
+        }
+
+        await route.continue();
+      }
+    );
+
+    await mockedPage.goto(
+      getAgentControlsUrl({ modal: 'edit', controlId: 77 })
+    );
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Edit Control' });
+    await expect(modal).toBeVisible();
+    await modal.getByText('Full JSON', { exact: true }).click();
+    await expect(modal.getByTestId('control-json-textarea')).toBeVisible();
+
+    await setJsonEditorValue(
+      mockedPage,
+      'control-json-textarea',
+      JSON.stringify(
+        {
+          ...compositeControl.control,
+          description: 'Updated in full JSON mode',
+          condition: updatedCondition,
+        },
+        null,
+        2
+      )
+    );
+
+    await modal.getByRole('button', { name: /Save/i }).click();
+    await mockedPage.getByRole('button', { name: /Confirm/i }).click({
+      force: true,
+    });
+
+    await expect.poll(() => updateRequestBody).not.toBeNull();
+
+    expect(updateRequestBody).toMatchObject({
+      data: {
+        description: 'Updated in full JSON mode',
+        condition: updatedCondition,
+      },
+    });
+  });
+
+  test('full JSON Monaco formatting preserves commas inside string values', async ({
+    mockedPage,
+  }) => {
+    const control = mockData.controls.controls[0]!;
+
+    await mockedPage.goto(
+      getAgentControlsUrl({ modal: 'edit', controlId: String(control.id) })
+    );
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Edit Control' });
+    await expect(modal).toBeVisible();
+    await modal.getByText('Full JSON', { exact: true }).click();
+
+    await setJsonEditorValue(
+      mockedPage,
+      'control-json-textarea',
+      JSON.stringify(
+        {
+          ...control.control,
+          condition: {
+            selector: { path: 'output' },
+            evaluator: {
+              name: 'regex',
+              config: { pattern: 'a,}' },
+            },
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    await modal.getByRole('button', { name: 'Format document' }).click();
+
+    const after = JSON.parse(
+      await getJsonEditorValue(mockedPage, 'control-json-textarea')
+    ) as {
+      condition: { evaluator: { config: { pattern: string } } };
+    };
+    expect(after.condition.evaluator.config.pattern).toBe('a,}');
+  });
+
+  test('full JSON editor always uses Monaco', async ({ mockedPage }) => {
+    const control = mockData.controls.controls[0]!;
+
+    await mockedPage.addInitScript(() => {
+      window.localStorage.setItem('editControl.jsonEditorEngine', 'codemirror');
+    });
+
+    await mockedPage.goto(
+      getAgentControlsUrl({ modal: 'edit', controlId: String(control.id) })
+    );
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Edit Control' });
+    await expect(modal).toBeVisible();
+    await modal.getByText('Full JSON', { exact: true }).click();
+
+    await expect(modal.getByText('CodeMirror', { exact: true })).toHaveCount(0);
+
+    const editor = modal.getByTestId('control-json-textarea');
+    await expect(editor).toBeVisible();
+    await mockedPage.waitForFunction((selector) => {
+      const element = document.querySelector(`[data-testid="${selector}"]`) as {
+        __getJsonEditorLanguageId?: () => string | null;
+        __isJsonEditorReady?: () => boolean;
+      } | null;
+
+      return (
+        typeof element?.__getJsonEditorLanguageId === 'function' &&
+        element.__isJsonEditorReady?.() === true
+      );
+    }, 'control-json-textarea');
+
+    const languageId = await editor.evaluate((element) => {
+      const target = element as {
+        __getJsonEditorLanguageId?: () => string | null;
+      };
+
+      return target.__getJsonEditorLanguageId?.() ?? null;
+    });
+
+    expect(languageId).toBe('json');
+  });
+
+  test('full JSON editor suggests recursive condition keys', async ({
+    mockedPage,
+  }) => {
+    const compositeControl: Control = {
+      id: 78,
+      name: 'Condition Autocomplete',
+      control: {
+        description: 'Autocomplete condition editing',
+        enabled: true,
+        execution: 'server',
+        scope: { step_types: ['llm'], stages: ['post'] },
+        condition: {
+          selector: { path: 'output' },
+          evaluator: {
+            name: 'regex',
+            config: { pattern: '.*' },
+          },
+        },
+        action: { decision: 'deny' },
+        tags: [],
+      },
+    };
+
+    await mockRoutes.agent(mockedPage, {
+      controls: { data: { controls: [compositeControl] } },
+      agent: { data: mockData.agentWithSteps },
+    });
+    await mockedPage.route('**/api/v1/controls/78/data', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: compositeControl.control }),
+      });
+    });
+
+    await mockedPage.goto(
+      getAgentControlsUrl({ modal: 'edit', controlId: 78 })
+    );
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Edit Control' });
+    await expect(modal).toBeVisible();
+    await modal.getByText('Full JSON', { exact: true }).click();
+
+    await setJsonEditorValue(
+      mockedPage,
+      'control-json-textarea',
+      `{
+  "description": "Autocomplete condition editing",
+  "enabled": true,
+  "execution": "server",
+  "condition": {
+    
+  },
+  "action": {
+    "decision": "deny"
+  },
+  "tags": []
+}`
+    );
+
+    const suggestions = await getJsonEditorSuggestions(
+      mockedPage,
+      'control-json-textarea',
+      6,
+      5
+    );
+    const labels = suggestions.map((item) => item.label);
+
+    expect(labels).toEqual(
+      expect.arrayContaining(['selector', 'evaluator', 'and', 'or', 'not'])
+    );
+  });
+
+  test('full JSON editor suggests condition keys while replacing a partial key', async ({
+    mockedPage,
+  }) => {
+    const compositeControl: Control = {
+      id: 79,
+      name: 'Partial Condition Key Autocomplete',
+      control: {
+        description: 'Autocomplete partial condition keys',
+        enabled: true,
+        execution: 'server',
+        condition: {
+          selector: { path: 'output' },
+          evaluator: {
+            name: 'regex',
+            config: { pattern: '.*' },
+          },
+        },
+        action: { decision: 'deny' },
+        tags: [],
+      },
+    };
+
+    await mockRoutes.agent(mockedPage, {
+      controls: { data: { controls: [compositeControl] } },
+      agent: { data: mockData.agentWithSteps },
+    });
+    await mockedPage.route('**/api/v1/controls/79/data', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: compositeControl.control }),
+      });
+    });
+
+    await mockedPage.goto(
+      getAgentControlsUrl({ modal: 'edit', controlId: 79 })
+    );
+
+    const modal = mockedPage.getByRole('dialog', { name: 'Edit Control' });
+    await expect(modal).toBeVisible();
+    await modal.getByText('Full JSON', { exact: true }).click();
+
+    await setJsonEditorValue(
+      mockedPage,
+      'control-json-textarea',
+      `{
+  "description": "Autocomplete partial condition keys",
+  "enabled": true,
+  "execution": "server",
+  "condition": {
+    "s": {}
+  },
+  "action": {
+    "decision": "deny"
+  },
+  "tags": []
+}`
+    );
+
+    const suggestions = await getJsonEditorSuggestions(
+      mockedPage,
+      'control-json-textarea',
+      6,
+      6
+    );
+    const labels = suggestions.map((item) => item.label);
+
+    expect(labels).toEqual(
+      expect.arrayContaining(['selector', 'evaluator', 'and', 'or', 'not'])
+    );
+  });
+
+  test('full JSON editor suggests condition keys for incomplete property keys', async ({
+    mockedPage,
+  }) => {
+    const compositeControl: Control = {
+      id: 81,
