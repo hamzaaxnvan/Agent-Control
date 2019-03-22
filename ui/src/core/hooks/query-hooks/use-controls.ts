@@ -14,3 +14,8 @@ export type UseControlsParams = {
 };
 
 export function useControls(params?: UseControlsParams) {
+  return useQuery({
+    queryKey: ['controls', 'list', params],
+    queryFn: async () => {
+      const { data, error } = await api.controls.list(params);
+      if (error) {

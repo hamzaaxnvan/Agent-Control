@@ -35,3 +35,16 @@ async def test_match_mode_exact_is_the_default():
 
 @pytest.mark.asyncio
 async def test_data_none_returns_empty_input_message():
+    """None input is treated as empty and the control is ignored."""
+    config = ListEvaluatorConfig(values=["x"])
+    evaluator = ListEvaluator(config)
+
+    result = await evaluator.evaluate(None)
+
+    assert result.matched is False
+    assert result.message == "Empty input - control ignored"
+    assert result.metadata["input_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_message_truncates_match_list_at_five():
