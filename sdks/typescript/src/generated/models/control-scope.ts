@@ -24,3 +24,29 @@ export type ControlScope = {
   /**
    * Evaluation stages this control applies to
    */
+  stages?: Array<Stages> | null | undefined;
+  /**
+   * RE2 pattern matched with search() against step name
+   */
+  stepNameRegex?: string | null | undefined;
+  /**
+   * Exact step names this control applies to
+   */
+  stepNames?: Array<string> | null | undefined;
+  /**
+   * Step types this control applies to (omit to apply to all types). Built-in types are 'tool' and 'llm'.
+   */
+  stepTypes?: Array<string> | null | undefined;
+};
+
+/** @internal */
+export const Stages$inboundSchema: z.ZodMiniType<Stages, unknown> = openEnums
+  .inboundSchema(Stages);
+/** @internal */
+export const Stages$outboundSchema: z.ZodMiniType<string, Stages> = openEnums
+  .outboundSchema(Stages);
+
+/** @internal */
+export const ControlScope$inboundSchema: z.ZodMiniType<ControlScope, unknown> =
+  z.pipe(
+    z.object({
