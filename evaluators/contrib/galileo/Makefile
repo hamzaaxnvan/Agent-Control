@@ -19,3 +19,10 @@ test:
 	uv run --extra dev --with pytest --with pytest-asyncio --with pytest-cov --package $(PACKAGE) pytest tests --cov=src --cov-report=xml:../../../coverage-evaluators-galileo.xml -q
 
 lint:
+	uv run --with ruff --package $(PACKAGE) ruff check --config ../../../pyproject.toml src/
+
+lint-fix:
+	uv run --with ruff --package $(PACKAGE) ruff check --config ../../../pyproject.toml --fix src/
+
+typecheck:
+	uv run --with mypy --package $(PACKAGE) mypy --config-file ../../../pyproject.toml src/

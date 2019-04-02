@@ -10,16 +10,3 @@ export type ValidateControlDataVariables = {
 };
 
 /**
- * Mutation hook to validate a control definition without saving it.
- * Pass signal to cancel the previous request when starting a new one.
- */
-export function useValidateControlData() {
-  return useMutation({
-    mutationFn: async ({
-      definition,
-      signal,
-    }: ValidateControlDataVariables) => {
-      const { data, error, response } = await api.controls.validateData({
-        data: definition,
-        signal,
-      });
