@@ -25,3 +25,12 @@ export function inboundSchemaInt<T extends Record<string, number | string>>(
   enumObj: T,
 ): z.ZodMiniType<OpenEnum<T>, unknown> {
   // For numeric enums, Object.values returns both numbers and string keys
+  const options = Object.values(enumObj).filter(v => typeof v === "number");
+  return z.union([
+    ...options.map(x => z.literal(x)),
+    z.pipe(z.int(), z.transform(x => unrecognized(x))),
+  ] as any);
+}
+
+export function outboundSchema<T extends Record<string, string>>(
+  _: T,

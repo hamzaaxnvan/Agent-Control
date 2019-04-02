@@ -52,30 +52,3 @@ export class ErrorBoundary extends Component<
       }
 
       // Default fallback based on variant
-      const { variant = 'content' } = this.props;
-
-      if (variant === 'page') {
-        return <FullPageError onRefresh={this.handleRefresh} />;
-      }
-
-      if (variant === 'modal') {
-        return <ModalError onRetry={this.handleReset} />;
-      }
-
-      // Default: content variant
-      return <ContentError onRetry={this.handleReset} />;
-    }
-
-    return this.props.children;
-  }
-}
-
-// Full page error - used at top level
-function FullPageError({ onRefresh }: { onRefresh: () => void }) {
-  return (
-    <Stack
-      align="center"
-      justify="center"
-      h="100vh"
-      gap="lg"
-      p="xl"
