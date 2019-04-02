@@ -8,24 +8,3 @@ import { remap as remap$ } from "../../lib/primitives.js";
 export type GetControlDataApiV1ControlsControlIdDataGetRequest = {
   controlId: number;
 };
-
-/** @internal */
-export type GetControlDataApiV1ControlsControlIdDataGetRequest$Outbound = {
-  control_id: number;
-};
-
-/** @internal */
-export const GetControlDataApiV1ControlsControlIdDataGetRequest$outboundSchema:
-  z.ZodMiniType<
-    GetControlDataApiV1ControlsControlIdDataGetRequest$Outbound,
-    GetControlDataApiV1ControlsControlIdDataGetRequest
-  > = z.pipe(
-    z.object({
-      controlId: z.int(),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        controlId: "control_id",
-      });
-    }),
-  );
