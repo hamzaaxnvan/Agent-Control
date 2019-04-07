@@ -8,14 +8,3 @@ import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
-/**
- * Response from updating a control binding.
- */
-export type PatchControlBindingResponse = {
-  /**
-   * Current enabled value.
-   */
-  enabled: boolean;
-  /**
-   * Whether the update succeeded.
-   */
