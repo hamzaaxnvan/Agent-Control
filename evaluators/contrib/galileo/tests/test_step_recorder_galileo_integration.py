@@ -12,32 +12,3 @@ def test_recorder_built_trace_matches_demo_shape():
     def policy_search(query: str) -> dict:
         return {"docs": ["policy-1"]}
 
-    def account_lookup(account_id: str) -> dict:
-        return {"balance": 500}
-
-    def banking_llm(prompt: str) -> str:
-        return f"response: {prompt}"
-
-    with record_step("trace", "banking_trace", input={"request": "r1"}) as trace:
-        trace.call(
-            policy_search, query="refund policy", step_type="retriever", step_name="policy_search"
-        )
-        trace.call(
-            account_lookup, account_id="acct-1", step_type="tool", step_name="account_lookup"
-        )
-        trace.call(banking_llm, "draft a reply", step_type="llm", step_name="banking_llm")
-        trace.output = {"status": "done"}
-
-    record = _record_from_step(trace.build())
-
-    assert type(record).__name__ == "Trace"
-    assert len(record.spans) == 3
-    assert {type(span).__name__ for span in record.spans} == {
-        "LlmSpan",
-        "ToolSpan",
-        "RetrieverSpan",
-    }
-
-
-def test_recorder_built_session_matches_demo_shape():
-    """A session with 2 traces, each with >=2 spans, builds the matching Session."""
