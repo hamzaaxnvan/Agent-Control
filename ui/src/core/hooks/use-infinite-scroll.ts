@@ -16,22 +16,3 @@ type UseInfiniteScrollOptions = {
  * @example
  * const { sentinelRef, scrollContainerRef } = useInfiniteScroll({
  *   hasNextPage,
- *   isFetchingNextPage,
- *   fetchNextPage,
- * });
- *
- * <ScrollArea viewportRef={scrollContainerRef}>
- *   <Table ... />
- *   <div ref={sentinelRef} style={{ height: 1 }} />
- * </ScrollArea>
- */
-export function useInfiniteScroll({
-  hasNextPage,
-  isFetchingNextPage,
-  fetchNextPage,
-}: UseInfiniteScrollOptions) {
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!sentinelRef.current || !hasNextPage || isFetchingNextPage) return;
