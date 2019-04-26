@@ -14,19 +14,3 @@ const nextConfig: NextConfig = {
     images: {
       unoptimized: true,
     },
-  }),
-
-  // Transpile Jupiter DS package to handle CSS imports
-  transpilePackages: ['@rungalileo/jupiter-ds'],
-
-  // Configure webpack to ignore CSS imports from Jupiter DS
-  // (we import the CSS manually in _app.tsx)
-  webpack: (config) => {
-    const webpack = require('webpack');
-
-    // Replace CSS imports from Jupiter DS with empty module
-    config.plugins.push(
-      new webpack.NormalModuleReplacementPlugin(
-        /^@mantine\/dates\/styles\.css$/,
-        (resource: any) => {
-          // Only replace if imported from Jupiter DS
