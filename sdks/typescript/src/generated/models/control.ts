@@ -23,28 +23,3 @@ export type ControlControl =
 
 /**
  * A control with identity and configuration.
- *
- * @remarks
- *
- * For rendered controls (raw or template-backed), ``control`` is a
- * ``ControlDefinition``.  For unrendered template controls, ``control``
- * is an ``UnrenderedTemplateControl``.
- */
-export type Control = {
-  control: ControlDefinitionOutput | UnrenderedTemplateControl;
-  id: number;
-  name: string;
-};
-
-/** @internal */
-export const ControlControl$inboundSchema: z.ZodMiniType<
-  ControlControl,
-  unknown
-> = smartUnion([
-  ControlDefinitionOutput$inboundSchema,
-  UnrenderedTemplateControl$inboundSchema,
-]);
-
-export function controlControlFromJSON(
-  jsonString: string,
-): SafeParseResult<ControlControl, SDKValidationError> {
