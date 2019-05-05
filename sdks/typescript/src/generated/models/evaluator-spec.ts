@@ -20,25 +20,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  */
 export type EvaluatorSpec = {
   /**
-   * Evaluator-specific configuration
-   */
-  config: { [k: string]: any };
-  /**
-   * Evaluator name or agent-scoped reference (agent:evaluator)
-   */
-  name: string;
-};
-
-/** @internal */
-export const EvaluatorSpec$inboundSchema: z.ZodMiniType<
-  EvaluatorSpec,
-  unknown
-> = z.object({
-  config: z.record(z.string(), z.any()),
-  name: types.string(),
-});
-/** @internal */
-export type EvaluatorSpec$Outbound = {
-  config: { [k: string]: any };
-  name: string;
-};
