@@ -18,24 +18,3 @@ def test_find_referencing_controls_dedupes_composite_matches() -> None:
         SimpleNamespace(
             name="composite-ctrl",
             control=ControlDefinition(
-                execution="server",
-                condition={
-                    "and": [
-                        {
-                            "selector": {"path": "input"},
-                            "evaluator": {"name": "agent-123456:custom", "config": {}},
-                        },
-                        {
-                            "selector": {"path": "output"},
-                            "evaluator": {"name": "agent-123456:custom", "config": {}},
-                        },
-                    ]
-                },
-                action={"decision": "deny"},
-            ),
-        )
-    ]
-
-    # When: scanning for references to the evaluator being removed
-    referencing_controls = _find_referencing_controls_for_removed_evaluators(
-        controls,
