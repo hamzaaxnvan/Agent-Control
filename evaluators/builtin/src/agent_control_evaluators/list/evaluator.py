@@ -33,38 +33,3 @@ class ListEvaluator(Evaluator[ListEvaluatorConfig]):
     )
     config_model = ListEvaluatorConfig
 
-    def __init__(self, config: ListEvaluatorConfig) -> None:
-        super().__init__(config)
-        # Defensive filtering keeps legacy invalid configs from compiling into pathological regexes.
-        normalized_values = [str(v) for v in config.values]
-        self._values = [value for value in normalized_values if value.strip() != ""]
-        self._regex: Any = self._build_regex()
-
-    def _build_regex(self) -> Any:
-        """Build regex pattern for matching."""
-        if not self._values:
-            return None
-
-        escaped = [re.escape(v) for v in self._values]
-
-        if self.config.match_mode == "contains":
-            # Word boundary matching for substring/keyword detection
-            pattern = f"\\b({'|'.join(escaped)})\\b"
-        elif self.config.match_mode == "starts_with":
-            # Prefix matching using anchors
-            pattern = f"^({'|'.join(escaped)})"
-        elif self.config.match_mode == "ends_with":
-            # Suffix matching using anchors
-            pattern = f"({'|'.join(escaped)})$"
-        else:
-            # Exact match using anchors
-            pattern = f"^({'|'.join(escaped)})$"
-
-        if not self.config.case_sensitive:
-            pattern = f"(?i){pattern}"
-
-        return re2.compile(pattern)
-
-    async def evaluate(self, data: Any) -> EvaluatorResult:
-        """Evaluate data against the value list.
-
