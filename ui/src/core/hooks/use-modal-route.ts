@@ -21,26 +21,3 @@ export function useModalRoute() {
     return {
       modal: typeof modal === 'string' ? modal : null,
       submodal: typeof submodal === 'string' ? submodal : null,
-      evaluator: typeof evaluator === 'string' ? evaluator : null,
-      controlId: typeof controlId === 'string' ? controlId : null,
-    };
-  }, [modal, submodal, evaluator, controlId]);
-
-  const openModal = useCallback(
-    (
-      modalName: string,
-      params?: { submodal?: string; evaluator?: string; controlId?: string }
-    ) => {
-      const query: Record<string, string> = { modal: modalName };
-      if (params?.submodal) query.submodal = params.submodal;
-      if (params?.evaluator) query.evaluator = params.evaluator;
-      if (params?.controlId) query.controlId = params.controlId;
-
-      router.push(
-        {
-          pathname: router.pathname,
-          query: { ...router.query, ...query },
-        },
-        undefined,
-        { shallow: true }
-      );
