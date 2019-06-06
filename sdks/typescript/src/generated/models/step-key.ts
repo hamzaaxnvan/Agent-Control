@@ -8,25 +8,3 @@ import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
-/**
- * Identifies a registered step schema by type and name.
- */
-export type StepKey = {
-  /**
-   * Registered step name
-   */
-  name: string;
-  /**
-   * Step type
-   */
-  type: string;
-};
-
-/** @internal */
-export const StepKey$inboundSchema: z.ZodMiniType<StepKey, unknown> = z.object({
-  name: types.string(),
-  type: types.string(),
-});
-/** @internal */
-export type StepKey$Outbound = {
-  name: string;
