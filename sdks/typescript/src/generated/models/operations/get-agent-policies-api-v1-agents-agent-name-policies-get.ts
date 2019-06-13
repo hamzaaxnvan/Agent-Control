@@ -8,24 +8,3 @@ import { remap as remap$ } from "../../lib/primitives.js";
 export type GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest = {
   agentName: string;
 };
-
-/** @internal */
-export type GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest$Outbound = {
-  agent_name: string;
-};
-
-/** @internal */
-export const GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest$outboundSchema:
-  z.ZodMiniType<
-    GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest$Outbound,
-    GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest
-  > = z.pipe(
-    z.object({
-      agentName: z.string(),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        agentName: "agent_name",
-      });
-    }),
-  );
