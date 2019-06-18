@@ -16,39 +16,3 @@ export type EvaluatorInfo = {
   /**
    * JSON Schema for config
    */
-  configSchema: { [k: string]: any };
-  /**
-   * Evaluator description
-   */
-  description: string;
-  /**
-   * Evaluator name
-   */
-  name: string;
-  /**
-   * Whether evaluator requires API key
-   */
-  requiresApiKey: boolean;
-  /**
-   * Default timeout in milliseconds
-   */
-  timeoutMs: number;
-  /**
-   * Evaluator version
-   */
-  version: string;
-};
-
-/** @internal */
-export const EvaluatorInfo$inboundSchema: z.ZodMiniType<
-  EvaluatorInfo,
-  unknown
-> = z.pipe(
-  z.object({
-    config_schema: z.record(z.string(), z.any()),
-    description: types.string(),
-    name: types.string(),
-    requires_api_key: types.boolean(),
-    timeout_ms: types.number(),
-    version: types.string(),
-  }),
