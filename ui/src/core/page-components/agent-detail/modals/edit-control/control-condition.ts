@@ -11,16 +11,3 @@ export type LeafConditionDetails = {
 export type ControlConditionState = {
   leafCondition: LeafConditionDetails | null;
   evaluatorId: string;
-  evaluator: AnyEvaluatorDefinition | undefined;
-  canEditLeafCondition: boolean;
-};
-
-function getLeafConditionDetails(
-  definition: ControlDefinition
-): LeafConditionDetails | null {
-  const condition = definition.condition;
-  if (!condition.selector || !condition.evaluator) {
-    return null;
-  }
-
-  return {
