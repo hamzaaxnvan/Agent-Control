@@ -20,25 +20,3 @@ fi
 if [[ ! -f "${SPEC_PATH}" ]]; then
   echo "OpenAPI spec not found at ${SPEC_PATH}. Generate it with: make openapi-spec" >&2
   exit 1
-fi
-
-if [[ ! -f "${OVERLAY_GENERATOR}" ]]; then
-  echo "Overlay generator not found at ${OVERLAY_GENERATOR}" >&2
-  exit 1
-fi
-
-if [[ ! -f "${NORMALIZE_GENERATOR}" ]]; then
-  echo "Generated SDK normalizer not found at ${NORMALIZE_GENERATOR}" >&2
-  exit 1
-fi
-
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required to generate overlay at ${OVERLAY_PATH}" >&2
-  exit 1
-fi
-
-python3 "${OVERLAY_GENERATOR}" \
-  --schema "${SPEC_PATH}" \
-  --out "${OVERLAY_PATH}"
-
-rm -rf "${TMP_OUTPUT_DIR}"
