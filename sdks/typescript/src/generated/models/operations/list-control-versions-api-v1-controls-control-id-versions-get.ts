@@ -10,29 +10,3 @@ export type ListControlVersionsApiV1ControlsControlIdVersionsGetRequest = {
   /**
    * Version number to start after (newest-first pagination)
    */
-  cursor?: number | null | undefined;
-  limit?: number | undefined;
-};
-
-/** @internal */
-export type ListControlVersionsApiV1ControlsControlIdVersionsGetRequest$Outbound =
-  {
-    control_id: number;
-    cursor?: number | null | undefined;
-    limit: number;
-  };
-
-/** @internal */
-export const ListControlVersionsApiV1ControlsControlIdVersionsGetRequest$outboundSchema:
-  z.ZodMiniType<
-    ListControlVersionsApiV1ControlsControlIdVersionsGetRequest$Outbound,
-    ListControlVersionsApiV1ControlsControlIdVersionsGetRequest
-  > = z.pipe(
-    z.object({
-      controlId: z.int(),
-      cursor: z.optional(z.nullable(z.int())),
-      limit: z._default(z.int(), 20),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
-        controlId: "control_id",
