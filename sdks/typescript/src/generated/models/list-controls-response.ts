@@ -14,19 +14,3 @@ import {
   PaginationInfo,
   PaginationInfo$inboundSchema,
 } from "./pagination-info.js";
-
-/**
- * Response for listing controls.
- */
-export type ListControlsResponse = {
-  /**
-   * List of control summaries
-   */
-  controls: Array<ControlSummary>;
-  /**
-   * Pagination metadata for cursor-based pagination.
-   */
-  pagination: PaginationInfo;
-};
-
-/** @internal */
