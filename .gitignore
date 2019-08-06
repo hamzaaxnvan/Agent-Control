@@ -29,34 +29,3 @@ ENV/
 
 # UV
 .uv/
-uv.lock
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-coverage-*.xml
-
-# Testing
-.pytest_cache/
-.coverage
-coverage-*.xml
-htmlcov/
-.tox/
-.mypy_cache/
-.ruff_cache/
-
-# Playwright
-playwright-report/
-playwright/.cache/
-test-results/
-
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Logs
