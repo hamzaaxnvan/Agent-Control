@@ -7,13 +7,3 @@ import { remap as remap$ } from "../../lib/primitives.js";
 
 export type RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest =
   {
-    agentName: string;
-    controlId: number;
-  };
-
-/** @internal */
-export type RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest$Outbound =
-  {
-    agent_name: string;
-    control_id: number;
-  };
