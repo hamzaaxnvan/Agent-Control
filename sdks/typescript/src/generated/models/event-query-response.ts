@@ -19,24 +19,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  *
  * Attributes:
  *     events: List of matching events
- *     total: Total number of matching events (for pagination)
- *     limit: Limit used in query
- *     offset: Offset used in query
- */
-export type EventQueryResponse = {
-  /**
-   * Matching events
-   */
-  events: Array<ControlExecutionEvent>;
-  /**
-   * Limit used in query
-   */
-  limit: number;
-  /**
-   * Offset used in query
-   */
-  offset: number;
-  /**
-   * Total matching events
-   */
-  total: number;
