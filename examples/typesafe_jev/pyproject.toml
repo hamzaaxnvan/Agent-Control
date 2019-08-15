@@ -7,13 +7,3 @@ requires-python = ">=3.12"
 dependencies = [
     "agent-control-evaluators>=8.7.0",
     "agent-control-models>=8.7.0",
-    "agent-control-sdk>=8.7.0",
-    "httpx>=0.24.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-]
-
