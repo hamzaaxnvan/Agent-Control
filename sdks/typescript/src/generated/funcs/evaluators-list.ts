@@ -28,34 +28,3 @@ import { Result } from "../types/fp.js";
  *
  * @remarks
  * List all available evaluators.
- *
- * Returns metadata and JSON Schema for each built-in evaluator.
- *
- * Built-in evaluators:
- * - **regex**: Regular expression pattern matching
- * - **list**: List-based value matching with flexible logic
- * - **json**: JSON validation with schema, types, constraints
- * - **sql**: SQL query validation
- *
- * Custom evaluators are registered per-agent via initAgent.
- * Use GET /agents/{agent_name}/evaluators to list agent-specific schemas.
- */
-export function evaluatorsList(
-  client: AgentControlSDKCore,
-  options?: RequestOptions,
-): APIPromise<
-  Result<
-    { [k: string]: models.EvaluatorInfo },
-    | AgentControlSDKError
-    | ResponseValidationError
-    | ConnectionError
-    | RequestAbortedError
-    | RequestTimeoutError
-    | InvalidRequestError
-    | UnexpectedClientError
-    | SDKValidationError
-  >
-> {
-  return new APIPromise($do(
-    client,
-    options,
