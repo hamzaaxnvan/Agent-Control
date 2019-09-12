@@ -8,14 +8,3 @@ from .sink_selection import (
     ControlEventSinkSelection,
     SinkSelectionError,
 )
-from .sinks import (
-    AsyncControlEventSink,
-    BaseAsyncControlEventSink,
-    BaseControlEventSink,
-    ControlEventSink,
-    SinkResult,
-)
-from .trace_context import (
-    TraceContext,
-    TraceContextProvider,
-    clear_trace_context_provider,
