@@ -7,22 +7,3 @@ import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-/**
- * Response from control metadata update.
- */
-export type PatchControlResponse = {
-  /**
-   * Current enabled status (if control has data configured)
-   */
-  enabled?: boolean | null | undefined;
-  /**
-   * Current control name (may have changed)
-   */
-  name: string;
-  /**
-   * Whether the update succeeded
-   */
-  success: boolean;
-};
-
