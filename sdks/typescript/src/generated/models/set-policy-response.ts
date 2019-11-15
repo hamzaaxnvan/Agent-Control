@@ -14,20 +14,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  */
 export type SetPolicyResponse = {
   /**
-   * Previously associated policy ID, if any
-   */
-  oldPolicyId?: number | null | undefined;
-  /**
-   * Whether the request succeeded
-   */
-  success: boolean;
-};
-
-/** @internal */
-export const SetPolicyResponse$inboundSchema: z.ZodMiniType<
-  SetPolicyResponse,
-  unknown
-> = z.pipe(
-  z.object({
-    old_policy_id: z.optional(z.nullable(types.number())),
-    success: types.boolean(),
