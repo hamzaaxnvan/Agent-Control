@@ -26,32 +26,3 @@ const normalizeRule = (value: unknown): DefenseClawRuleFormValue => {
       ? (value.severity as DefenseClawRuleFormValue['severity'])
       : 'HIGH',
     confidence: typeof value.confidence === 'number' ? value.confidence : 0.99,
-    tags: Array.isArray(value.tags)
-      ? value.tags.filter((tag): tag is string => typeof tag === 'string')
-      : [],
-  };
-};
-
-const validateRules = (value: unknown): string | null => {
-  if (!Array.isArray(value) || value.length === 0) {
-    return 'At least one rule is required';
-  }
-  const rules = value as DefenseClawRuleFormValue[];
-  const ids = rules.map((rule) => rule.id.trim());
-  if (
-    rules.some(
-      (rule) => !rule.id.trim() || !rule.title.trim() || !rule.pattern.trim()
-    )
-  ) {
-    return 'Every rule requires an ID, title, and pattern';
-  }
-  if (new Set(ids).size !== ids.length) return 'Rule IDs must be unique';
-  if (
-    rules.some(
-      (rule) =>
-        !Number.isFinite(rule.confidence) ||
-        rule.confidence < 0 ||
-        rule.confidence > 1
-    )
-  ) {
-    return 'Rule confidence must be between 0 and 1';
