@@ -7,13 +7,3 @@ the same state object.
 """
 
 from typing import TYPE_CHECKING, Any
-
-from .runtime_auth import RuntimeTokenCache
-
-if TYPE_CHECKING:
-    from agent_control_models import Agent
-
-    from .client import AgentControlClient
-
-
-class _StateContainer:
