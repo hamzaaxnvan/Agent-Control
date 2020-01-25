@@ -12,17 +12,3 @@ export type GetControlBindingApiV1ControlBindingsBindingIdGetRequest = {
 /** @internal */
 export type GetControlBindingApiV1ControlBindingsBindingIdGetRequest$Outbound =
   {
-    binding_id: number;
-  };
-
-/** @internal */
-export const GetControlBindingApiV1ControlBindingsBindingIdGetRequest$outboundSchema:
-  z.ZodMiniType<
-    GetControlBindingApiV1ControlBindingsBindingIdGetRequest$Outbound,
-    GetControlBindingApiV1ControlBindingsBindingIdGetRequest
-  > = z.pipe(
-    z.object({
-      bindingId: z.int(),
-    }),
-    z.transform((v) => {
-      return remap$(v, {
