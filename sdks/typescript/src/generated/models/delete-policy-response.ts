@@ -7,12 +7,3 @@ import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-/**
- * Compatibility response for singular policy deletion endpoint.
- */
-export type DeletePolicyResponse = {
-  /**
-   * Whether the request succeeded
-   */
-  success: boolean;
