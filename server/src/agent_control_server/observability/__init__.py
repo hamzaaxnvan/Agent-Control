@@ -18,24 +18,3 @@ Example:
     )
 
     # Default setup
-    store = PostgresEventStore(session_maker)
-    ingestor = DirectEventIngestor(store)
-
-    # Custom setup (enterprise)
-    store = ClickhouseEventStore(client)  # user-provided
-    ingestor = RedisEventIngestor(redis, store)  # user-provided
-"""
-
-from .ingest import DirectEventIngestor, EventIngestor, IngestResult
-from .sinks import (
-    ResolvedControlEventBackend,
-    get_registered_control_event_sink_factory_names,
-    register_control_event_sink_factory,
-    resolve_control_event_backend,
-    unregister_control_event_sink_factory,
-)
-from .store import (
-    EventQuery,
-    EventQueryResult,
-    EventStore,
-    PostgresEventStore,
