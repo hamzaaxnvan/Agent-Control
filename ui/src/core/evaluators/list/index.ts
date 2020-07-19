@@ -9,14 +9,3 @@ import type { ListFormValues } from './types';
  */
 export const listEvaluator: EvaluatorDefinition<ListFormValues> = {
   id: 'list',
-  displayName: 'List',
-
-  initialValues: {
-    values: '',
-    logic: 'any',
-    match_on: 'match',
-    match_mode: 'exact',
-    case_sensitive: false,
-  },
-
-  validate: {
