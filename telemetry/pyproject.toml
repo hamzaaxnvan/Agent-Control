@@ -8,13 +8,3 @@ dependencies = [
 ]
 authors = [
     {name = "Agent Control Team"}
-]
-readme = "README.md"
-license = {text = "Apache-2.0"}
-
-[dependency-groups]
-dev = [
-    "pytest>=8.0.0",
-    "mypy>=1.8.0",
-    "ruff>=0.1.0",
-    "agent-control-models",
