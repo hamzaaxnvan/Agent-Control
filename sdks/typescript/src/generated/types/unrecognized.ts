@@ -9,15 +9,3 @@ function unrecognized<T>(value: T): Unrecognized<T> {
   globalCount++;
   return value as Unrecognized<T>;
 }
-
-let globalCount = 0;
-let refCount = 0;
-export function startCountingUnrecognized() {
-  refCount++;
-  const start = globalCount;
-  return {
-    /**
-     * Ends counting and returns the delta.
-     * @param delta - If provided, only this amount is added to the parent counter
-     *   (used for nested unions where we only want to record the winning option's count).
-     *   If not provided, records all counts since start().
