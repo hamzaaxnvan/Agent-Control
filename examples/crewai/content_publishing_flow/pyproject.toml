@@ -6,12 +6,3 @@ requires-python = ">=3.12"
 dependencies = [
     "crewai[tools]>=1.10.1",
     "openai>=1.0.0",
-    "python-dotenv>=1.0.0",
-    "sqlglot[c]>=30.11.0,<30.12.0",
-]
-
-[project.scripts]
-content_publishing_flow = "content_publishing_flow.main:run"
-kickoff = "content_publishing_flow.main:kickoff"
-plot = "content_publishing_flow.main:plot"
-
