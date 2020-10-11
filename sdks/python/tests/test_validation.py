@@ -2,13 +2,3 @@
 
 import pytest
 
-from agent_control.validation import ensure_agent_name
-
-
-def test_ensure_agent_name_normalizes_to_lowercase() -> None:
-    assert ensure_agent_name("Agent-Name_123") == "agent-name_123"
-
-
-def test_ensure_agent_name_rejects_too_short() -> None:
-    with pytest.raises(ValueError, match="at least 10 characters"):
-        ensure_agent_name("short")
