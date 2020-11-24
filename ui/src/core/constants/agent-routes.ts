@@ -9,15 +9,3 @@ type RouteQueryValue =
   | null
   | undefined;
 
-type AgentRouteOptions = {
-  tab?: AgentDetailTab;
-  query?: Record<string, RouteQueryValue>;
-};
-
-export function getAgentRoute(
-  agentId: string,
-  options?: AgentRouteOptions
-): string {
-  const params = new URLSearchParams();
-  params.set('id', agentId);
-
