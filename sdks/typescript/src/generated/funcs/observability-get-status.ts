@@ -26,32 +26,3 @@ import { Result } from "../types/fp.js";
  * Get Status
  *
  * @remarks
- * Get observability system status.
- *
- * Returns basic health information.
- */
-export function observabilityGetStatus(
-  client: AgentControlSDKCore,
-  options?: RequestOptions,
-): APIPromise<
-  Result<
-    { [k: string]: any },
-    | AgentControlSDKError
-    | ResponseValidationError
-    | ConnectionError
-    | RequestAbortedError
-    | RequestTimeoutError
-    | InvalidRequestError
-    | UnexpectedClientError
-    | SDKValidationError
-  >
-> {
-  return new APIPromise($do(
-    client,
-    options,
-  ));
-}
-
-async function $do(
-  client: AgentControlSDKCore,
-  options?: RequestOptions,
