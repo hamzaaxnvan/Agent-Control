@@ -12,17 +12,3 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=4.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.8.0",
-]
-
-[project.entry-points."agent_control.evaluators"]
-"defenseclaw.rule_pack" = "agent_control_evaluator_defenseclaw.rule_pack:DefenseClawRulePackEvaluator"
-"defenseclaw.opa_policy" = "agent_control_evaluator_defenseclaw.opa_policy:DefenseClawOpaPolicyEvaluator"
-
-[build-system]
-requires = ["hatchling"]
