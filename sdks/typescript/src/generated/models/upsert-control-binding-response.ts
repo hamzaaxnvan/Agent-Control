@@ -16,21 +16,3 @@ export type UpsertControlBindingResponse = {
   /**
    * Identifier of the binding.
    */
-  bindingId: number;
-  /**
-   * True when a new binding was created; False when an existing binding was updated in place.
-   */
-  created: boolean;
-  /**
-   * Current enabled value.
-   */
-  enabled: boolean;
-};
-
-/** @internal */
-export const UpsertControlBindingResponse$inboundSchema: z.ZodMiniType<
-  UpsertControlBindingResponse,
-  unknown
-> = z.pipe(
-  z.object({
-    binding_id: types.number(),
