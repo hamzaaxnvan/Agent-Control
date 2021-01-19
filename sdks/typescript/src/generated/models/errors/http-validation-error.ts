@@ -8,24 +8,3 @@ import * as models from "../index.js";
 import { AgentControlSDKError } from "./agent-control-sdk-error.js";
 
 export type HTTPValidationErrorData = {
-  detail?: Array<models.ValidationError> | undefined;
-};
-
-export class HTTPValidationError extends AgentControlSDKError {
-  detail?: Array<models.ValidationError> | undefined;
-
-  /** The original data that was passed to this error instance. */
-  data$: HTTPValidationErrorData;
-
-  constructor(
-    err: HTTPValidationErrorData,
-    httpMeta: { response: Response; request: Request; body: string },
-  ) {
-    const message = "message" in err && typeof err.message === "string"
-      ? err.message
-      : `API error occurred: ${JSON.stringify(err)}`;
-    super(message, httpMeta);
-    this.data$ = err;
-    if (err.detail != null) this.detail = err.detail;
-
-    this.name = "HTTPValidationError";
