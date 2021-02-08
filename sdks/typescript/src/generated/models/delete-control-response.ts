@@ -15,20 +15,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 export type DeleteControlResponse = {
   /**
    * Control binding IDs that were removed before deletion
-   */
-  detachedTargetBindings?: Array<number> | undefined;
-  /**
-   * Deprecated: policy IDs the control was removed from before deletion
-   */
-  dissociatedFrom?: Array<number> | undefined;
-  /**
-   * Agent names the control was removed from before deletion
-   */
-  dissociatedFromAgents?: Array<string> | undefined;
-  /**
-   * Policy IDs the control was removed from before deletion
-   */
-  dissociatedFromPolicies?: Array<number> | undefined;
-  /**
-   * Whether the control was deleted
-   */
