@@ -5,10 +5,3 @@ export function removeTrailingCommasOutsideStrings(text: string): string {
 
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
-
-    if (char === '"' && !escaped) {
-      inString = !inString;
-      fixed += char;
-      continue;
-    }
-
