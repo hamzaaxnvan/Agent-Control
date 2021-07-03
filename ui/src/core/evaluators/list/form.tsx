@@ -19,24 +19,3 @@ export const ListForm = ({ form }: EvaluatorFormProps<ListFormValues>) => {
           />
         }
         labelProps={labelPropsInline}
-        placeholder="Enter values (one per line)"
-        minRows={4}
-        maxRows={8}
-        autosize
-        size="sm"
-        {...form.getInputProps('values')}
-      />
-
-      <Select
-        label={
-          <LabelWithTooltip
-            label="Logic"
-            tooltip="How to combine multiple values when matching"
-          />
-        }
-        labelProps={labelPropsInline}
-        data={[
-          { value: 'any', label: 'Any (match if any value matches)' },
-          { value: 'all', label: 'All (match if all values match)' },
-        ]}
-        size="sm"
