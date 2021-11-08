@@ -14,19 +14,3 @@ import {
   TemplateControlInput$Outbound,
   TemplateControlInput$outboundSchema,
 } from "./template-control-input.js";
-
-/**
- * Control configuration data to validate
- */
-export type ValidateControlDataRequestData =
-  | ControlDefinitionInput
-  | TemplateControlInput;
-
-/**
- * Request to validate control configuration data without saving.
- */
-export type ValidateControlDataRequest = {
-  /**
-   * Control configuration data to validate
-   */
-  data: ControlDefinitionInput | TemplateControlInput;
