@@ -8,14 +8,3 @@ export class SDKValidationError extends Error {
   /**
    * The raw value that failed validation.
    */
-  public readonly rawValue: unknown;
-
-  /**
-   * The raw message that failed validation.
-   */
-  public readonly rawMessage: unknown;
-
-  // Allows for backwards compatibility for `instanceof` checks of `ResponseValidationError`
-  static override [Symbol.hasInstance](
-    instance: unknown,
-  ): instance is SDKValidationError {
