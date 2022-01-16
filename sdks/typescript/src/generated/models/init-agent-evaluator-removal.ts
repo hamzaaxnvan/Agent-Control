@@ -10,15 +10,3 @@ import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
 /**
- * Details for an evaluator removed during overwrite mode.
- */
-export type InitAgentEvaluatorRemoval = {
-  /**
-   * IDs of active controls referencing this evaluator
-   */
-  controlIds?: Array<number> | undefined;
-  /**
-   * Names of active controls referencing this evaluator
-   */
-  controlNames?: Array<string> | undefined;
-  /**
