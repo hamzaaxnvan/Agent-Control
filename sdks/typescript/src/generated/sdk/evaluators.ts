@@ -5,10 +5,3 @@
 import { evaluatorsList } from "../funcs/evaluators-list.js";
 import { ClientSDK, RequestOptions } from "../lib/sdks.js";
 import * as models from "../models/index.js";
-import { unwrapAsync } from "../types/fp.js";
-
-export class Evaluators extends ClientSDK {
-  /**
-   * List available evaluators
-   *
-   * @remarks
