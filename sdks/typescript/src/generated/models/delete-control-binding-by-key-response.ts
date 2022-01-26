@@ -5,10 +5,3 @@
 import * as z from "zod/v4-mini";
 import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
-import * as types from "../types/primitives.js";
-import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-/**
- * Response from a natural-key detach.
- */
-export type DeleteControlBindingByKeyResponse = {
