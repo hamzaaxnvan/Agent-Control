@@ -12,18 +12,3 @@ export const QueryParamTimeRange = {
   Fifteenm: "15m",
   Oneh: "1h",
   TwentyFourh: "24h",
-  Sevend: "7d",
-  Thirtyd: "30d",
-  OneHundredAndEightyd: "180d",
-  ThreeHundredAndSixtyFived: "365d",
-} as const;
-export type QueryParamTimeRange = ClosedEnum<typeof QueryParamTimeRange>;
-
-export type GetControlStatsApiV1ObservabilityStatsControlsControlIdGetRequest =
-  {
-    controlId: number;
-    agentName: string;
-    timeRange?: QueryParamTimeRange | undefined;
-    includeTimeseries?: boolean | undefined;
-  };
-
