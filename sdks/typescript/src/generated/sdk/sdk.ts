@@ -10,27 +10,3 @@ import { Controls } from "./controls.js";
 import { Evaluation } from "./evaluation.js";
 import { Evaluators } from "./evaluators.js";
 import { Observability } from "./observability.js";
-import { Policies } from "./policies.js";
-import { System } from "./system.js";
-
-export class AgentControlSDK extends ClientSDK {
-  private _system?: System;
-  get system(): System {
-    return (this._system ??= new System(this._options));
-  }
-
-  private _agents?: Agents;
-  get agents(): Agents {
-    return (this._agents ??= new Agents(this._options));
-  }
-
-  private _auth?: Auth;
-  get auth(): Auth {
-    return (this._auth ??= new Auth(this._options));
-  }
-
-  private _controlBindings?: ControlBindings;
-  get controlBindings(): ControlBindings {
-    return (this._controlBindings ??= new ControlBindings(this._options));
-  }
-
