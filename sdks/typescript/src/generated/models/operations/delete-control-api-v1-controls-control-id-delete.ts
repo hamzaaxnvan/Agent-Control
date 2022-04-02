@@ -10,15 +10,3 @@ export type DeleteControlApiV1ControlsControlIdDeleteRequest = {
   /**
    * If true, dissociate from all policy/agent links before deleting. If false, fail if control is associated with any policy or agent.
    */
-  force?: boolean | undefined;
-};
-
-/** @internal */
-export type DeleteControlApiV1ControlsControlIdDeleteRequest$Outbound = {
-  control_id: number;
-  force: boolean;
-};
-
-/** @internal */
-export const DeleteControlApiV1ControlsControlIdDeleteRequest$outboundSchema:
-  z.ZodMiniType<
