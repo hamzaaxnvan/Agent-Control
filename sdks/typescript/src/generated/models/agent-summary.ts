@@ -12,18 +12,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 /**
  * Summary of an agent for list responses.
  */
-export type AgentSummary = {
-  /**
-   * Number of active controls for this agent
-   */
-  activeControlsCount: number;
-  /**
-   * Unique identifier of the agent
-   */
-  agentName: string;
-  /**
-   * ISO 8601 timestamp when agent was created
-   */
-  createdAt?: string | null | undefined;
-  /**
-   * Number of evaluators registered with the agent
