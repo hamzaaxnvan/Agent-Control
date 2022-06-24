@@ -6,20 +6,3 @@ import * as z from "zod/v4-mini";
 import { safeParse } from "../lib/schemas.js";
 import { Result as SafeParseResult } from "../types/fp.js";
 import { Control, Control$inboundSchema } from "./control.js";
-import { SDKValidationError } from "./errors/sdk-validation-error.js";
-
-export type AgentControlsResponse = {
-  /**
-   * List of agent-associated controls matching the requested state filters (all associated controls by default, including disabled and unrendered controls)
-   */
-  controls: Array<Control>;
-};
-
-/** @internal */
-export const AgentControlsResponse$inboundSchema: z.ZodMiniType<
-  AgentControlsResponse,
-  unknown
-> = z.object({
-  controls: z.array(Control$inboundSchema),
-});
-
