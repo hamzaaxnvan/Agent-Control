@@ -13,34 +13,3 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  * Summary of a single control version.
  */
 export type ControlVersionSummary = {
-  /**
-   * ISO 8601 timestamp when this version was created
-   */
-  createdAt: string;
-  /**
-   * Machine-readable event type for this version
-   */
-  eventType: string;
-  /**
-   * Human-readable note describing the change
-   */
-  note?: string | null | undefined;
-  /**
-   * Monotonic version number for the control
-   */
-  versionNum: number;
-};
-
-/** @internal */
-export const ControlVersionSummary$inboundSchema: z.ZodMiniType<
-  ControlVersionSummary,
-  unknown
-> = z.pipe(
-  z.object({
-    created_at: types.string(),
-    event_type: types.string(),
-    note: z.optional(z.nullable(types.string())),
-    version_num: types.number(),
-  }),
-  z.transform((v) => {
-    return remap$(v, {
