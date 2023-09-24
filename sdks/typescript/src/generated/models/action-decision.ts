@@ -4,9 +4,3 @@
 
 import * as z from "zod/v4-mini";
 import * as openEnums from "../types/enums.js";
-import { OpenEnum } from "../types/enums.js";
-
-export const ActionDecision = {
-  Deny: "deny",
-  Steer: "steer",
-  Observe: "observe",
