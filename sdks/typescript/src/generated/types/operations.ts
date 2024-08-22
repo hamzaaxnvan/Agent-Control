@@ -24,29 +24,3 @@ export function createPageIterator<V>(
       if (halt(page)) {
         return;
       }
-
-      let p: typeof page | null = page;
-      for (p = await p.next(); p != null; p = await p.next()) {
-        yield p;
-        if (halt(p)) {
-          return;
-        }
-      }
-    },
-  };
-}
-
-/**
- * This utility create a special iterator that yields a single value and
- * terminates. It is useful in paginated SDK functions that have early return
- * paths when things go wrong.
- */
-export function haltIterator<V extends object>(
-  v: V,
-): PageIterator<V, undefined> {
-  return {
-    ...v,
-    next: () => null,
-    [Symbol.asyncIterator]: async function* paginator() {
-      yield v;
-    },
