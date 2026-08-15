@@ -4,9 +4,3 @@ version = "0.1.0"
 description = "CrewAI financial agent with steering, deny, and observe actions via Agent Control"
 requires-python = ">=3.12"
 dependencies = [
-    "crewai[tools]>=1.10.1",
-    "openai>=1.0.0",
-    "python-dotenv>=1.0.0",
-    "sqlglot[c]>=30.11.0,<30.12.0",
-]
-
