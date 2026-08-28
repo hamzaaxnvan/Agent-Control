@@ -1,0 +1,70 @@
+name: Build and Publish Docker Images
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-push-server:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: galileoai/agent-control-server
+          tags: |
+            # For version tags: v1.2.3 -> 1.2.3, 1.2, 1, latest
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # For main branch: latest
+            type=raw,value=latest,enable={{is_default_branch}}
+            # For branches: branch name (sanitized)
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
+            # For PRs: pr-123
+            type=ref,event=pr
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64
+          load: ${{ github.event_name == 'pull_request' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test psycopg runtime
+        if: github.event_name == 'pull_request'
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          image="$(printf '%s\n' "$IMAGE_TAGS" | head -n 1)"
+          docker run --rm --entrypoint python "$image" -c 'import os; import psycopg; from psycopg import pq; assert os.environ["PSYCOPG_IMPL"] == "python"; assert pq.version() > 0; print(f"psycopg {psycopg.__version__}, libpq {pq.version()}")'
