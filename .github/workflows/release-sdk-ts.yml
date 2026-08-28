@@ -1,0 +1,101 @@
+name: Release TypeScript SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Run semantic-release in dry-run mode
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  release-sdk-ts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      issues: write
+      pull-requests: write
+    env:
+      SPEAKEASY_API_KEY: ${{ secrets.SPEAKEASY_API_KEY }}
+      # npm provenance publish is rejected for private GitHub repositories (E422).
+      NPM_CONFIG_PROVENANCE: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GALILEO_AUTOMATION_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync Python dependencies
+        run: make sync
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install TypeScript SDK dependencies
+        working-directory: ./sdks/typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Speakeasy CLI
+        run: make -C sdks/typescript speakeasy-install
+
+      - name: Generate OpenAPI from server code and verify TypeScript client drift
+        run: make sdk-ts-generate-check
+
+      - name: Lint TypeScript SDK
+        run: make sdk-ts-lint
+
+      - name: Typecheck TypeScript SDK
+        run: make sdk-ts-typecheck
+
+      - name: Test TypeScript SDK
+        run: make sdk-ts-test
+
+      - name: Build TypeScript SDK
+        run: make sdk-ts-build
+
+      - name: Run semantic-release
+        working-directory: ./sdks/typescript
+        env:
+          GITHUB_TOKEN: ${{ secrets.GALILEO_AUTOMATION_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "Running semantic-release dry-run."
+            pnpm run release:dry-run
+            exit 0
+          fi
+
+          if [[ "${{ github.ref_name }}" != "main" ]]; then
+            echo "Publish runs must be dispatched from main. Current ref: ${{ github.ref_name }}"
+            exit 1
+          fi
+
+          if [[ -z "${NPM_TOKEN}" ]]; then
+            echo "NPM_TOKEN secret is required for publish runs."
+            exit 1
+          fi
+
+          pnpm run release
