@@ -1,0 +1,240 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: agent_control
+          POSTGRES_USER: agent_control
+          POSTGRES_PASSWORD: agent_control
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd="pg_isready -U agent_control -d agent_control" 
+          --health-interval=10s 
+          --health-timeout=5s 
+          --health-retries=5
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_USER: agent_control
+      DB_PASSWORD: agent_control
+      DB_DATABASE: agent_control
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install libpq runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpq5
+
+      - name: Show versions
+        run: |
+          uv --version
+          python --version
+
+      - name: Verify contrib packaging contract
+        run: make contrib-verify
+
+      - name: Sync dependencies
+        run: make sync
+
+      - name: Run Python checks
+        run: make check
+
+      - name: Collect coverage files
+        id: coverage_files
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+
+          base_reports = [
+              "coverage-models.xml",
+              "coverage-engine.xml",
+              "coverage-telemetry.xml",
+              "coverage-server.xml",
+              "coverage-sdk.xml",
+          ]
+          contrib_reports = sorted(path.name for path in Path(".").glob("coverage-evaluators-*.xml"))
+          print(f"files={','.join([*base_reports, *contrib_reports])}")
+          PY
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ${{ steps.coverage_files.outputs.files }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  ui-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        shell: bash
+        working-directory: ./ui
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        working-directory: ./ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ui/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('ui/**/*.ts', 'ui/**/*.tsx', 'ui/**/*.js', 'ui/**/*.jsx', 'ui/package.json', 'ui/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-
+
+      - name: Lint
+        working-directory: ./ui
+        run: pnpm run lint
+
+      - name: Prettier check
+        working-directory: ./ui
+        run: pnpm run prettify:check
+
+      - name: Type check
+        working-directory: ./ui
+        run: pnpm run typecheck
+
+      - name: Install Playwright browsers
+        working-directory: ./ui
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build Next.js app
+        working-directory: ./ui
+        run: pnpm run build
+        env:
+          # Disable telemetry during build
+          NEXT_TELEMETRY_DISABLED: 1
+          # Optimize build for CI
+          NODE_ENV: production
+          # Skip unnecessary optimizations for test builds
+          SKIP_ENV_VALIDATION: true
+
+      - name: Run integration tests
+        working-directory: ./ui
+        run: pnpm run test:integration
+        env:
+          # Use production build for faster startup
+          NODE_ENV: production
+
+      - name: Run component tests
+        working-directory: ./ui
+        run: pnpm run test:ct
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: ui/playwright-report/
+          retention-days: 7
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results
+          path: ui/test-results/
+          retention-days: 3
+
+  sdk-ts-ci:
+    runs-on: ubuntu-latest
+    env:
+      SPEAKEASY_API_KEY: ${{ secrets.SPEAKEASY_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Sync Python dependencies
+        run: make sync
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install TypeScript SDK dependencies
+        working-directory: ./sdks/typescript
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Speakeasy CLI
+        run: make -C sdks/typescript speakeasy-install
+
+      - name: Test TypeScript SDK naming generator
+        run: make sdk-ts-overlay-test
+
+      - name: Lint TypeScript SDK
+        run: make sdk-ts-lint
+
+      - name: Typecheck TypeScript SDK
+        run: make sdk-ts-typecheck
+
+      - name: Test TypeScript SDK
+        run: make sdk-ts-test
+
+      - name: Build TypeScript SDK
+        run: make sdk-ts-build
+
+      - name: Verify generated TypeScript client is current
+        run: make sdk-ts-generate-check
+
+      - name: Verify generated method naming conventions
+        run: make sdk-ts-name-check
