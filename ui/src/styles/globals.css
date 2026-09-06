@@ -9,3 +9,27 @@
     'Fira Mono', 'Droid Sans Mono', 'Courier New', monospace;
 }
 
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Confirm modal button: white text in light mode, black in dark mode */
+[data-mantine-color-scheme='light'] .confirm-modal-confirm-btn {
+  color: var(--mantine-color-white);
+}
+[data-mantine-color-scheme='dark'] .confirm-modal-confirm-btn {
+  color: var(--mantine-color-black);
+}
