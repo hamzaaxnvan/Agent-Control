@@ -24,3 +24,29 @@ export type PatchAgentResponse = {
   stepsRemoved?: Array<StepKey> | undefined;
 };
 
+/** @internal */
+export const PatchAgentResponse$inboundSchema: z.ZodMiniType<
+  PatchAgentResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    evaluators_removed: types.optional(z.array(types.string())),
+    steps_removed: types.optional(z.array(StepKey$inboundSchema)),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "evaluators_removed": "evaluatorsRemoved",
+      "steps_removed": "stepsRemoved",
+    });
+  }),
+);
+
+export function patchAgentResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<PatchAgentResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => PatchAgentResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'PatchAgentResponse' from JSON`,
+  );
+}
