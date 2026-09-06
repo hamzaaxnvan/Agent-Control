@@ -16,3 +16,22 @@ class EvaluatorShowcaseCrew:
     @agent
     def data_analyst(self) -> Agent:
         sql_tool = create_sql_tool()
+        analysis_tool = create_analysis_tool()
+        return Agent(
+            config=self.agents_config["data_analyst"],
+            tools=[sql_tool, analysis_tool],
+            verbose=True,
+        )
+
+    @task
+    def analysis_task(self) -> Task:
+        return Task(config=self.tasks_config["analysis_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=True,
+        )
