@@ -138,3 +138,144 @@ class TestEvaluatorMetadata:
         """Test that evaluator metadata is accessible."""
         # Given/When: Accessing MockTestEvaluator metadata
         # Then: All fields should be correct
+        assert MockTestEvaluator.metadata.name == "test-mock-evaluator"
+        assert MockTestEvaluator.metadata.version == "1.0.0"
+        assert MockTestEvaluator.metadata.description == "Test evaluator for engine tests"
+
+    def test_config_schema(self):
+        """Test that config model provides JSON schema."""
+        # Given/When: Getting JSON schema from config model
+        schema = MockTestEvaluator.config_model.model_json_schema()
+
+        # Then: Schema should include threshold property
+        assert "properties" in schema
+        assert "threshold" in schema["properties"]
+
+
+class TestBuiltInEvaluators:
+    """Tests for built-in evaluators."""
+
+    def test_regex_evaluator_registered(self):
+        """Test regex evaluator is registered."""
+        # Given/When: Getting regex evaluator
+        from agent_control_engine import list_evaluators
+        evaluator = list_evaluators().get("regex")
+
+        # Then: Should be registered with correct name
+        assert evaluator is not None
+        assert evaluator.metadata.name == "regex"
+
+    def test_list_evaluator_registered(self):
+        """Test list evaluator is registered."""
+        # Given/When: Getting list evaluator
+        from agent_control_engine import list_evaluators
+        evaluator = list_evaluators().get("list")
+
+        # Then: Should be registered with correct name
+        assert evaluator is not None
+        assert evaluator.metadata.name == "list"
+
+
+class TestRegexEvaluatorFlags:
+    """Tests for regex evaluator flag handling."""
+
+    @pytest.mark.asyncio
+    async def test_regex_case_sensitive_by_default(self):
+        """Test regex is case-sensitive by default.
+
+        Given: A regex pattern without flags
+        When: Evaluating against different case text
+        Then: Only exact case matches
+        """
+        # Given: Regex for "SECRET" without flags
+        config = EvaluatorSpec(
+            name="regex",
+            config={"pattern": "SECRET"}
+        )
+        evaluator = get_evaluator_instance(config)
+
+        # When/Then: Exact case matches
+        result = await evaluator.evaluate("the SECRET is here")
+        assert result.matched is True
+
+        # When/Then: Different case does NOT match
+        result = await evaluator.evaluate("the secret is here")
+        assert result.matched is False
+
+        result = await evaluator.evaluate("the Secret is here")
+        assert result.matched is False
+
+    @pytest.mark.asyncio
+    async def test_regex_ignorecase_flag(self):
+        """Test regex IGNORECASE flag works.
+
+        Given: A regex pattern with IGNORECASE flag
+        When: Evaluating against different case text
+        Then: All cases match
+        """
+        # Given: Regex for "SECRET" with IGNORECASE flag
+        config = EvaluatorSpec(
+            name="regex",
+            config={"pattern": "SECRET", "flags": ["IGNORECASE"]}
+        )
+        evaluator = get_evaluator_instance(config)
+
+        # When/Then: All case variations should match
+        result = await evaluator.evaluate("the SECRET is here")
+        assert result.matched is True
+
+        result = await evaluator.evaluate("the secret is here")
+        assert result.matched is True
+
+        result = await evaluator.evaluate("the Secret is here")
+        assert result.matched is True
+
+        result = await evaluator.evaluate("the sEcReT is here")
+        assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_regex_short_i_flag(self):
+        """Test regex short 'I' flag works.
+
+        Given: A regex pattern with 'I' flag (short for IGNORECASE)
+        When: Evaluating against different case text
+        Then: All cases match
+        """
+        # Given: Regex with short "I" flag
+        config = EvaluatorSpec(
+            name="regex",
+            config={"pattern": "password", "flags": ["I"]}
+        )
+        evaluator = get_evaluator_instance(config)
+
+        # When/Then: All case variations should match
+        result = await evaluator.evaluate("PASSWORD")
+        assert result.matched is True
+
+        result = await evaluator.evaluate("password")
+        assert result.matched is True
+
+        result = await evaluator.evaluate("Password")
+        assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_regex_ignorecase_lowercase_flag(self):
+        """Test regex ignorecase flag works with lowercase.
+
+        Given: A regex pattern with lowercase 'ignorecase' flag
+        When: Evaluating against different case text
+        Then: All cases match
+        """
+        # Given: Regex with lowercase flag variant
+        config = EvaluatorSpec(
+            name="regex",
+            config={"pattern": "admin", "flags": ["ignorecase"]}
+        )
+        evaluator = get_evaluator_instance(config)
+
+        # When/Then: Should work with lowercase flag
+        result = await evaluator.evaluate("ADMIN")
+        assert result.matched is True
+
+        result = await evaluator.evaluate("admin")
+        assert result.matched is True

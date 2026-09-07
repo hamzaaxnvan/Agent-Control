@@ -333,3 +333,673 @@ test.describe('Modal Routing', () => {
     await expect(mockedPage).toHaveURL(
       getAgentControlsUrl({ modal: 'control-store', submodal: 'add-new' })
     );
+  });
+
+  test('opens create control modal via URL query parameters', async ({
+    mockedPage,
+  }) => {
+    await mockedPage.goto(
+      getAgentControlsUrl({
+        modal: 'control-store',
+        submodal: 'create',
+        evaluator: 'list',
+      })
+    );
+
+    // Control store and add-new modals should be visible (create is nested inside add-new)
+    const controlStoreModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Browse existing controls or create a new one' });
+    await expect(controlStoreModal).toBeVisible();
+
+    const addNewModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Select an evaluator to create a new control' });
+    await expect(addNewModal).toBeVisible();
+
+    // Create control modal should be visible
+    const createModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(createModal).toBeVisible();
+
+    // URL should contain all parameters
+    await expect(mockedPage).toHaveURL(
+      getAgentControlsUrl({
+        modal: 'control-store',
+        submodal: 'create',
+        evaluator: 'list',
+      })
+    );
+  });
+
+  test('opens edit control modal via URL query parameters (Copy flow)', async ({
+    mockedPage,
+  }) => {
+    // First, we need to get a control ID from the list
+    await mockedPage.goto(getAgentControlsUrl({ modal: 'control-store' }));
+    const modal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Browse existing controls or create a new one' });
+    await expect(modal).toBeVisible();
+
+    // Get the first control's ID (we'll use PII Detection which has ID 1 in mock data)
+    const targetRow = modal.locator('tr', { hasText: 'PII Detection' });
+    await targetRow.getByTestId('copy-control-button').click();
+
+    // Wait for the edit modal to open
+    const editModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(editModal).toBeVisible();
+
+    // URL should contain edit submodal and controlId
+    await expect(mockedPage).toHaveURL(
+      /\/agents\?id=agent-1&tab=controls&modal=control-store&submodal=edit&controlId=\d+/
+    );
+  });
+
+  test('closing create modal returns to add-new modal', async ({
+    mockedPage,
+  }) => {
+    await mockedPage.goto(
+      getAgentControlsUrl({
+        modal: 'control-store',
+        submodal: 'create',
+        evaluator: 'list',
+      })
+    );
+
+    // Verify create modal is open
+    const createModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(createModal).toBeVisible();
+
+    // Close the create modal via Cancel button
+    await createModal.getByRole('button', { name: 'Cancel' }).click();
+
+    // Wait for create modal to close
+    await expect(createModal).not.toBeVisible();
+
+    // Add-new modal should still be visible
+    const addNewModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Select an evaluator to create a new control' });
+    await expect(addNewModal).toBeVisible();
+
+    // URL should be back to add-new
+    await expect(mockedPage).toHaveURL(
+      getAgentControlsUrl({ modal: 'control-store', submodal: 'add-new' })
+    );
+  });
+
+  test('closing edit modal (Copy flow) closes completely', async ({
+    mockedPage,
+  }) => {
+    // Open control store and click Copy
+    await mockedPage.goto(getAgentControlsUrl({ modal: 'control-store' }));
+    const modal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Browse existing controls or create a new one' });
+    await expect(modal).toBeVisible();
+
+    const targetRow = modal.locator('tr', { hasText: 'PII Detection' });
+    await targetRow.getByTestId('copy-control-button').click();
+
+    // Wait for edit modal to open
+    const editModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(editModal).toBeVisible();
+
+    // Close the edit modal via Cancel button
+    await editModal.getByRole('button', { name: 'Cancel' }).click();
+
+    // Wait for edit modal to close
+    await expect(editModal).not.toBeVisible();
+
+    // Control store modal should still be visible
+    await expect(modal).toBeVisible();
+
+    // URL should only have modal parameter (no submodal)
+    await expect(mockedPage).toHaveURL(
+      getAgentControlsUrl({ modal: 'control-store' })
+    );
+  });
+
+  test('modal state persists on page refresh', async ({ mockedPage }) => {
+    // Open modals via URL
+    await mockedPage.goto(
+      getAgentControlsUrl({ modal: 'control-store', submodal: 'add-new' })
+    );
+
+    // Verify modals are open
+    const controlStoreModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Browse existing controls or create a new one' });
+    await expect(controlStoreModal).toBeVisible();
+
+    const addNewModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Select an evaluator to create a new control' });
+    await expect(addNewModal).toBeVisible();
+
+    // Refresh the page
+    await mockedPage.reload();
+
+    // Modals should still be open after refresh
+    await expect(controlStoreModal).toBeVisible();
+    await expect(addNewModal).toBeVisible();
+
+    // URL should still have the parameters
+    await expect(mockedPage).toHaveURL(
+      getAgentControlsUrl({ modal: 'control-store', submodal: 'add-new' })
+    );
+  });
+
+  test('navigating through modal flow updates URL correctly', async ({
+    mockedPage,
+  }) => {
+    // Start at control store
+    await mockedPage.goto(getAgentControlsUrl({ modal: 'control-store' }));
+    await expect(mockedPage).toHaveURL(
+      getAgentControlsUrl({ modal: 'control-store' })
+    );
+
+    // Click "Create Control" button
+    const controlStoreModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Browse existing controls or create a new one' });
+    await controlStoreModal.getByTestId('footer-new-control-button').click();
+
+    // URL should update to include submodal=add-new
+    await expect(mockedPage).toHaveURL(
+      getAgentControlsUrl({ modal: 'control-store', submodal: 'add-new' })
+    );
+
+    // Click "Use" on an evaluator
+    const addNewModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Select an evaluator to create a new control' });
+    const tableRow = addNewModal.locator('tbody tr').first();
+    await tableRow.getByRole('button', { name: 'Use' }).click();
+
+    // URL should update to include submodal=create and evaluator
+    await expect(mockedPage).toHaveURL(
+      /\/agents\?id=agent-1&tab=controls&modal=control-store&submodal=create&evaluator=\w+/
+    );
+
+    // Create modal should be visible
+    const createModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(createModal).toBeVisible();
+  });
+
+  test('can create a control from full JSON', async ({ mockedPage }) => {
+    const addNewModal = await openAddNewControlModal(mockedPage);
+    await addNewModal.getByTestId('from-json-button').click();
+
+    await expect(mockedPage).toHaveURL(
+      getAgentControlsUrl({
+        modal: 'control-store',
+        submodal: 'create',
+      })
+    );
+
+    const createModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(createModal).toBeVisible();
+    await expect(
+      createModal.getByTestId('control-json-textarea')
+    ).toBeVisible();
+
+    let createRequestBody: Record<string, unknown> | null = null;
+
+    await mockedPage.route('**/api/v1/controls', async (route, request) => {
+      if (request.method() === 'PUT') {
+        createRequestBody = (await request.postDataJSON()) as Record<
+          string,
+          unknown
+        >;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ control_id: 100 }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await mockedPage.route(
+      '**/api/v1/agents/*/controls/*',
+      async (route, request) => {
+        if (request.method() === 'POST') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true }),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    const jsonDefinition = {
+      description: 'Created from JSON',
+      enabled: true,
+      execution: 'server',
+      scope: { step_types: ['tool'], stages: ['pre'] },
+      condition: {
+        selector: { path: 'input.query' },
+        evaluator: {
+          name: 'sql',
+          config: { mode: 'strict' },
+        },
+      },
+      action: { decision: 'deny' },
+      tags: ['json'],
+    };
+
+    await createModal
+      .getByPlaceholder('Enter control name')
+      .fill('json-created-control');
+    await setJsonEditorValue(
+      mockedPage,
+      'control-json-textarea',
+      JSON.stringify(jsonDefinition, null, 2)
+    );
+
+    await createModal.getByRole('button', { name: /Save|Create/i }).click();
+
+    const confirmButton = mockedPage.locator("button:has-text('Confirm')");
+    await expect(confirmButton).toBeVisible({ timeout: 5000 });
+
+    const responsePromise = mockedPage.waitForResponse(
+      '**/api/v1/agents/*/controls/*',
+      { timeout: 10000 }
+    );
+    await confirmButton.click();
+    await responsePromise;
+
+    await expect.poll(() => createRequestBody).not.toBeNull();
+    expect(createRequestBody).toMatchObject({
+      name: 'json-created-control',
+      data: jsonDefinition,
+    });
+  });
+
+  test('closes all modals when control is successfully created', async ({
+    mockedPage,
+  }) => {
+    // Navigate to create modal via URL (simulating the full flow)
+    await mockedPage.goto(
+      getAgentControlsUrl({
+        modal: 'control-store',
+        submodal: 'create',
+        evaluator: 'list',
+      })
+    );
+
+    // Verify all modals are open
+    const controlStoreModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Browse existing controls or create a new one' });
+    await expect(controlStoreModal).toBeVisible();
+
+    const addNewModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Select an evaluator to create a new control' });
+    await expect(addNewModal).toBeVisible();
+
+    const createModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(createModal).toBeVisible();
+
+    // Mock successful API response for direct agent-control association
+    await mockedPage.route(
+      '**/api/v1/agents/*/controls/*',
+      async (route, request) => {
+        if (request.method() === 'POST') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true }),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    await mockedPage.route('**/api/v1/controls', async (route, request) => {
+      if (request.method() === 'PUT') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ control_id: 100 }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await mockedPage.route(
+      '**/api/v1/controls/*/data',
+      async (route, request) => {
+        if (request.method() === 'PUT') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({}),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    // Fill out the form and submit
+    const controlNameInput = createModal.getByPlaceholder('Enter control name');
+    await controlNameInput.fill('test-control');
+
+    // Fill in the required "Values" field for the list evaluator (at least one value required)
+    const valuesTextarea = createModal.getByPlaceholder(
+      'Enter values (one per line)'
+    );
+    await valuesTextarea.fill('test-value');
+
+    // Submit the form
+    const saveButton = createModal.getByRole('button', {
+      name: /Save|Create/i,
+    });
+    await saveButton.click();
+
+    // Wait for confirmation modal to appear
+    await mockedPage.waitForTimeout(300); // Wait for modal animation
+
+    // Find the confirm button by text - use locator to find button containing "Confirm"
+    const confirmButton = mockedPage.locator("button:has-text('Confirm')");
+    await expect(confirmButton).toBeVisible({ timeout: 5000 });
+
+    // Start waiting for API response before clicking (must be set up before the action)
+    const responsePromise = mockedPage.waitForResponse(
+      '**/api/v1/agents/*/controls/*',
+      { timeout: 10000 }
+    );
+    await confirmButton.click();
+
+    // Wait for API call to complete
+    await responsePromise;
+
+    // Wait for all modals to close
+    await expect(controlStoreModal).not.toBeVisible({ timeout: 5000 });
+    await expect(addNewModal).not.toBeVisible();
+    await expect(createModal).not.toBeVisible();
+
+    // URL should not contain any modal parameters
+    await expect(mockedPage).not.toHaveURL(/.*\?modal=/);
+  });
+
+  test('closes all modals when control is successfully copied', async ({
+    mockedPage,
+  }) => {
+    // Open control store and click Copy
+    await mockedPage.goto(getAgentControlsUrl({ modal: 'control-store' }));
+    const controlStoreModal = mockedPage
+      .getByRole('dialog')
+      .filter({ hasText: 'Browse existing controls or create a new one' });
+    await expect(controlStoreModal).toBeVisible();
+
+    const targetRow = controlStoreModal.locator('tr', {
+      hasText: 'PII Detection',
+    });
+    await targetRow.getByTestId('copy-control-button').click();
+
+    // Wait for edit modal to open
+    const editModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(editModal).toBeVisible();
+
+    // Wait for form to be initialized with control data (control name should contain "-copy")
+    const controlNameInput = editModal.getByPlaceholder('Enter control name');
+    await expect(controlNameInput).toHaveValue(/.*-copy$/, { timeout: 5000 });
+
+    // Set up mock routes for control creation flow (copying creates a new control)
+    await mockedPage.route(
+      '**/api/v1/agents/*/controls/*',
+      async (route, request) => {
+        if (request.method() === 'POST') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true }),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    await mockedPage.route('**/api/v1/controls', async (route, request) => {
+      if (request.method() === 'PUT') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ control_id: 100 }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await mockedPage.route(
+      '**/api/v1/controls/*/data',
+      async (route, request) => {
+        if (request.method() === 'PUT') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({}),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    // Submit the form
+    const saveButton = editModal.getByRole('button', { name: /Save|Create/i });
+    await saveButton.click();
+
+    // Wait for confirmation modal to appear
+    await mockedPage.waitForTimeout(300); // Wait for modal animation
+
+    // Find the confirm button
+    const confirmButton = mockedPage.locator("button:has-text('Confirm')");
+    await expect(confirmButton).toBeVisible({ timeout: 5000 });
+
+    // Start waiting for API response before clicking (must be set up before the action)
+    const responsePromise = mockedPage.waitForResponse(
+      '**/api/v1/agents/*/controls/*',
+      { timeout: 10000 }
+    );
+    await confirmButton.click();
+
+    // Wait for API call to complete
+    await responsePromise;
+
+    // Wait for all modals to close
+    await expect(controlStoreModal).not.toBeVisible({ timeout: 5000 });
+    await expect(editModal).not.toBeVisible();
+
+    // URL should not contain any modal parameters
+    await expect(mockedPage).not.toHaveURL(/.*\?modal=/);
+  });
+
+  test('cleans up created control when agent association fails', async ({
+    mockedPage,
+  }) => {
+    await mockedPage.goto(
+      getAgentControlsUrl({
+        modal: 'control-store',
+        submodal: 'create',
+        evaluator: 'list',
+      })
+    );
+
+    const createModal = mockedPage.getByRole('dialog', {
+      name: 'Create Control',
+    });
+    await expect(createModal).toBeVisible();
+
+    let cleanupDeleteCalls = 0;
+
+    await mockedPage.route(
+      '**/api/v1/agents/*/controls/*',
+      async (route, request) => {
+        if (request.method() === 'POST') {
+          await route.fulfill({
+            status: 400,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              detail: 'Control is incompatible with this agent',
+              error_code: 'POLICY_CONTROL_INCOMPATIBLE',
+            }),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    await mockedPage.route('**/api/v1/controls', async (route, request) => {
+      if (request.method() === 'PUT') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ control_id: 100 }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await mockedPage.route(
+      '**/api/v1/controls/*/data',
+      async (route, request) => {
+        if (request.method() === 'PUT') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true }),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    await mockedPage.route(
+      /\/api\/v1\/controls\/\d+\?force=true$/,
+      async (route, request) => {
+        if (request.method() === 'DELETE') {
+          cleanupDeleteCalls += 1;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              success: true,
+              dissociated_from_policies: [],
+              dissociated_from_agents: [],
+            }),
+          });
+        } else {
+          await route.continue();
+        }
+      }
+    );
+
+    const controlNameInput = createModal.getByPlaceholder('Enter control name');
+    await controlNameInput.fill('cleanup-test-control');
+    const valuesTextarea = createModal.getByPlaceholder(
+      'Enter values (one per line)'
+    );
+    await valuesTextarea.fill('value-1');
+
+    const saveButton = createModal.getByRole('button', {
+      name: /Save|Create/i,
+    });
+    await saveButton.click();
+
+    const confirmButton = mockedPage.locator("button:has-text('Confirm')");
+    await expect(confirmButton).toBeVisible({ timeout: 5000 });
+
+    const failedAssociationPromise = mockedPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        /\/api\/v1\/agents\/[^/]+\/controls\/\d+/.test(response.url()) &&
+        response.status() === 400,
+      { timeout: 10000 }
+    );
+    const cleanupDeletePromise = mockedPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' &&
+        /\/api\/v1\/controls\/\d+\?force=true/.test(response.url()) &&
+        response.status() === 200,
+      { timeout: 10000 }
+    );
+
+    await confirmButton.click();
+    await failedAssociationPromise;
+    await cleanupDeletePromise;
+
+    expect(cleanupDeleteCalls).toBe(1);
+  });
+});
+
+test.describe('Control Store - Loading States', () => {
+  test('shows error state when controls fail to load', async ({ page }) => {
+    await mockRoutes.config(page);
+    // Mock agent controls to return normally
+    await page.route('**/api/v1/agents/*/controls', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockData.controls),
+      });
+    });
+
+    // Mock agent to return normally
+    await page.route('**/api/v1/agents/*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockData.agent),
+      });
+    });
+
+    // Mock controls list to fail
+    await page.route('**/api/v1/controls**', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Failed to fetch controls' }),
+      });
+    });
+
+    await page.goto(getAgentRoute('agent-1', { tab: 'controls' }));
+
+    // Open the control store modal
+    await page.getByTestId('add-control-button').first().click();
+
+    // Should show error state
+    await expect(page.getByText('Failed to load controls')).toBeVisible();
+  });
+});
