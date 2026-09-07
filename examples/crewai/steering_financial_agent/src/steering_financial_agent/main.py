@@ -113,3 +113,119 @@ def main():
 
     if not os.getenv("OPENAI_API_KEY"):
         print("\nSet OPENAI_API_KEY to run this example.")
+        return
+
+    crew = create_financial_crew()
+
+    # ── Scenario 1: Small Legitimate Transfer ───────────────────────
+    # Amount < $10k, known country, low fraud → OBSERVE only
+    # Unknown recipient → OBSERVE (recorded, not blocked)
+    run_scenario(
+        crew,
+        1,
+        "Small Legitimate Transfer (OBSERVE)",
+        {
+            "amount": 2500,
+            "recipient": "New Vendor XYZ",
+            "destination_country": "Germany",
+            "fraud_score": 0.1,
+        },
+        "Allowed with an observe event (new recipient recorded for audit)",
+    )
+
+    # ── Scenario 2: Sanctioned Country ──────────────────────────────
+    # Destination is North Korea → DENY immediately
+    run_scenario(
+        crew,
+        2,
+        "Sanctioned Country (DENY)",
+        {
+            "amount": 500,
+            "recipient": "Trade Partner",
+            "destination_country": "North Korea",
+            "fraud_score": 0.0,
+        },
+        "DENIED - OFAC sanctioned country",
+    )
+
+    # ── Scenario 3: Large Transfer Requiring 2FA ────────────────────
+    # Amount $15k → STEER (2FA required), agent verifies, retries successfully
+    run_scenario(
+        crew,
+        3,
+        "Large Transfer - 2FA Steering (STEER then success)",
+        {
+            "amount": 15000,
+            "recipient": "Acme Corp",
+            "destination_country": "United Kingdom",
+            "fraud_score": 0.2,
+        },
+        "STEERED (2FA), then succeeded after verification",
+    )
+
+    # ── Scenario 4: Very Large Transfer Requiring Manager Approval ──
+    # Amount $75k → STEER (2FA + manager approval), agent handles both successfully
+    run_scenario(
+        crew,
+        4,
+        "Very Large Transfer - Manager Approval (STEER then success)",
+        {
+            "amount": 75000,
+            "recipient": "Global Suppliers Inc",
+            "destination_country": "Japan",
+            "fraud_score": 0.15,
+        },
+        "STEERED (2FA + manager), then ALLOWED after approvals",
+    )
+
+    # ── Scenario 5: Fraud Detected ──────────────────────────────────
+    # Fraud score 0.95 → DENY immediately
+    run_scenario(
+        crew,
+        5,
+        "High Fraud Score (DENY)",
+        {
+            "amount": 3000,
+            "recipient": "Suspicious Entity",
+            "destination_country": "Cayman Islands",
+            "fraud_score": 0.95,
+        },
+        "DENIED - fraud score exceeds threshold",
+    )
+
+    # ── Summary ─────────────────────────────────────────────────────
+    print("=" * 60)
+    print("  Demo Complete!")
+    print("=" * 60)
+    print("""
+  Action Types Demonstrated:
+
+    DENY   Sanctioned country (Scenario 2) - hard block, no recovery
+           High fraud score (Scenario 5)   - hard block, no recovery
+
+    STEER  2FA verification (Scenario 3)   - pause, verify, retry
+           Manager approval (Scenario 4)   - pause, collect + approve, retry
+
+    OBSERVE New recipient (Scenario 1)      - recorded for audit, not blocked
+            PII in output (if triggered)    - recorded for compliance, not blocked
+
+  Key Differences:
+    DENY  = ControlViolationError (agent cannot recover)
+    STEER = ControlSteerError     (agent corrects and retries)
+    OBSERVE = Recorded silently   (agent continues uninterrupted)
+""")
+
+
+def run():
+    """Entry point for [project.scripts]."""
+    try:
+        main()
+    finally:
+        agent_control.shutdown()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        agent_control.shutdown()
