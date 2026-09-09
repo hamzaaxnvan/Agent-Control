@@ -29,3 +29,99 @@ import {
 } from "./template-value.js";
 
 /**
+ * Where this control executes
+ */
+export const Execution = {
+  Server: "server",
+  SDK: "sdk",
+} as const;
+/**
+ * Where this control executes
+ */
+export type Execution = OpenEnum<typeof Execution>;
+
+/**
+ * A control definition to evaluate agent interactions.
+ *
+ * @remarks
+ *
+ * This model contains only the logic and configuration.
+ * Identity fields (id, name) are managed by the database.
+ */
+export type ControlDefinitionOutput = {
+  /**
+   * What to do when control matches.
+   */
+  action: ControlAction;
+  /**
+   * Recursive boolean condition tree for control evaluation.
+   */
+  condition: ConditionNodeOutput;
+  /**
+   * Detailed description of the control
+   */
+  description?: string | null | undefined;
+  /**
+   * Whether this control is active
+   */
+  enabled: boolean;
+  /**
+   * Where this control executes
+   */
+  execution: Execution;
+  /**
+   * Defines when a control applies to a Step.
+   */
+  scope?: ControlScope | undefined;
+  /**
+   * Tags for categorization
+   */
+  tags?: Array<string> | undefined;
+  /**
+   * Template metadata for template-backed controls
+   */
+  template?: TemplateDefinitionOutput | null | undefined;
+  /**
+   * Resolved parameter values for template-backed controls
+   */
+  templateValues?: { [k: string]: TemplateValue } | null | undefined;
+};
+
+/** @internal */
+export const Execution$inboundSchema: z.ZodMiniType<Execution, unknown> =
+  openEnums.inboundSchema(Execution);
+
+/** @internal */
+export const ControlDefinitionOutput$inboundSchema: z.ZodMiniType<
+  ControlDefinitionOutput,
+  unknown
+> = z.pipe(
+  z.object({
+    action: ControlAction$inboundSchema,
+    condition: ConditionNodeOutput$inboundSchema,
+    description: z.optional(z.nullable(types.string())),
+    enabled: z._default(types.boolean(), true),
+    execution: Execution$inboundSchema,
+    scope: types.optional(ControlScope$inboundSchema),
+    tags: types.optional(z.array(types.string())),
+    template: z.optional(z.nullable(TemplateDefinitionOutput$inboundSchema)),
+    template_values: z.optional(
+      z.nullable(z.record(z.string(), TemplateValue$inboundSchema)),
+    ),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "template_values": "templateValues",
+    });
+  }),
+);
+
+export function controlDefinitionOutputFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlDefinitionOutput, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlDefinitionOutput$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlDefinitionOutput' from JSON`,
+  );
+}
