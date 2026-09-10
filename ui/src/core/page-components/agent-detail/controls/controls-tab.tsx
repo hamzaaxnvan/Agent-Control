@@ -39,3 +39,45 @@ export function ControlsTab({
         color="red"
       >
         Failed to fetch controls. Please try again later.
+      </Alert>
+    );
+  }
+
+  if (controls.length === 0) {
+    return (
+      <Paper p="xl" withBorder radius="sm" ta="center">
+        <Stack align="center" gap="md" py="xl">
+          <IconInbox size={48} color="var(--mantine-color-gray-4)" />
+          <Stack gap="xs" align="center">
+            <Text fw={500} c="dimmed">
+              No controls configured
+            </Text>
+            <Text size="sm" c="dimmed">
+              This agent doesn&apos;t have any controls set up yet.
+            </Text>
+          </Stack>
+          <Button
+            variant="filled"
+            mt="md"
+            data-testid="add-control-button"
+            onClick={onAddControl}
+          >
+            Add Control
+          </Button>
+        </Stack>
+      </Paper>
+    );
+  }
+
+  return (
+    <Box>
+      <Table
+        columns={columns}
+        data={controls}
+        maxHeight="calc(100dvh - 270px)"
+        highlightOnHover
+        withColumnBorders
+      />
+    </Box>
+  );
+}
