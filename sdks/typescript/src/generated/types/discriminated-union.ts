@@ -48,3 +48,54 @@ export function discriminatedUnion<
     outputPropertyName?: OutputDiscriminator;
   } = {},
 ): z.ZodMiniType<
+  | z.output<TOptions[keyof TOptions]>
+  | Unknown<OutputDiscriminator, UnknownValue>,
+  unknown
+> {
+  const { unknownValue = "UNKNOWN" as UnknownValue, outputPropertyName } = opts;
+  return z.pipe(
+    z.unknown(),
+    z.transform((input) => {
+      const fallback = Object.defineProperties(
+        {
+          raw: input,
+          [outputPropertyName ?? inputPropertyName]: unknownValue,
+          isUnknown: true as const,
+        },
+        { [UNKNOWN]: { value: true, enumerable: false, configurable: false } },
+      );
+
+      const isObject = typeof input === "object" && input !== null;
+      if (!isObject) return fallback;
+
+      const discriminator = input[inputPropertyName as keyof typeof input];
+      if (typeof discriminator !== "string") return fallback;
+      if (!(discriminator in options)) return fallback;
+
+      const schema = options[discriminator];
+      if (!schema) return fallback;
+
+      // Start counters before parsing to track nested unrecognized/zeroDefault values
+      const unrecognizedCtr = startCountingUnrecognized();
+      const zeroDefaultCtr = startCountingDefaultToZeroValue();
+
+      const result = z.safeParse(schema, input);
+      if (!result.success) {
+        // Parse failed - don't propagate any counts from the failed attempt
+        unrecognizedCtr.end(0);
+        zeroDefaultCtr.end(0);
+        return fallback;
+      }
+
+      // Parse succeeded - propagate the actual counts
+      unrecognizedCtr.end();
+      zeroDefaultCtr.end();
+
+      if (outputPropertyName) {
+        (result.data as any)[outputPropertyName] = discriminator;
+      }
+
+      return result.data;
+    }),
+  ) as any;
+}
