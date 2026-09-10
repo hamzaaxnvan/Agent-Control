@@ -312,3 +312,317 @@ class APIValidationError(APIError):
         error_code: ErrorCode,
         detail: str,
         *,
+        errors: list[ValidationErrorItem] | None = None,
+        resource: str | None = None,
+        hint: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            status_code=422,
+            error_code=error_code,
+            reason=ErrorReason.UNPROCESSABLE_ENTITY,
+            detail=detail,
+            errors=errors,
+            resource=resource,
+            hint=hint,
+            **kwargs,
+        )
+
+
+class BadRequestError(APIError):
+    """Bad request error (400)."""
+
+    def __init__(
+        self,
+        error_code: ErrorCode,
+        detail: str,
+        *,
+        errors: list[ValidationErrorItem] | None = None,
+        hint: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            status_code=400,
+            error_code=error_code,
+            reason=ErrorReason.BAD_REQUEST,
+            detail=detail,
+            errors=errors,
+            hint=hint,
+            **kwargs,
+        )
+
+
+class AuthenticationError(APIError):
+    """Authentication error (401)."""
+
+    def __init__(
+        self,
+        error_code: ErrorCode,
+        detail: str,
+        *,
+        hint: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            status_code=401,
+            error_code=error_code,
+            reason=ErrorReason.UNAUTHORIZED,
+            detail=detail,
+            hint=hint,
+            **kwargs,
+        )
+
+
+class ForbiddenError(APIError):
+    """Authorization/permission error (403)."""
+
+    def __init__(
+        self,
+        error_code: ErrorCode,
+        detail: str,
+        *,
+        hint: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            status_code=403,
+            error_code=error_code,
+            reason=ErrorReason.FORBIDDEN,
+            detail=detail,
+            hint=hint,
+            **kwargs,
+        )
+
+
+# =============================================================================
+# Server Error Classes (5xx)
+# =============================================================================
+
+
+class DatabaseError(APIError):
+    """Database operation error (500)."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        resource: str | None = None,
+        operation: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        hint = "This is a server-side issue. Please try again later or contact support."
+        if operation:
+            hint = f"Failed during {operation}. {hint}"
+
+        super().__init__(
+            status_code=500,
+            error_code=ErrorCode.DATABASE_ERROR,
+            reason=ErrorReason.INTERNAL_ERROR,
+            detail=detail,
+            resource=resource,
+            hint=hint,
+            **kwargs,
+        )
+
+
+class InternalError(APIError):
+    """Internal server error (500)."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        hint: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            status_code=500,
+            error_code=ErrorCode.INTERNAL_ERROR,
+            reason=ErrorReason.INTERNAL_ERROR,
+            detail=detail,
+            hint=hint or "This is an unexpected error. Please try again or contact support.",
+            **kwargs,
+        )
+
+
+# =============================================================================
+# Exception Handlers
+# =============================================================================
+
+
+async def api_error_handler(request: Request, exc: APIError) -> JSONResponse:
+    """
+    Exception handler for APIError instances.
+
+    Converts APIError exceptions to RFC 7807 JSON responses.
+    """
+    problem = _sanitize_problem_detail(exc.to_problem_detail(instance=str(request.url.path)))
+
+    # Add headers for auth errors
+    headers: dict[str, str] | None = None
+    if exc.status_code == 401:
+        headers = {"WWW-Authenticate": "ApiKey"}
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=problem.model_dump(mode="json", exclude_none=True),
+        headers=headers,
+    )
+
+
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    """
+    Exception handler for standard HTTPException.
+
+    Converts generic HTTPException to RFC 7807 format for consistency.
+    This handles cases where HTTPException is raised directly (legacy code)
+    or from FastAPI internals.
+    """
+    # Map status codes to error codes and reasons
+    status_to_error: dict[int, tuple[ErrorCode, ErrorReason]] = {
+        400: (ErrorCode.VALIDATION_ERROR, ErrorReason.BAD_REQUEST),
+        401: (ErrorCode.AUTH_INVALID_KEY, ErrorReason.UNAUTHORIZED),
+        403: (ErrorCode.AUTH_INSUFFICIENT_PRIVILEGES, ErrorReason.FORBIDDEN),
+        404: (ErrorCode.RESOURCE_NOT_FOUND, ErrorReason.NOT_FOUND),
+        409: (ErrorCode.CONTROL_NAME_CONFLICT, ErrorReason.CONFLICT),
+        422: (ErrorCode.VALIDATION_ERROR, ErrorReason.UNPROCESSABLE_ENTITY),
+        500: (ErrorCode.INTERNAL_ERROR, ErrorReason.INTERNAL_ERROR),
+    }
+
+    error_code, reason = status_to_error.get(
+        exc.status_code, (ErrorCode.INTERNAL_ERROR, ErrorReason.UNKNOWN)
+    )
+
+    # Extract detail - handle both string and dict details
+    if isinstance(exc.detail, dict):
+        detail_value = exc.detail.get("message")
+        detail_str = str(detail_value) if detail_value is not None else str(exc.detail)
+    else:
+        detail_str = str(exc.detail)
+
+    problem = ProblemDetail(
+        type=make_error_type(error_code),
+        title=ERROR_TITLES.get(error_code, "Error"),
+        status=exc.status_code,
+        detail=detail_str,
+        instance=str(request.url.path),
+        error_code=error_code,
+        reason=reason,
+        metadata=ErrorMetadata(),
+    )
+    problem = _sanitize_problem_detail(problem)
+
+    headers: dict[str, str] | None = None
+    if exc.status_code == 401:
+        headers = {"WWW-Authenticate": "ApiKey"}
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=problem.model_dump(mode="json", exclude_none=True),
+        headers=headers,
+    )
+
+
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Exception handler for unhandled exceptions.
+
+    Converts unexpected exceptions to RFC 7807 format.
+
+    SECURITY NOTE: Stack traces are NEVER exposed to users, even in debug mode.
+    Debug information is only logged server-side.
+    """
+    # Generate a correlation ID for support to look up the full error in logs
+    # In production, you'd want to use a proper request ID from middleware
+    error_id = str(uuid.uuid4())[:8]
+    _logger.error(
+        "Unhandled exception (error_id=%s, path=%s, method=%s)",
+        error_id,
+        request.url.path,
+        request.method,
+        exc_info=True,
+    )
+
+    problem = ProblemDetail(
+        type=make_error_type(ErrorCode.INTERNAL_ERROR),
+        title="Internal Server Error",
+        status=500,
+        detail=_GENERIC_INTERNAL_DETAIL,
+        instance=str(request.url.path),
+        error_code=ErrorCode.INTERNAL_ERROR,
+        reason=ErrorReason.INTERNAL_ERROR,
+        metadata=ErrorMetadata(request_id=error_id),
+        hint=f"Reference error ID '{error_id}' when contacting support.",
+    )
+    problem = _sanitize_problem_detail(problem)
+
+    return JSONResponse(
+        status_code=500,
+        content=problem.model_dump(mode="json", exclude_none=True),
+    )
+
+
+async def validation_exception_handler(
+    request: Request, exc: "RequestValidationError"
+) -> JSONResponse:
+    """
+    Exception handler for Pydantic/FastAPI validation errors.
+
+    Converts validation errors to GitHub-style error arrays within RFC 7807 format.
+    """
+    # Convert Pydantic errors to our format
+    errors: list[ValidationErrorItem] = []
+
+    for error in exc.errors():
+        # Build field path from location
+        loc = error.get("loc", ())
+        # Skip 'body' prefix in location
+        field_parts = [p for p in loc if p != "body"]
+        field = format_field_path(field_parts)
+
+        # Determine resource from first path component
+        resource = "Request"
+        if field_parts:
+            # Map common prefixes to resources
+            prefix_map = {
+                "agent": "Agent",
+                "steps": "Step",
+                "evaluators": "Evaluator",
+                "data": "Control",
+                "policy": "Policy",
+            }
+            first_part = str(field_parts[0]).lower()
+            resource = prefix_map.get(first_part, resource)
+
+        errors.append(
+            ValidationErrorItem(
+                resource=resource,
+                field=field,
+                code=str(error.get("type", "validation_error")),
+                message=str(error.get("msg", "Validation failed")),
+                value=error.get("input"),
+            )
+        )
+
+    problem = ProblemDetail(
+        type=make_error_type(ErrorCode.VALIDATION_ERROR),
+        title="Validation Error",
+        status=422,
+        detail=f"Request validation failed with {len(errors)} error(s)",
+        instance=str(request.url.path),
+        error_code=ErrorCode.VALIDATION_ERROR,
+        reason=ErrorReason.UNPROCESSABLE_ENTITY,
+        metadata=ErrorMetadata(),
+        errors=errors,
+        hint="Check the 'errors' array for field-level validation details.",
+    )
+    problem = _sanitize_problem_detail(problem)
+
+    return JSONResponse(
+        status_code=422,
+        content=problem.model_dump(mode="json", exclude_none=True),
+    )
+
+
+# Type hint import for the handler
+from fastapi.exceptions import RequestValidationError  # noqa: E402

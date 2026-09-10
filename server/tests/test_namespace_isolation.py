@@ -116,3 +116,121 @@ def test_policies_same_name_different_namespaces_allowed(
     _insert_policy(db_engine, namespace_key="ns-one", name="default-policy")
     _insert_policy(db_engine, namespace_key="ns-two", name="default-policy")
 
+
+# Same-namespace duplicate rejection.
+
+
+def test_agents_same_namespace_duplicate_name_rejected(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    name = _agent_name()
+    _insert_agent(db_engine, namespace_key="ns-one", name=name)
+    with pytest.raises(IntegrityError):
+        _insert_agent(db_engine, namespace_key="ns-one", name=name)
+
+
+def test_controls_same_namespace_duplicate_live_name_rejected(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    _insert_control(db_engine, namespace_key="ns-one", name="pii-blocker")
+    with pytest.raises(IntegrityError):
+        _insert_control(db_engine, namespace_key="ns-one", name="pii-blocker")
+
+
+def test_policies_same_namespace_duplicate_name_rejected(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    _insert_policy(db_engine, namespace_key="ns-one", name="default-policy")
+    with pytest.raises(IntegrityError):
+        _insert_policy(db_engine, namespace_key="ns-one", name="default-policy")
+
+
+# Soft-deleted controls still allow name reuse within the same namespace, since
+# the partial unique index excludes soft-deleted rows.
+
+
+def test_controls_soft_deleted_name_can_be_reused_within_namespace(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    _insert_control(
+        db_engine, namespace_key="ns-one", name="pii-blocker", deleted=True
+    )
+    _insert_control(db_engine, namespace_key="ns-one", name="pii-blocker")
+
+
+# Same-namespace foreign key enforcement.
+
+
+def test_agent_controls_rejects_cross_namespace_agent_reference(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    name = _agent_name()
+    _insert_agent(db_engine, namespace_key="ns-one", name=name)
+    control_id = _insert_control(
+        db_engine, namespace_key="ns-two", name="pii-blocker"
+    )
+    with pytest.raises(IntegrityError), db_engine.begin() as conn:
+        # The agent lives in ns-one but we try to attach a ns-two control to it
+        # via a row stamped ns-two; ns-two has no agent with this name.
+        conn.execute(
+            text(
+                "INSERT INTO agent_controls (namespace_key, agent_name, control_id) "
+                "VALUES (:ns, :agent_name, :control_id)"
+            ),
+            {"ns": "ns-two", "agent_name": name, "control_id": control_id},
+        )
+
+
+def test_agent_controls_rejects_cross_namespace_control_reference(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    name = _agent_name()
+    _insert_agent(db_engine, namespace_key="ns-one", name=name)
+    control_id = _insert_control(
+        db_engine, namespace_key="ns-two", name="pii-blocker"
+    )
+    with pytest.raises(IntegrityError), db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO agent_controls (namespace_key, agent_name, control_id) "
+                "VALUES (:ns, :agent_name, :control_id)"
+            ),
+            {"ns": "ns-one", "agent_name": name, "control_id": control_id},
+        )
+
+
+def test_agent_policies_rejects_cross_namespace_policy_reference(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    name = _agent_name()
+    _insert_agent(db_engine, namespace_key="ns-one", name=name)
+    policy_id = _insert_policy(
+        db_engine, namespace_key="ns-two", name="default-policy"
+    )
+    with pytest.raises(IntegrityError), db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO agent_policies (namespace_key, agent_name, policy_id) "
+                "VALUES (:ns, :agent_name, :policy_id)"
+            ),
+            {"ns": "ns-one", "agent_name": name, "policy_id": policy_id},
+        )
+
+
+def test_policy_controls_rejects_cross_namespace_reference(
+    db_engine: Engine, clean_tables: None
+) -> None:
+    policy_id = _insert_policy(
+        db_engine, namespace_key="ns-one", name="default-policy"
+    )
+    control_id = _insert_control(
+        db_engine, namespace_key="ns-two", name="pii-blocker"
+    )
+    with pytest.raises(IntegrityError), db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO policy_controls (namespace_key, policy_id, control_id) "
+                "VALUES (:ns, :policy_id, :control_id)"
+            ),
+            {"ns": "ns-one", "policy_id": policy_id, "control_id": control_id},
+        )
