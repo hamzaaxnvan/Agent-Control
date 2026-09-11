@@ -17,3 +17,22 @@ export function useAgent(
       GetAgentResponse,
       Error,
       GetAgentResponse,
+      readonly unknown[]
+    >,
+    'queryKey' | 'queryFn'
+  >
+): UseQueryResult<GetAgentResponse, Error> {
+  const { enabled, ...rest } = options ?? {};
+  const isEnabled = enabled ?? Boolean(agentId);
+
+  return useQuery({
+    queryKey: ['agent', agentId],
+    queryFn: async () => {
+      const { data, error } = await api.agents.get(agentId);
+      if (error) throw error;
+      return data;
+    },
+    enabled: isEnabled,
+    ...rest,
+  });
+}
