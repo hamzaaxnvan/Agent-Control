@@ -27,3 +27,32 @@ export type GetAgentResponse = {
    * Each agent has a unique immutable name and can have multiple steps registered with it.
    */
   agent: Agent;
+  /**
+   * Custom evaluators registered with this agent
+   */
+  evaluators?: Array<EvaluatorSchema> | undefined;
+  /**
+   * Steps registered with this agent
+   */
+  steps: Array<StepSchema>;
+};
+
+/** @internal */
+export const GetAgentResponse$inboundSchema: z.ZodMiniType<
+  GetAgentResponse,
+  unknown
+> = z.object({
+  agent: Agent$inboundSchema,
+  evaluators: types.optional(z.array(EvaluatorSchema$inboundSchema)),
+  steps: z.array(StepSchema$inboundSchema),
+});
+
+export function getAgentResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetAgentResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetAgentResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetAgentResponse' from JSON`,
+  );
+}
