@@ -14,3 +14,20 @@ export type GetControlSchemaResponse = {
   schema: { [k: string]: any };
 };
 
+/** @internal */
+export const GetControlSchemaResponse$inboundSchema: z.ZodMiniType<
+  GetControlSchemaResponse,
+  unknown
+> = z.object({
+  schema: z.record(z.string(), z.any()),
+});
+
+export function getControlSchemaResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlSchemaResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlSchemaResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlSchemaResponse' from JSON`,
+  );
+}
