@@ -133,3 +133,139 @@ actions:
   - target: $["paths"]["/api/v1/control-bindings/{binding_id}"]["get"]
     update:
       x-speakeasy-group: controlBindings
+      x-speakeasy-name-override: get
+
+  - target: $["paths"]["/api/v1/control-bindings/{binding_id}"]["patch"]
+    update:
+      x-speakeasy-group: controlBindings
+      x-speakeasy-name-override: update
+
+  - target: $["paths"]["/api/v1/control-bindings/{binding_id}"]["delete"]
+    update:
+      x-speakeasy-group: controlBindings
+      x-speakeasy-name-override: delete
+
+  - target: $["paths"]["/api/v1/control-templates/render"]["post"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: renderTemplate
+
+  - target: $["paths"]["/api/v1/controls"]["get"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: list
+
+  - target: $["paths"]["/api/v1/controls"]["put"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: create
+
+  - target: $["paths"]["/api/v1/controls/schema"]["get"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: getSchema
+
+  - target: $["paths"]["/api/v1/controls/validate"]["post"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: validateData
+
+  - target: $["paths"]["/api/v1/controls/{control_id}"]["get"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: get
+
+  - target: $["paths"]["/api/v1/controls/{control_id}"]["patch"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: updateMetadata
+
+  - target: $["paths"]["/api/v1/controls/{control_id}"]["delete"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: delete
+
+  - target: $["paths"]["/api/v1/controls/{control_id}/clone-and-bind"]["post"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: cloneAndBindControl
+
+  - target: $["paths"]["/api/v1/controls/{control_id}/data"]["get"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: getData
+
+  - target: $["paths"]["/api/v1/controls/{control_id}/data"]["put"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: updateData
+
+  - target: $["paths"]["/api/v1/controls/{control_id}/versions"]["get"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: listVersions
+
+  - target: $["paths"]["/api/v1/controls/{control_id}/versions/{version_num}"]["get"]
+    update:
+      x-speakeasy-group: controls
+      x-speakeasy-name-override: getVersion
+
+  - target: $["paths"]["/api/v1/evaluation"]["post"]
+    update:
+      x-speakeasy-group: evaluation
+      x-speakeasy-name-override: evaluate
+
+  - target: $["paths"]["/api/v1/evaluators"]["get"]
+    update:
+      x-speakeasy-group: evaluators
+      x-speakeasy-name-override: list
+
+  - target: $["paths"]["/api/v1/observability/events"]["post"]
+    update:
+      x-speakeasy-group: observability
+      x-speakeasy-name-override: ingestEvents
+
+  - target: $["paths"]["/api/v1/observability/events/query"]["post"]
+    update:
+      x-speakeasy-group: observability
+      x-speakeasy-name-override: queryEvents
+
+  - target: $["paths"]["/api/v1/observability/stats"]["get"]
+    update:
+      x-speakeasy-group: observability
+      x-speakeasy-name-override: getStats
+
+  - target: $["paths"]["/api/v1/observability/stats/controls/{control_id}"]["get"]
+    update:
+      x-speakeasy-group: observability
+      x-speakeasy-name-override: getControlStats
+
+  - target: $["paths"]["/api/v1/observability/status"]["get"]
+    update:
+      x-speakeasy-group: observability
+      x-speakeasy-name-override: getStatus
+
+  - target: $["paths"]["/api/v1/policies"]["put"]
+    update:
+      x-speakeasy-group: policies
+      x-speakeasy-name-override: create
+
+  - target: $["paths"]["/api/v1/policies/{policy_id}/controls"]["get"]
+    update:
+      x-speakeasy-group: policies
+      x-speakeasy-name-override: listControls
+
+  - target: $["paths"]["/api/v1/policies/{policy_id}/controls/{control_id}"]["post"]
+    update:
+      x-speakeasy-group: policies
+      x-speakeasy-name-override: addControl
+
+  - target: $["paths"]["/api/v1/policies/{policy_id}/controls/{control_id}"]["delete"]
+    update:
+      x-speakeasy-group: policies
+      x-speakeasy-name-override: removeControl
+
+  - target: $["paths"]["/health"]["get"]
+    update:
+      x-speakeasy-group: system
+      x-speakeasy-name-override: healthCheck
