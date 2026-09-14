@@ -20,3 +20,26 @@ export const regexEvaluator: EvaluatorDefinition<RegexFormValues> = {
       if (!value || (value as string).trim() === '') {
         return 'Pattern is required';
       }
+      try {
+        new RegExp(value as string);
+        return null;
+      } catch (error) {
+        return `Invalid regex pattern: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`;
+      }
+    },
+  },
+
+  toConfig: (values) => ({
+    pattern: values.pattern,
+  }),
+
+  fromConfig: (config) => ({
+    pattern: (config.pattern as string) || '^.*$',
+  }),
+
+  FormComponent: RegexForm,
+};
+
+export type { RegexFormValues } from './types';
