@@ -26,3 +26,32 @@ export function SearchInput({
 }: SearchInputProps) {
   const [searchQuery, setSearchQuery] = useQueryParam(queryKey);
 
+  const showClearButton = useMemo(() => {
+    return searchQuery.length > 0;
+  }, [searchQuery]);
+
+  const handleClear = () => {
+    setSearchQuery('');
+  };
+
+  return (
+    <TextInput
+      placeholder={placeholder}
+      leftSection={<IconSearch size={16} />}
+      rightSection={
+        showClearButton ? (
+          <IconX
+            size={16}
+            style={{ cursor: 'pointer' }}
+            onClick={handleClear}
+            data-testid={`search-clear-${queryKey}`}
+          />
+        ) : null
+      }
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.currentTarget.value)}
+      w={w}
+      {...rest}
+    />
+  );
+}
