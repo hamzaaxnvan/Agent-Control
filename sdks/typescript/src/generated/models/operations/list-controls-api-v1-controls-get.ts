@@ -36,3 +36,81 @@ export type ListControlsApiV1ControlsGetRequest = {
    */
   stage?: string | null | undefined;
   /**
+   * Filter by execution ('server' or 'sdk')
+   */
+  execution?: string | null | undefined;
+  /**
+   * Filter by tag
+   */
+  tag?: string | null | undefined;
+  /**
+   * When true, include direct agent associations, policy associations, and, when target filters are supplied, target bindings for each listed control.
+   */
+  includeAttachments?: boolean | undefined;
+  /**
+   * Optional target_type filter applied to the returned controls and expanded target bindings. Only used when include_attachments=true.
+   */
+  attachmentTargetType?: string | null | undefined;
+  /**
+   * Optional target_id filter applied to the returned controls and expanded target bindings. Only used when include_attachments=true.
+   */
+  attachmentTargetId?: string | null | undefined;
+};
+
+/** @internal */
+export type ListControlsApiV1ControlsGetRequest$Outbound = {
+  cursor?: number | null | undefined;
+  limit: number;
+  name?: string | null | undefined;
+  enabled?: boolean | null | undefined;
+  template_backed?: boolean | null | undefined;
+  cloned?: boolean | null | undefined;
+  step_type?: string | null | undefined;
+  stage?: string | null | undefined;
+  execution?: string | null | undefined;
+  tag?: string | null | undefined;
+  include_attachments: boolean;
+  attachment_target_type?: string | null | undefined;
+  attachment_target_id?: string | null | undefined;
+};
+
+/** @internal */
+export const ListControlsApiV1ControlsGetRequest$outboundSchema: z.ZodMiniType<
+  ListControlsApiV1ControlsGetRequest$Outbound,
+  ListControlsApiV1ControlsGetRequest
+> = z.pipe(
+  z.object({
+    cursor: z.optional(z.nullable(z.int())),
+    limit: z._default(z.int(), 20),
+    name: z.optional(z.nullable(z.string())),
+    enabled: z.optional(z.nullable(z.boolean())),
+    templateBacked: z.optional(z.nullable(z.boolean())),
+    cloned: z.optional(z.nullable(z.boolean())),
+    stepType: z.optional(z.nullable(z.string())),
+    stage: z.optional(z.nullable(z.string())),
+    execution: z.optional(z.nullable(z.string())),
+    tag: z.optional(z.nullable(z.string())),
+    includeAttachments: z._default(z.boolean(), false),
+    attachmentTargetType: z.optional(z.nullable(z.string())),
+    attachmentTargetId: z.optional(z.nullable(z.string())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      templateBacked: "template_backed",
+      stepType: "step_type",
+      includeAttachments: "include_attachments",
+      attachmentTargetType: "attachment_target_type",
+      attachmentTargetId: "attachment_target_id",
+    });
+  }),
+);
+
+export function listControlsApiV1ControlsGetRequestToJSON(
+  listControlsApiV1ControlsGetRequest: ListControlsApiV1ControlsGetRequest,
+): string {
+  return JSON.stringify(
+    ListControlsApiV1ControlsGetRequest$outboundSchema.parse(
+      listControlsApiV1ControlsGetRequest,
+    ),
+  );
+}
