@@ -179,3 +179,185 @@ export function CreateFromTemplate({
           } else {
             notifications.show({
               title: 'Failed to create control',
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'An unexpected error occurred',
+              color: 'red',
+            });
+          }
+        }
+      },
+    });
+  };
+
+  return (
+    <Box>
+      {/* Header */}
+      <Box p="md">
+        <Group justify="space-between" mb="xs">
+          <Title order={3} fw={600}>
+            Create from Template
+          </Title>
+          <Button
+            size="sm"
+            onClick={onClose}
+            data-testid="close-template-modal-button"
+          >
+            <IconX size={16} />
+          </Button>
+        </Group>
+        <Text size="sm" c="dimmed">
+          {step === 'paste'
+            ? 'Paste a template definition JSON to get started'
+            : 'Fill in the template parameters and create the control'}
+        </Text>
+      </Box>
+      <Divider />
+
+      {step === 'paste' ? (
+        <Box p="md">
+          <Stack gap="md">
+            <Textarea
+              label="Template definition (JSON)"
+              placeholder={`{
+  "parameters": {
+    "pattern": {
+      "type": "regex_re2",
+      "label": "Pattern"
+    }
+  },
+  "definition_template": {
+    "execution": "server",
+    "scope": { "stages": ["pre"] },
+    "condition": {
+      "selector": { "path": "input" },
+      "evaluator": {
+        "name": "regex",
+        "config": { "pattern": { "$param": "pattern" } }
+      }
+    },
+    "action": { "decision": "deny" }
+  }
+}`}
+              value={jsonText}
+              onChange={(e) => {
+                setJsonText(e.currentTarget.value);
+                setParseError(null);
+              }}
+              autosize
+              minRows={12}
+              maxRows={20}
+              error={parseError}
+              styles={{
+                input: { fontFamily: 'monospace', fontSize: 12 },
+              }}
+            />
+
+            <Group justify="flex-end">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                data-testid="cancel-template-paste"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="filled"
+                onClick={handleContinue}
+                data-testid="continue-template"
+              >
+                Continue
+              </Button>
+            </Group>
+          </Stack>
+        </Box>
+      ) : template ? (
+        <Box p="md">
+          <Stack gap="md">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBack}
+              leftSection={<IconArrowLeft size={14} />}
+              style={{ alignSelf: 'flex-start' }}
+              data-testid="back-to-template-json"
+            >
+              Back to template JSON
+            </Button>
+
+            <TextInput
+              label="Control name"
+              required
+              value={controlName}
+              onChange={(e) => setControlName(e.currentTarget.value)}
+              size="sm"
+            />
+
+            {template.description ? (
+              <Paper withBorder p="sm" radius="sm">
+                <Text size="xs" c="dimmed" fw={500} mb={4}>
+                  Template
+                </Text>
+                <Text size="sm">{template.description}</Text>
+              </Paper>
+            ) : null}
+
+            <Box>
+              <Text size="sm" fw={500} mb="xs">
+                Parameters
+              </Text>
+              <TemplateParamForm
+                template={template}
+                values={templateValues}
+                onChange={setTemplateValues}
+                errors={paramErrors}
+              />
+            </Box>
+
+            <TemplatePreview
+              template={template}
+              values={templateValues}
+              onErrors={handlePreviewErrors}
+            />
+
+            {apiError ? (
+              <Alert
+                color="red"
+                variant="light"
+                title={apiError.title || 'Error'}
+              >
+                <Text size="xs">{apiError.detail}</Text>
+                {apiError.hint ? (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    {apiError.hint}
+                  </Text>
+                ) : null}
+              </Alert>
+            ) : null}
+
+            <Divider />
+
+            <Group justify="flex-end">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                data-testid="cancel-template-create"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="filled"
+                onClick={handleSave}
+                loading={addControlToAgent.isPending}
+                data-testid="save-template-control"
+              >
+                Create Control
+              </Button>
+            </Group>
+          </Stack>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
