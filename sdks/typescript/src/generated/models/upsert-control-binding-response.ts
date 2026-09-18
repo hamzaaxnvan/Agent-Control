@@ -16,3 +16,40 @@ export type UpsertControlBindingResponse = {
   /**
    * Identifier of the binding.
    */
+  bindingId: number;
+  /**
+   * True when a new binding was created; False when an existing binding was updated in place.
+   */
+  created: boolean;
+  /**
+   * Current enabled value.
+   */
+  enabled: boolean;
+};
+
+/** @internal */
+export const UpsertControlBindingResponse$inboundSchema: z.ZodMiniType<
+  UpsertControlBindingResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    binding_id: types.number(),
+    created: types.boolean(),
+    enabled: types.boolean(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "binding_id": "bindingId",
+    });
+  }),
+);
+
+export function upsertControlBindingResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<UpsertControlBindingResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => UpsertControlBindingResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'UpsertControlBindingResponse' from JSON`,
+  );
+}
