@@ -10,3 +10,27 @@
   position: absolute;
   inset: 0;
   display: block;
+}
+
+.lightLogo {
+  display: none;
+}
+
+[data-mantine-color-scheme='dark'] .darkLogo {
+  display: none;
+}
+
+[data-mantine-color-scheme='dark'] .lightLogo {
+  display: block;
+}
+
+/* When Mantine mode is "auto", follow the system preference explicitly. */
+@media (prefers-color-scheme: dark) {
+  [data-mantine-color-scheme='auto'] .darkLogo {
+    display: none;
+  }
+
+  [data-mantine-color-scheme='auto'] .lightLogo {
+    display: block;
+  }
+}
