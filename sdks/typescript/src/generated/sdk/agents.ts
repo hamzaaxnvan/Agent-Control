@@ -217,3 +217,222 @@ export class Agents extends ClientSDK {
   async removeControl(
     request:
       operations.RemoveAgentControlApiV1AgentsAgentNameControlsControlIdDeleteRequest,
+    options?: RequestOptions,
+  ): Promise<models.RemoveAgentControlResponse> {
+    return unwrapAsync(agentsRemoveControl(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Associate control directly with agent
+   *
+   * @remarks
+   * Associate a control directly with an agent (idempotent).
+   */
+  async addControl(
+    request:
+      operations.AddAgentControlApiV1AgentsAgentNameControlsControlIdPostRequest,
+    options?: RequestOptions,
+  ): Promise<models.AssocResponse> {
+    return unwrapAsync(agentsAddControl(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * List agent's registered evaluator schemas
+   *
+   * @remarks
+   * List all evaluator schemas registered with an agent.
+   *
+   * Evaluator schemas are registered via initAgent and used for:
+   * - Config validation when creating Controls
+   * - UI to display available config options
+   *
+   * Args:
+   *     agent_name: Agent identifier
+   *     cursor: Optional cursor for pagination (name of last evaluator from previous page)
+   *     limit: Pagination limit (default 20, max 100)
+   *     db: Database session (injected)
+   *     principal: Authorized request principal
+   *
+   * Returns:
+   *     ListEvaluatorsResponse with evaluator schemas and pagination
+   *
+   * Raises:
+   *     HTTPException 404: Agent not found
+   */
+  async listEvaluators(
+    request:
+      operations.ListAgentEvaluatorsApiV1AgentsAgentNameEvaluatorsGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.ListEvaluatorsResponse> {
+    return unwrapAsync(agentsListEvaluators(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Get specific evaluator schema
+   *
+   * @remarks
+   * Get a specific evaluator schema registered with an agent.
+   *
+   * Args:
+   *     agent_name: Agent identifier
+   *     evaluator_name: Name of the evaluator
+   *     db: Database session (injected)
+   *     principal: Authorized request principal
+   *
+   * Returns:
+   *     EvaluatorSchemaItem with schema details
+   *
+   * Raises:
+   *     HTTPException 404: Agent or evaluator not found
+   */
+  async getEvaluator(
+    request:
+      operations.GetAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.EvaluatorSchemaItem> {
+    return unwrapAsync(agentsGetEvaluator(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Remove all policy associations from agent
+   *
+   * @remarks
+   * Remove all policy associations from an agent.
+   */
+  async removeAllAgentPolicies(
+    request:
+      operations.RemoveAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest,
+    options?: RequestOptions,
+  ): Promise<models.AssocResponse> {
+    return unwrapAsync(agentsRemoveAllAgentPolicies(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * List policies associated with agent
+   *
+   * @remarks
+   * List policy IDs associated with an agent.
+   */
+  async getPolicies(
+    request: operations.GetAgentPoliciesApiV1AgentsAgentNamePoliciesGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.GetAgentPoliciesResponse> {
+    return unwrapAsync(agentsGetPolicies(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Remove policy association from agent
+   *
+   * @remarks
+   * Remove a policy association from an agent.
+   *
+   * Idempotent for existing resources: removing a non-associated link is a no-op.
+   * Missing agent/policy resources still return 404.
+   */
+  async removePolicy(
+    request:
+      operations.RemoveAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest,
+    options?: RequestOptions,
+  ): Promise<models.AssocResponse> {
+    return unwrapAsync(agentsRemovePolicy(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Associate policy with agent
+   *
+   * @remarks
+   * Associate a policy with an agent (idempotent).
+   */
+  async addPolicy(
+    request:
+      operations.AddAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdPostRequest,
+    options?: RequestOptions,
+  ): Promise<models.AssocResponse> {
+    return unwrapAsync(agentsAddPolicy(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Remove agent's policy assignment (compatibility)
+   *
+   * @remarks
+   * Compatibility endpoint that removes all policy associations.
+   */
+  async deletePolicy(
+    request:
+      operations.DeleteAgentPolicyApiV1AgentsAgentNamePolicyDeleteRequest,
+    options?: RequestOptions,
+  ): Promise<models.DeletePolicyResponse> {
+    return unwrapAsync(agentsDeletePolicy(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Get agent's assigned policy (compatibility)
+   *
+   * @remarks
+   * Compatibility endpoint that returns the first associated policy.
+   */
+  async getPolicy(
+    request: operations.GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.GetPolicyResponse> {
+    return unwrapAsync(agentsGetPolicy(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Assign policy to agent (compatibility)
+   *
+   * @remarks
+   * Compatibility endpoint that replaces all policy associations with one policy.
+   */
+  async updatePolicy(
+    request:
+      operations.SetAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest,
+    options?: RequestOptions,
+  ): Promise<models.SetPolicyResponse> {
+    return unwrapAsync(agentsUpdatePolicy(
+      this,
+      request,
+      options,
+    ));
+  }
+}
