@@ -22,3 +22,28 @@ export type GetControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest$
 export const GetControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest$outboundSchema:
   z.ZodMiniType<
     GetControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest$Outbound,
+    GetControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest
+  > = z.pipe(
+    z.object({
+      controlId: z.int(),
+      versionNum: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        controlId: "control_id",
+        versionNum: "version_num",
+      });
+    }),
+  );
+
+export function getControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequestToJSON(
+  getControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest:
+    GetControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest,
+): string {
+  return JSON.stringify(
+    GetControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest$outboundSchema
+      .parse(
+        getControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest,
+      ),
+  );
+}

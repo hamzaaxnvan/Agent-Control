@@ -10,3 +10,41 @@ export class ResponseValidationError extends AgentControlSDKError {
   /**
    * The raw value that failed validation.
    */
+  public readonly rawValue: unknown;
+
+  /**
+   * The raw message that failed validation.
+   */
+  public readonly rawMessage: unknown;
+
+  constructor(
+    message: string,
+    extra: {
+      response: Response;
+      request: Request;
+      body: string;
+      cause: unknown;
+      rawValue: unknown;
+      rawMessage: unknown;
+    },
+  ) {
+    super(message, extra);
+    this.name = "ResponseValidationError";
+    this.cause = extra.cause;
+    this.rawValue = extra.rawValue;
+    this.rawMessage = extra.rawMessage;
+  }
+
+  /**
+   * Return a pretty-formatted error message if the underlying validation error
+   * is a ZodError or some other recognized error type, otherwise return the
+   * default error message.
+   */
+  public pretty(): string {
+    if (this.cause instanceof z.$ZodError) {
+      return `${this.rawMessage}\n${formatZodError(this.cause)}`;
+    } else {
+      return this.toString();
+    }
+  }
+}
