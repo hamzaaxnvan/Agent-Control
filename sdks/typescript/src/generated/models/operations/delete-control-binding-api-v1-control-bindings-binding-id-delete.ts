@@ -19,3 +19,24 @@ export type DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest$Outbo
 export const DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest$outboundSchema:
   z.ZodMiniType<
     DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest$Outbound,
+    DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest
+  > = z.pipe(
+    z.object({
+      bindingId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        bindingId: "binding_id",
+      });
+    }),
+  );
+
+export function deleteControlBindingApiV1ControlBindingsBindingIdDeleteRequestToJSON(
+  deleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest:
+    DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest,
+): string {
+  return JSON.stringify(
+    DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest$outboundSchema
+      .parse(deleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest),
+  );
+}

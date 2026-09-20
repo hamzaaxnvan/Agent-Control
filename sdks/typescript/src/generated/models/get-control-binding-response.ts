@@ -28,3 +28,34 @@ export const GetControlBindingResponse$inboundSchema: z.ZodMiniType<
   GetControlBindingResponse,
   unknown
 > = z.pipe(
+  z.object({
+    control_id: types.number(),
+    created_at: types.date(),
+    enabled: types.boolean(),
+    id: types.number(),
+    namespace_key: types.string(),
+    target_id: types.string(),
+    target_type: types.string(),
+    updated_at: types.date(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "control_id": "controlId",
+      "created_at": "createdAt",
+      "namespace_key": "namespaceKey",
+      "target_id": "targetId",
+      "target_type": "targetType",
+      "updated_at": "updatedAt",
+    });
+  }),
+);
+
+export function getControlBindingResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlBindingResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlBindingResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlBindingResponse' from JSON`,
+  );
+}
