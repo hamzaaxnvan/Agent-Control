@@ -12,3 +12,31 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  * Health check response model.
  *
  * @remarks
+ *
+ * Attributes:
+ *     status: Current health status (e.g., "healthy", "degraded", "unhealthy")
+ *     version: Application version
+ */
+export type HealthResponse = {
+  status: string;
+  version: string;
+};
+
+/** @internal */
+export const HealthResponse$inboundSchema: z.ZodMiniType<
+  HealthResponse,
+  unknown
+> = z.object({
+  status: types.string(),
+  version: types.string(),
+});
+
+export function healthResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<HealthResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => HealthResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'HealthResponse' from JSON`,
+  );
+}
