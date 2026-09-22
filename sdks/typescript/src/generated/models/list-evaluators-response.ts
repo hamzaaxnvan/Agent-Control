@@ -21,3 +21,26 @@ import {
 export type ListEvaluatorsResponse = {
   evaluators: Array<EvaluatorSchemaItem>;
   /**
+   * Pagination metadata for cursor-based pagination.
+   */
+  pagination: PaginationInfo;
+};
+
+/** @internal */
+export const ListEvaluatorsResponse$inboundSchema: z.ZodMiniType<
+  ListEvaluatorsResponse,
+  unknown
+> = z.object({
+  evaluators: z.array(EvaluatorSchemaItem$inboundSchema),
+  pagination: PaginationInfo$inboundSchema,
+});
+
+export function listEvaluatorsResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<ListEvaluatorsResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ListEvaluatorsResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ListEvaluatorsResponse' from JSON`,
+  );
+}
