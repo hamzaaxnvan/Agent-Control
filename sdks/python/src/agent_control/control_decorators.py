@@ -499,3 +499,505 @@ def _extract_input_from_args(func: Callable, args: tuple, kwargs: dict) -> str:
             return value
 
     # Last resort: stringify all arguments
+    return str(bound.arguments)
+
+
+def _create_evaluation_payload(
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    output: Any = None,
+    step_name: str | None = None,
+    explicit_step_type: str | None = None,
+    tools: ToolsConfiguration = None,
+) -> dict[str, Any]:
+    """
+    Create evaluation payload for server, detecting if it's a tool step or LLM step.
+
+    Returns a Step payload structure.
+
+    Args:
+        func: The function being evaluated
+        args: Function positional arguments
+        kwargs: Function keyword arguments
+        output: Function output (None for pre-execution)
+        step_name: Optional explicit step name to override auto-detection
+        explicit_step_type: Optional explicit step type to override inference
+        tools: Optional static tool definitions or a provider called with args/kwargs
+    """
+    sig = inspect.signature(func)
+    bound = sig.bind(*args, **kwargs)
+    bound.apply_defaults()
+
+    # Determine step name priority: explicit step_name > tool_name > func.__name__
+    if step_name:
+        # Explicit step_name provided - use it
+        determined_name = step_name
+        # Try to detect if it's a tool based on attributes
+        is_tool = (
+            getattr(func, "name", None) is not None
+            or getattr(func, "tool_name", None) is not None
+        )
+        inferred_type = "tool" if is_tool else "llm"
+    else:
+        # Auto-detect: Check if function has tool_name from @tool decorator
+        tool_name = getattr(func, "name", None) or getattr(func, "tool_name", None)
+        if tool_name:
+            determined_name = tool_name
+            inferred_type = "tool"
+        else:
+            determined_name = func.__name__
+            inferred_type = "llm"
+
+    step_type = (
+        ensure_step_type(explicit_step_type)
+        if explicit_step_type is not None
+        else inferred_type
+    )
+
+    if tools is not None and step_type != "llm":
+        raise _InvalidToolsConfigurationError(
+            f"@control(tools=...) requires an LLM step; received step_type={step_type!r}."
+        )
+
+    resolved_tools = tools(args, kwargs) if callable(tools) else tools
+
+    def validate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate decorator payloads against the shared runtime Step model."""
+        Step.model_validate(payload)
+        return payload
+
+    if step_type not in ("llm", "tool"):
+        # Custom step types use the complete bound argument mapping. Unlike an
+        # LLM step, there is no generic convention for selecting one argument
+        # as the prompt/input for a retriever, trace, session, etc.
+        return validate_payload({
+            "type": step_type,
+            "name": determined_name,
+            "input": dict(bound.arguments),
+            "output": output if isinstance(output, (str, int, float, bool, dict, list)) else (
+                None if output is None else str(output)
+            ),
+        })
+
+    if step_type == "tool":
+        # This is a tool step
+        return validate_payload({
+            "type": step_type,
+            "name": determined_name,
+            "input": dict(bound.arguments),
+            "output": output if isinstance(output, (str, int, float, bool, dict, list)) else (
+                None if output is None else str(output)
+            ),
+        })
+
+    # This is an LLM step
+    input_data = _extract_input_from_args(func, args, kwargs)
+    payload = {
+        "type": step_type,
+        "name": determined_name,
+        "input": input_data,
+        "output": output if isinstance(output, (str, int, float, bool, dict, list)) else (
+            None if output is None else str(output)
+        ),
+    }
+    if resolved_tools is not None:
+        payload["tools"] = deepcopy(list(resolved_tools))
+    return validate_payload(payload)
+
+
+def _handle_evaluation_result(result: dict[str, Any]) -> None:
+    """Handle evaluation result from server - raise on deny or steer."""
+    if not result:
+        logger.warning("Received empty evaluation result from server")
+        return
+
+    is_safe = result.get("is_safe", True)
+    matches = result.get("matches") or []  # Handle None case
+    errors = result.get("errors") or []  # Handle server-side evaluation errors
+
+    # CRITICAL: Check errors array FIRST - server-side failures must block execution
+    if errors:
+        error_messages = []
+        for error in errors:
+            if isinstance(error, dict):
+                control_name = error.get("control_name", "unknown")
+                error_msg = error.get("result", {}).get("message", "Unknown error")
+                error_messages.append(f"[{control_name}] {error_msg}")
+
+        raise RuntimeError(
+            f"Control evaluation failed on server. Execution blocked for safety.\n"
+            f"Errors: {'; '.join(error_messages)}"
+        )
+
+    # CRITICAL: Handle actions in priority order: deny > steer > observe
+    # Check blocking actions first (deny/steer), then log observe matches.
+
+    if not is_safe:
+        # Pass 1: Check for deny actions (highest priority - blocks immediately)
+        for match in matches:
+            if not isinstance(match, dict) or match.get("action", "deny") != "deny":
+                continue
+
+            result_data = match.get("result") or {}
+            message = (
+                result_data.get("message", "Control triggered")
+                if isinstance(result_data, dict)
+                else "Control triggered"
+            )
+            metadata = result_data.get("metadata", {}) if isinstance(result_data, dict) else {}
+            raise ControlViolationError(
+                control_id=match.get("control_id"),
+                control_name=match.get("control_name", "unknown"),
+                message=message,
+                metadata=metadata
+            )
+
+        # Pass 2: Check for steer actions (second priority - signals correction needed)
+        for match in matches:
+            if not isinstance(match, dict) or match.get("action", "deny") != "steer":
+                continue
+
+            result_data = match.get("result") or {}
+            message = (
+                result_data.get("message", "Control triggered")
+                if isinstance(result_data, dict)
+                else "Control triggered"
+            )
+            metadata = result_data.get("metadata", {}) if isinstance(result_data, dict) else {}
+
+            # Extract steering_context directly from match (now a first-class field)
+            steering_context_obj = match.get("steering_context")
+
+            # Extract message from SteeringContext object or use as string
+            if isinstance(steering_context_obj, dict):
+                steering_context = steering_context_obj.get("message", message)
+            elif isinstance(steering_context_obj, str):
+                steering_context = steering_context_obj
+            else:
+                # No steering context provided, use evaluator message
+                steering_context = message
+
+            raise ControlSteerError(
+                control_id=match.get("control_id"),
+                control_name=match.get("control_name", "unknown"),
+                message=message,
+                metadata=metadata,
+                steering_context=steering_context
+            )
+
+    # Log observe actions (non-blocking, always processed)
+    for match in matches:
+        if not isinstance(match, dict):
+            continue
+
+        action = normalize_action(str(match.get("action", "observe")))
+        if action != "observe":
+            continue
+
+        result_data = match.get("result") or {}
+        message = (
+            result_data.get("message", "Control triggered")
+            if isinstance(result_data, dict)
+            else "Control triggered"
+        )
+        control_name = match.get("control_name", "unknown")
+
+        logger.info(f"Control observe [{control_name}]: {message}")
+
+
+def _log_control_evaluations(
+    result: dict[str, Any],
+    trace_id: str,
+    span_id: str,
+    check_stage: str,
+) -> None:
+    """Log each control evaluation from the result for debugging."""
+    # Log matches
+    for match in result.get("matches") or []:
+        _log_single_control(match, trace_id, span_id, check_stage, matched=True)
+
+    # Log errors
+    for error in result.get("errors") or []:
+        _log_single_control(error, trace_id, span_id, check_stage, matched=False)
+
+    # Log non-matches
+    for non_match in result.get("non_matches") or []:
+        _log_single_control(non_match, trace_id, span_id, check_stage, matched=False)
+
+
+def _log_single_control(
+    control_data: dict[str, Any],
+    trace_id: str,
+    span_id: str,
+    check_stage: str,
+    matched: bool,
+) -> None:
+    """Log a single control evaluation."""
+    log_control_evaluation(
+        trace_id=trace_id,
+        span_id=span_id,
+        control_name=control_data.get("control_name", "unknown"),
+        matched=matched,
+        action=normalize_action(str(control_data.get("action", "observe"))),
+        confidence=control_data.get("result", {}).get("confidence", 0.0),
+        duration_ms=control_data.get("execution_duration_ms"),
+        control_execution_id=control_data.get("control_execution_id"),
+        check_stage=check_stage,
+    )
+
+
+def _get_server_controls() -> list[dict[str, Any]] | None:
+    """Get the cached server controls from agent_control module."""
+    try:
+        import agent_control
+        return agent_control.get_server_controls()
+    except Exception as exc:
+        logger.debug(
+            "Unable to access cached server controls; proceeding without local cache.",
+            exc_info=exc,
+        )
+        return None
+
+
+async def _execute_with_control(
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    is_async: bool,
+    step_name: str | None = None,
+    step_type: str | None = None,
+    tools: ToolsConfiguration = None,
+) -> Any:
+    """
+    Core control execution logic for both async and sync functions.
+
+    This function is always called in an async context (either directly with await
+    for async functions, or inside asyncio.run() for sync functions), so it can
+    always use await _evaluate() directly.
+
+    Uses cached controls from init() to support both SDK-side and server-side
+    evaluation. Controls with execution="sdk" are evaluated locally, while
+    execution="server" controls are sent to the server.
+
+    Args:
+        func: The wrapped function to execute
+        args: Positional arguments for the function
+        kwargs: Keyword arguments for the function
+        is_async: Whether the wrapped function is async
+        step_name: Optional explicit step name for control matching
+        step_type: Optional explicit step type for control matching
+
+    Returns:
+        The result of the wrapped function
+
+    Raises:
+        ControlViolationError: If any control triggers with "deny" action
+        ControlSteerError: If any control triggers with "steer" action
+        RuntimeError: If control evaluation fails unexpectedly
+    """
+    agent = _get_current_agent()
+    if agent is None:
+        logger.warning(
+            "No agent initialized. Call agent_control.init() first. "
+            "Running without protection."
+        )
+        if is_async:
+            return await func(*args, **kwargs)
+        return func(*args, **kwargs)
+
+    # Get cached controls for local evaluation support
+    controls = _get_server_controls()
+
+    trace_id, span_id = _resolve_control_trace_context()
+
+    ctx = ControlContext(
+        agent_name=agent.agent_name,
+        server_url=_get_server_url(),
+        func=func,
+        args=args,
+        kwargs=kwargs,
+        trace_id=trace_id,
+        span_id=span_id,
+        start_time=time.perf_counter(),
+        step_name=step_name,
+        step_type=step_type,
+        tools=tools,
+    )
+    ctx.log_start()
+
+    try:
+        # PRE-EXECUTION: Check controls with check_stage="pre"
+        try:
+            pre_payload = ctx.pre_payload()
+        except _InvalidToolsConfigurationError:
+            raise
+        except Exception as e:
+            logger.error("Pre-execution control payload creation failed: %s", e, exc_info=True)
+            raise RuntimeError(_unexpected_control_failure_message("pre", e)) from e
+        await _run_control_check(ctx, "pre", pre_payload, controls)
+
+        # Execute the function
+        if is_async:
+            output = await func(*args, **kwargs)
+        else:
+            output = func(*args, **kwargs)
+
+        # POST-EXECUTION: Check controls with check_stage="post"
+        try:
+            post_payload = ctx.post_payload(output)
+        except _InvalidToolsConfigurationError:
+            raise
+        except Exception as e:
+            logger.error("Post-execution control payload creation failed: %s", e, exc_info=True)
+            raise RuntimeError(_unexpected_control_failure_message("post", e)) from e
+        await _run_control_check(ctx, "post", post_payload, controls)
+
+        return output
+    finally:
+        ctx.log_end()
+
+
+def control(
+    policy: str | None = None,
+    step_name: str | None = None,
+    step_type: str | None = None,
+    *,
+    tools: Sequence[JSONObject] | Callable[
+        [tuple[Any, ...], Mapping[str, Any]], Sequence[JSONObject] | None
+    ] | None = None,
+) -> Callable[[F], F]:
+    """
+    Decorator to apply server-defined controls at this code location.
+
+    Controls (stage, condition tree, action) are defined on the SERVER.
+    This decorator marks WHERE to evaluate controls for the current agent.
+
+    Args:
+        policy: Optional policy name for documentation. This parameter is for
+                clarity in code when multiple policies exist.
+        step_name: Optional custom name for this step. If not provided, uses
+                   the function name.
+        step_type: Optional custom type for this step. If not provided, tool-like
+                   functions are classified as ``tool`` and other functions as
+                   ``llm``.
+        tools: Optional tool definitions for LLM steps. Static definitions are
+               copied when the decorator is created. A provider receives the
+               raw call-site positional arguments as ``args`` and keyword
+               arguments as ``kwargs`` at each pre- and post-execution check.
+
+    Returns:
+        Decorated function
+
+    Raises:
+        ControlViolationError: If any control triggers with "deny" action
+        ControlSteerError: If any control triggers with "steer" action
+        RuntimeError: If control evaluation fails unexpectedly
+
+    How it works:
+        1. Before function execution: Calls server with stage="pre"
+           - Server evaluates all matching "pre" controls for the agent
+        2. Function executes
+        3. After function execution: Calls server with stage="post"
+           - Server evaluates all matching "post" controls for the agent
+
+    Example:
+        import agent_control
+
+        # Initialize agent (connects to server, loads control associations)
+        agent_control.init(
+            agent_name="my-bot-identity",
+        )
+
+        # Apply controls associated with the agent
+        @agent_control.control()
+        async def chat(message: str) -> str:
+            return await assistant.respond(message)
+
+        # Document which policy this uses (optional, for clarity)
+        @agent_control.control(policy="safety-policy")
+        async def process(input: str) -> str:
+            return await pipeline.run(input)
+
+        # Custom step name for control matching
+        @agent_control.control(step_name="user_query_handler")
+        async def handle_user_input(user_message: str) -> str:
+            return await process_query(user_message)
+
+    Server Setup (separate from agent code):
+        1. Create controls via API:
+           PUT /api/v1/controls {"name": "block-toxic-inputs", "data": {...}}
+
+        2. Create policy and add controls:
+           PUT /api/v1/policies {"name": "safety-policy"}
+           POST /api/v1/policies/{policy_id}/controls/{control_id}
+
+        3. Associate policy and/or controls with an agent:
+           POST /api/v1/agents/{agent_name}/policies/{policy_id}
+           POST /api/v1/agents/{agent_name}/controls/{control_id}
+    """
+    if step_type is not None:
+        step_type = ensure_step_type(step_type)
+
+    # The policy parameter is for documentation only - the server evaluates
+    # controls associated with the agent via policy and direct links.
+    _ = policy
+
+    configured_tools = deepcopy(list(tools)) if tools is not None and not callable(tools) else tools
+
+    def decorator(func: F) -> F:
+        # Register this function's step schema for auto-discovery by init()
+        from agent_control._control_registry import register
+
+        register(func, policy=policy, step_type=step_type)
+
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            return await _execute_with_control(
+                func,
+                args,
+                kwargs,
+                is_async=True,
+                step_name=step_name,
+                step_type=step_type,
+                tools=configured_tools,
+            )
+
+        # Copy over ALL attributes from the original function (important for LangChain tools)
+        for attr in dir(func):
+            if not attr.startswith('_') and attr not in ('__call__', '__wrapped__'):
+                try:
+                    setattr(async_wrapper, attr, getattr(func, attr))
+                except (AttributeError, TypeError):
+                    pass
+
+        @functools.wraps(func)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            return asyncio.run(
+                _execute_with_control(
+                    func,
+                    args,
+                    kwargs,
+                    is_async=False,
+                    step_name=step_name,
+                    step_type=step_type,
+                    tools=configured_tools,
+                )
+            )
+
+        if inspect.iscoroutinefunction(func):
+            return async_wrapper  # type: ignore
+        return sync_wrapper  # type: ignore
+
+    return decorator
+
+
+# =============================================================================
+# EXPORTS
+# =============================================================================
+
+__all__ = [
+    "control",
+    "ControlViolationError",
+    "ControlSteerError",
+]
