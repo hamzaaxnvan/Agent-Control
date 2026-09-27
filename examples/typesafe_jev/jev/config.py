@@ -98,3 +98,104 @@ class JevQuestion(BaseModel):
                     f"a choice question requires a text operator {sorted(TEXT_OPERATORS)}"
                 )
         elif self.type == "score":
+            if not isinstance(self.criteria, list) or len(self.criteria) < 2:
+                raise ValueError("a score question requires criteria with 2 or more levels")
+        elif self.criteria is not None:
+            if not isinstance(self.criteria, dict) or set(self.criteria) != {"true", "false"}:
+                raise ValueError(
+                    "a noul question requires criteria with exactly 'true' and 'false'"
+                )
+
+        if self.type in ("noul", "score") and self.threshold is not None:
+            if self.operator not in NUMERIC_OPERATORS:
+                raise ValueError(
+                    f"a {self.type} question requires a numeric operator "
+                    f"{sorted(NUMERIC_OPERATORS)}"
+                )
+            if coerce_number(self.threshold) is None:
+                raise ValueError(f"operator {self.operator!r} requires a numeric threshold")
+        return self
+
+    @property
+    def decides(self) -> bool:
+        """Whether this question takes part in the decision."""
+        return self.threshold is not None
+
+
+class DecideConfig(BaseModel):
+    """How the deciding questions combine into one boolean."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    combine: Literal["any", "all"] = Field(
+        default="any",
+        description=(
+            "any: the control fires when any deciding question trips. "
+            "all: every deciding question must trip."
+        ),
+    )
+
+
+class TypeSafeJevConfig(EvaluatorConfig):
+    """Configuration for one TypeSafe Jev control.
+
+    Attributes:
+        questions: Questions to ask, keyed by id. All are sent in one request.
+        decide: How the deciding questions combine.
+        payload_field: Which side to send when the selected data is a mapping
+            that carries both an input and an output.
+        api_key_env: Name of the environment variable holding the API key.
+        base_url: API origin. Override for a proxy or a test double.
+        model: Model identifier sent to the API.
+        timeout_ms: Total budget for one evaluation, retries included.
+        on_error: Decision applied when the call fails. ``allow`` fails open
+            and ``deny`` fails closed.
+    """
+
+    questions: dict[str, JevQuestion] = Field(
+        min_length=1,
+        description="Questions to ask, keyed by id. All are sent in a single request.",
+    )
+    decide: DecideConfig = Field(
+        default_factory=DecideConfig,
+        description="How the deciding questions combine into one boolean.",
+    )
+    payload_field: JevPayloadField = Field(
+        default="input",
+        description="Which side to send when selected data carries input and output.",
+    )
+    api_key_env: str = Field(
+        default="TYPESAFE_API_KEY",
+        min_length=1,
+        description="Environment variable name holding the TypeSafe API key.",
+    )
+    base_url: str = Field(
+        default=DEFAULT_BASE_URL,
+        min_length=1,
+        description="API origin. Override for a proxy or a test double.",
+    )
+    model: str = Field(
+        default=DEFAULT_MODEL, min_length=1, description="Model identifier sent to the API."
+    )
+    timeout_ms: int = Field(
+        default=10000,
+        ge=500,
+        le=60000,
+        description=(
+            "Total budget for one evaluation in milliseconds, retries included. "
+            "The engine applies its own timeout on top."
+        ),
+    )
+    on_error: Literal["allow", "deny"] = Field(
+        default="allow",
+        description="Decision applied when the call fails. allow fails open.",
+    )
+
+    @model_validator(mode="after")
+    def require_a_deciding_question(self) -> TypeSafeJevConfig:
+        """At least one question must carry a threshold, or nothing can decide."""
+        if not any(question.decides for question in self.questions.values()):
+            raise ValueError(
+                "at least one question needs a threshold, otherwise nothing decides"
+            )
+        return self
