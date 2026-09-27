@@ -43,3 +43,49 @@ __all__ = [
 # Optionally export Luna types when available
 try:
     from agent_control_evaluator_galileo.luna import (  # type: ignore[import-not-found]  # noqa: F401
+        LUNA_AVAILABLE,
+        GalileoLunaClient,
+        LunaEvaluator,
+        LunaEvaluatorConfig,
+        LunaOperator,
+        ScorerInvokeInputs,
+        ScorerInvokeRequest,
+        ScorerInvokeResponse,
+    )
+
+    __all__.extend(
+        [
+            "GalileoLunaClient",
+            "ScorerInvokeInputs",
+            "ScorerInvokeRequest",
+            "ScorerInvokeResponse",
+            "LunaEvaluator",
+            "LunaEvaluatorConfig",
+            "LunaOperator",
+            "LUNA_AVAILABLE",
+        ]
+    )
+except ImportError:
+    pass
+
+# Optionally export LLM evaluator types when available
+try:
+    from agent_control_evaluator_galileo.llm import (  # type: ignore[import-not-found]  # noqa: F401
+        LLM_AVAILABLE,
+        GalileoLLMClient,
+        LlmEvaluator,
+        LlmEvaluatorConfig,
+        LlmOperator,
+    )
+
+    __all__.extend(
+        [
+            "GalileoLLMClient",
+            "LlmEvaluator",
+            "LlmEvaluatorConfig",
+            "LlmOperator",
+            "LLM_AVAILABLE",
+        ]
+    )
+except ImportError:
+    pass

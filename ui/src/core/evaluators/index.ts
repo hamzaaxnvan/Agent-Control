@@ -16,3 +16,79 @@
  *
  * @example
  * ```typescript
+ * // evaluators/my-evaluator/index.ts
+ * import type { EvaluatorDefinition } from "../types";
+ * import { MyForm } from "./form";
+ * import type { MyFormValues } from "./types";
+ *
+ * export const myEvaluator: EvaluatorDefinition<MyFormValues> = {
+ *   id: "my-evaluator",
+ *   displayName: "My Evaluator",
+ *   initialValues: { ... },
+ *   validate: { ... },
+ *   toConfig: (values) => ({ ... }),
+ *   fromConfig: (config) => ({ ... }),
+ *   FormComponent: MyForm,
+ * };
+ * ```
+ */
+
+import {
+  defenseClawOpaPolicyEvaluator,
+  defenseClawRulePackEvaluator,
+} from './defenseclaw';
+import { jsonEvaluator } from './json';
+import { listEvaluator } from './list';
+import { lunaEvaluator } from './luna';
+import { regexEvaluator } from './regex';
+import { sqlEvaluator } from './sql';
+import type { AnyEvaluatorDefinition } from './types';
+
+/**
+ * All registered evaluators.
+ * Add new evaluators here to make them available in the UI.
+ */
+export const evaluators: AnyEvaluatorDefinition[] = [
+  defenseClawRulePackEvaluator,
+  defenseClawOpaPolicyEvaluator,
+  regexEvaluator,
+  listEvaluator,
+  jsonEvaluator,
+  sqlEvaluator,
+  lunaEvaluator,
+];
+
+/**
+ * Map of evaluator ID to evaluator for quick lookup.
+ */
+export const evaluatorRegistry = new Map<string, AnyEvaluatorDefinition>(
+  evaluators.map((evaluator) => [evaluator.id, evaluator])
+);
+
+/**
+ * Get an evaluator by ID.
+ * Returns undefined if the evaluator is not found.
+ */
+export const getEvaluator = (id: string): AnyEvaluatorDefinition | undefined =>
+  evaluatorRegistry.get(id);
+
+/**
+ * Check if an evaluator exists.
+ */
+export const hasEvaluator = (id: string): boolean => evaluatorRegistry.has(id);
+
+// Re-export types and individual evaluators for direct imports
+export {
+  defenseClawOpaPolicyEvaluator,
+  defenseClawRulePackEvaluator,
+} from './defenseclaw';
+export { jsonEvaluator } from './json';
+export { listEvaluator } from './list';
+export { lunaEvaluator } from './luna';
+export { regexEvaluator } from './regex';
+export { sqlEvaluator } from './sql';
+export type {
+  AnyEvaluatorDefinition,
+  EvaluatorDefinition,
+  EvaluatorFormProps,
+} from './types';
