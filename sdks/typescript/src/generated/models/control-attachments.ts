@@ -12,3 +12,61 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 import { PolicyRef, PolicyRef$inboundSchema } from "./policy-ref.js";
 import {
   TargetAttachmentRef,
+  TargetAttachmentRef$inboundSchema,
+} from "./target-attachment-ref.js";
+
+/**
+ * Attachments for a listed control.
+ */
+export type ControlAttachments = {
+  /**
+   * Direct agent associations for this control
+   */
+  agents?: Array<AgentRef> | undefined;
+  /**
+   * Policy associations for this control
+   */
+  policies?: Array<PolicyRef> | undefined;
+  /**
+   * Target bindings for this control
+   */
+  targets?: Array<TargetAttachmentRef> | undefined;
+  /**
+   * Total target bindings matching the attachment filters
+   */
+  targetsTotal: number;
+  /**
+   * Whether the target bindings list was capped
+   */
+  targetsTruncated: boolean;
+};
+
+/** @internal */
+export const ControlAttachments$inboundSchema: z.ZodMiniType<
+  ControlAttachments,
+  unknown
+> = z.pipe(
+  z.object({
+    agents: types.optional(z.array(AgentRef$inboundSchema)),
+    policies: types.optional(z.array(PolicyRef$inboundSchema)),
+    targets: types.optional(z.array(TargetAttachmentRef$inboundSchema)),
+    targets_total: z._default(types.number(), 0),
+    targets_truncated: z._default(types.boolean(), false),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "targets_total": "targetsTotal",
+      "targets_truncated": "targetsTruncated",
+    });
+  }),
+);
+
+export function controlAttachmentsFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlAttachments, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlAttachments$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlAttachments' from JSON`,
+  );
+}
