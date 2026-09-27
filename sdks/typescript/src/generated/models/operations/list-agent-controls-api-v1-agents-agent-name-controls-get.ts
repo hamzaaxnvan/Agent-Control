@@ -50,3 +50,55 @@ export type ListAgentControlsApiV1AgentsAgentNameControlsGetRequest = {
    * Optional opaque target identifier. Required when target_type is supplied.
    */
   targetId?: string | null | undefined;
+};
+
+/** @internal */
+export const RenderedState$outboundSchema: z.ZodMiniEnum<typeof RenderedState> =
+  z.enum(RenderedState);
+
+/** @internal */
+export const EnabledState$outboundSchema: z.ZodMiniEnum<typeof EnabledState> = z
+  .enum(EnabledState);
+
+/** @internal */
+export type ListAgentControlsApiV1AgentsAgentNameControlsGetRequest$Outbound = {
+  agent_name: string;
+  rendered_state: string;
+  enabled_state: string;
+  target_type?: string | null | undefined;
+  target_id?: string | null | undefined;
+};
+
+/** @internal */
+export const ListAgentControlsApiV1AgentsAgentNameControlsGetRequest$outboundSchema:
+  z.ZodMiniType<
+    ListAgentControlsApiV1AgentsAgentNameControlsGetRequest$Outbound,
+    ListAgentControlsApiV1AgentsAgentNameControlsGetRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+      renderedState: z._default(RenderedState$outboundSchema, "all"),
+      enabledState: z._default(EnabledState$outboundSchema, "all"),
+      targetType: z.optional(z.nullable(z.string())),
+      targetId: z.optional(z.nullable(z.string())),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+        renderedState: "rendered_state",
+        enabledState: "enabled_state",
+        targetType: "target_type",
+        targetId: "target_id",
+      });
+    }),
+  );
+
+export function listAgentControlsApiV1AgentsAgentNameControlsGetRequestToJSON(
+  listAgentControlsApiV1AgentsAgentNameControlsGetRequest:
+    ListAgentControlsApiV1AgentsAgentNameControlsGetRequest,
+): string {
+  return JSON.stringify(
+    ListAgentControlsApiV1AgentsAgentNameControlsGetRequest$outboundSchema
+      .parse(listAgentControlsApiV1AgentsAgentNameControlsGetRequest),
+  );
+}

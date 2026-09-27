@@ -349,3 +349,355 @@ def test_init_agent_logs_warning_on_bad_existing_data(client: TestClient, caplog
         assert "force_replace" in response_data.get("hint", "").lower()
         assert response_data["errors"][0]["message"] == (
             "Stored agent data is corrupted and cannot be parsed."
+        )
+        assert "ValidationError" not in response_data["errors"][0]["message"]
+        # Then: an error is logged about parse failure
+        messages = [rec.getMessage() for rec in caplog.records]
+        assert any("Failed to parse existing agent data" in m for m in messages)
+
+def _create_policy(client: TestClient) -> int:
+    # Helper: create a policy via API and return id
+    name = f"pol-{uuid.uuid4()}"
+    resp = client.put("/api/v1/policies", json={"name": name})
+    assert resp.status_code == 200
+    pid = resp.json()["policy_id"]
+    assert isinstance(pid, int)
+    return pid
+
+
+def test_set_agent_policy_first_time(client: TestClient) -> None:
+    # Given: a created policy and agent
+    policy_id = _create_policy(client)
+    payload = make_agent_payload()
+    r = client.post("/api/v1/agents/initAgent", json=payload)
+    assert r.status_code == 200
+    agent_name = payload["agent"]["agent_name"]
+
+    # When: assigning policy the first time
+    resp = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+    # Then: success and no old policy
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["old_policy_id"] is None
+
+
+def test_get_agent_policy_after_assignment(client: TestClient) -> None:
+    # Given: an agent with a policy assigned
+    policy_id = _create_policy(client)
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+    agent_name = payload["agent"]["agent_name"]
+    client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+
+    # When: retrieving policy
+    resp = client.get(f"/api/v1/agents/{agent_name}/policy")
+    # Then: we see the assigned policy id
+    assert resp.status_code == 200
+    assert resp.json()["policy_id"] == policy_id
+
+
+def test_reassign_agent_policy_returns_old_id(client: TestClient) -> None:
+    # Given: an agent with an existing policy
+    first = _create_policy(client)
+    second = _create_policy(client)
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+    agent_name = payload["agent"]["agent_name"]
+    client.post(f"/api/v1/agents/{agent_name}/policy/{first}")
+
+    # When: reassigning to another policy
+    resp = client.post(f"/api/v1/agents/{agent_name}/policy/{second}")
+    # Then: success and old_policy_id equals the first policy id
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    assert resp.json()["old_policy_id"] == first
+
+
+def test_delete_agent_policy_then_get_404(client: TestClient) -> None:
+    # Given: an agent with a policy assigned
+    policy_id = _create_policy(client)
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+    agent_name = payload["agent"]["agent_name"]
+    client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+
+    # When: removing the policy association
+    del_resp = client.delete(f"/api/v1/agents/{agent_name}/policy")
+    # Then: deletion success
+    assert del_resp.status_code == 200
+    assert del_resp.json()["success"] is True
+
+    # When: fetching policy after deletion
+    get_resp = client.get(f"/api/v1/agents/{agent_name}/policy")
+    # Then: not found
+    assert get_resp.status_code == 404
+
+
+def test_set_policy_agent_not_found_returns_404(client: TestClient) -> None:
+    # Given: a policy id and a random agent uuid
+    policy_id = _create_policy(client)
+    missing_agent = str(uuid.uuid4())
+
+    # When: assigning to missing agent
+    resp = client.post(f"/api/v1/agents/{missing_agent}/policy/{policy_id}")
+    # Then: 404
+    assert resp.status_code == 404
+
+
+def test_set_policy_not_found_returns_404(client: TestClient) -> None:
+    # Given: an agent and a bogus policy id
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+    agent_name = payload["agent"]["agent_name"]
+    bogus_policy = "999999999"
+
+    # When: assigning a non-existent policy
+    resp = client.post(f"/api/v1/agents/{agent_name}/policy/{bogus_policy}")
+    # Then: 404
+    assert resp.status_code == 404
+
+
+def test_list_agent_controls_no_policy_returns_empty(client: TestClient) -> None:
+    # Given: an agent without a policy
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+    agent_name = payload["agent"]["agent_name"]
+
+    # When: listing controls
+    r = client.get(f"/api/v1/agents/{agent_name}/controls")
+    # Then: empty list
+    assert r.status_code == 200
+    assert r.json()["controls"] == []
+
+
+def test_list_agent_controls_with_policy(client: TestClient) -> None:
+    # Given: an agent with a policy containing one control set and one control
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+    agent_name = payload["agent"]["agent_name"]
+
+    # Create policy, control, and wire them
+    pol_name = f"pol-{uuid.uuid4()}"
+    pol = client.put("/api/v1/policies", json={"name": pol_name})
+    policy_id = pol.json()["policy_id"]
+
+    ctl_name = f"control-{uuid.uuid4()}"
+    from .utils import VALID_CONTROL_PAYLOAD
+    data_payload = VALID_CONTROL_PAYLOAD
+    ctl = client.put("/api/v1/controls", json={"name": ctl_name, "data": data_payload})
+    control_id = ctl.json()["control_id"]
+
+    # Associate control -> policy; assign policy to agent
+    client.post(f"/api/v1/policies/{policy_id}/controls/{control_id}")
+    client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+
+    # When: listing controls
+    r = client.get(f"/api/v1/agents/{agent_name}/controls")
+    # Then: contains our control serialized via API model
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body.get("controls"), list)
+    # Verify control data is present and matches description
+    assert any(
+        item.get("control", {}).get("description") == data_payload["description"]
+        for item in body["controls"]
+    )
+
+
+def test_list_agent_controls_agent_not_found_404(client: TestClient) -> None:
+    # Given: random agent id
+    missing = str(uuid.uuid4())
+    # When: requesting
+    r = client.get(f"/api/v1/agents/{missing}/controls")
+    # Then: 404
+    assert r.status_code == 404
+
+
+def test_init_agent_rejects_invalid_agent_name(client: TestClient) -> None:
+    # Given: a payload with an invalid agent_name
+    payload = {
+        "agent": {
+            "agent_name": "short",
+            "agent_description": "desc",
+            "agent_version": "1.0",
+        },
+        "steps": [],
+    }
+    # When: calling initAgent
+    resp = client.post("/api/v1/agents/initAgent", json=payload)
+    # Then: a 422 validation error is returned
+    assert resp.status_code == 422
+
+
+# =============================================================================
+# List Agents Endpoint Tests
+# =============================================================================
+
+
+def test_list_agents_empty(client: TestClient) -> None:
+    """Test listing agents when none exist returns empty list."""
+    # Given: no agents are registered
+    # When: listing agents with no agents created
+    resp = client.get("/api/v1/agents")
+    # Then: returns empty list with zero total
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["agents"] == []
+    assert body["pagination"]["total"] == 0
+    assert body["pagination"]["limit"] == 20
+    assert body["pagination"]["has_more"] is False
+    assert body["pagination"]["next_cursor"] is None
+
+
+def test_list_agents_returns_created_agents(client: TestClient) -> None:
+    """Test listing agents returns created agents with correct summaries."""
+    # Given: two agents with different steps/evaluators
+    payload1 = make_agent_payload(name="agent-one-01")
+    payload1["evaluators"] = [
+        {"name": "eval-1", "description": "Test", "config_schema": {}},
+    ]
+    r1 = client.post("/api/v1/agents/initAgent", json=payload1)
+    assert r1.status_code == 200
+
+    payload2 = make_agent_payload(name="agent-two-02")
+    payload2["steps"] = [
+        {"type": "tool", "name": "tool_x", "input_schema": {}, "output_schema": {}},
+        {"type": "tool", "name": "tool_y", "input_schema": {}, "output_schema": {}},
+    ]
+    r2 = client.post("/api/v1/agents/initAgent", json=payload2)
+    assert r2.status_code == 200
+
+    # When: listing agents
+    resp = client.get("/api/v1/agents")
+    # Then: both agents are returned
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pagination"]["total"] == 2
+    assert len(body["agents"]) == 2
+
+    # Verify agent summaries contain correct data
+    agent_map = {a["agent_name"]: a for a in body["agents"]}
+
+    assert "agent-one-01" in agent_map
+    agent1 = agent_map["agent-one-01"]
+    assert agent1["agent_name"] == "agent-one-01"
+    assert agent1["step_count"] == 1  # from make_agent_payload
+    assert agent1["evaluator_count"] == 1
+    assert agent1["policy_ids"] == []
+
+    assert "agent-two-02" in agent_map
+    agent2 = agent_map["agent-two-02"]
+    assert agent2["agent_name"] == "agent-two-02"
+    assert agent2["step_count"] == 2
+    assert agent2["evaluator_count"] == 0
+    assert agent2["policy_ids"] == []
+
+
+def test_list_agents_with_policy(client: TestClient) -> None:
+    """Test that list agents shows policy_ids when assigned."""
+    # Given: an agent with a policy assigned
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+    agent_name = payload["agent"]["agent_name"]
+
+    policy_id = _create_policy(client)
+    client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+
+    # When: listing agents
+    resp = client.get("/api/v1/agents")
+    # Then: the agent shows policy_ids
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["agents"]) == 1
+    assert body["agents"][0]["policy_ids"] == [policy_id]
+
+
+def test_list_agents_pagination(client: TestClient) -> None:
+    """Test cursor-based pagination works correctly."""
+    # Given: 5 agents
+    agent_names = []
+    for i in range(5):
+        agent_name = str(uuid.uuid4())
+        agent_names.append(agent_name)
+        payload = make_agent_payload(agent_name=agent_name, name=f"Agent {i}")
+        r = client.post("/api/v1/agents/initAgent", json=payload)
+        assert r.status_code == 200
+
+    # When: requesting first page with limit=2
+    resp = client.get("/api/v1/agents?limit=2")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Then: pagination metadata indicates more pages
+    assert body["pagination"]["total"] == 5
+    assert len(body["agents"]) == 2
+    assert body["pagination"]["limit"] == 2
+    assert body["pagination"]["has_more"] is True
+    assert body["pagination"]["next_cursor"] is not None
+
+    # When: requesting next page using cursor
+    cursor = body["pagination"]["next_cursor"]
+    resp2 = client.get(f"/api/v1/agents?limit=2&cursor={cursor}")
+    assert resp2.status_code == 200
+    body2 = resp2.json()
+    # Then: second page returns two more agents
+    assert body2["pagination"]["total"] == 5
+    assert len(body2["agents"]) == 2
+    assert body2["pagination"]["has_more"] is True
+
+    # When: requesting third page (should have 1 agent left)
+    cursor2 = body2["pagination"]["next_cursor"]
+    resp3 = client.get(f"/api/v1/agents?limit=2&cursor={cursor2}")
+    assert resp3.status_code == 200
+    body3 = resp3.json()
+    # Then: last page returns remaining agent and ends pagination
+    assert body3["pagination"]["total"] == 5
+    assert len(body3["agents"]) == 1
+    assert body3["pagination"]["has_more"] is False
+    assert body3["pagination"]["next_cursor"] is None
+
+
+def test_list_agents_accepts_mixed_case_cursor(client: TestClient) -> None:
+    # Given: three agents to paginate
+    for i in range(3):
+        payload = make_agent_payload(name=f"agent-cursor-{i:02d}")
+        resp = client.post("/api/v1/agents/initAgent", json=payload)
+        assert resp.status_code == 200
+
+    first_page = client.get("/api/v1/agents?limit=1")
+    assert first_page.status_code == 200
+    first_body = first_page.json()
+    assert first_body["pagination"]["has_more"] is True
+    assert first_body["pagination"]["next_cursor"] is not None
+
+    mixed_case_cursor = str(first_body["pagination"]["next_cursor"]).upper()
+
+    # When: requesting second page with mixed-case cursor
+    second_page = client.get(f"/api/v1/agents?limit=1&cursor={mixed_case_cursor}")
+    assert second_page.status_code == 200
+    second_body = second_page.json()
+
+    # Then: cursor is normalized and pagination advances
+    assert len(second_body["agents"]) == 1
+    assert second_body["agents"][0]["agent_name"] != first_body["agents"][0]["agent_name"]
+
+
+def test_list_agents_limit_clamping(client: TestClient) -> None:
+    """Test that limit is clamped to valid range."""
+    # Given: one agent
+    payload = make_agent_payload()
+    client.post("/api/v1/agents/initAgent", json=payload)
+
+    # When: requesting with limit > 100
+    resp = client.get("/api/v1/agents?limit=200")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Then: limit is clamped to 100
+    assert body["pagination"]["limit"] == 100
+
+    # When: requesting with limit < 1
+    resp2 = client.get("/api/v1/agents?limit=0")
+    assert resp2.status_code == 200
+    body2 = resp2.json()
+    # Then: limit is clamped to 1
+    assert body2["pagination"]["limit"] == 1
