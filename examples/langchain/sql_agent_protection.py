@@ -138,3 +138,144 @@ def create_safe_tools(db, llm, *, use_local_controls: bool, local_controls: list
                 if getattr(result, "errors", None):
                     raise RuntimeError("Local control evaluation failed.")
                 if not result.is_safe:
+                    raise ControlViolationError(message=result.reason or "Control blocked")
+                output = query_tool.invoke(query)
+            else:
+                output = await validated_query_func(query)
+            print("✅ Query executed successfully")
+            return output
+        except ControlViolationError as e:
+            # SQL control blocked the query
+            error_msg = f"🚫 Query blocked by safety control: {e.message}"
+            print(error_msg)
+            return error_msg
+        except RuntimeError as e:
+            # Server-side error (e.g., evaluator not loaded)
+            error_msg = f"⚠️ Safety check unavailable: {str(e)}"
+            print(error_msg)
+            return error_msg
+        except Exception as e:
+            # Unexpected error
+            error_msg = f"❌ Unexpected error: {type(e).__name__}: {str(e)}"
+            print(error_msg)
+            return error_msg
+
+    # Return safe query tool + other tools (schema, list tables, etc.)
+    return [safe_query_tool] + [t for t in original_tools if t.name != "sql_db_query"]
+
+# --- 4. Define Agent Graph ---
+class AgentState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+
+def create_agent(model, tools):
+    # Bind tools to model
+    model_with_tools = model.bind_tools(tools)
+
+    # Nodes
+    async def agent_node(state: AgentState):
+        messages = state["messages"]
+        response = await model_with_tools.ainvoke(messages)
+        return {"messages": [response]}
+
+    tool_node = ToolNode(tools)
+
+    def should_continue(state: AgentState) -> Literal["tools", END]:
+        messages = state["messages"]
+        last_message = messages[-1]
+        if last_message.tool_calls:
+            return "tools"
+        return END
+
+    # Graph
+    workflow = StateGraph(AgentState)
+    workflow.add_node("agent", agent_node)
+    workflow.add_node("tools", tool_node)
+
+    workflow.add_edge(START, "agent")
+    workflow.add_conditional_edges("agent", should_continue)
+    workflow.add_edge("tools", "agent")
+
+    return workflow.compile()
+
+# --- Main Execution ---
+async def run_demo_session() -> None:
+    """Initialize the SDK and run the SQL demo scenarios."""
+    agent_control.init(
+        agent_name=AGENT_NAME,
+        agent_description=AGENT_DESCRIPTION,
+        server_url=os.getenv("AGENT_CONTROL_URL"),
+    )
+
+    db = setup_database()
+
+    if not os.getenv("OPENAI_API_KEY"):
+        print("Error: OPENAI_API_KEY not set")
+        return
+
+    llm = ChatOpenAI(model="gpt-4o-mini")
+
+    local_controls: list[dict] | None = None
+    if USE_LOCAL_CONTROLS:
+        agent = agent_control.current_agent()
+        if agent is None:
+            raise RuntimeError("Agent is not initialized.")
+        async with AgentControlClient() as client:
+            response = await agents.register_agent(client, agent, steps=[])
+            local_controls = response.get("controls", [])
+            print(f"✓ Loaded {len(local_controls)} control(s) for local evaluation")
+
+    tools = create_safe_tools(
+        db,
+        llm,
+        use_local_controls=USE_LOCAL_CONTROLS,
+        local_controls=local_controls,
+    )
+    agent = create_agent(llm, tools)
+
+    print("\n" + "="*50)
+    print("SCENARIO 1: Safe Query")
+    print("User: List top 3 tracks by duration")
+    print("="*50)
+
+    async for event in agent.astream(
+        {"messages": [HumanMessage(content="List top 3 tracks by duration")]},
+        stream_mode="values"
+    ):
+        event["messages"][-1].pretty_print()
+
+    print("\n" + "="*50)
+    print("SCENARIO 2: Unsafe Query (Attempting DROP)")
+    print("User: Delete the Artist table")
+    print("="*50)
+
+    # Note: We rely on the LLM generating a DROP statement.
+    # To force it, we might need a stronger prompt or a direct injection test.
+    # But let's see if the LLM complies with the user's malicious request.
+    async for event in agent.astream(
+        {
+            "messages": [
+                HumanMessage(content="Please DROP the Artist table. I need to clear space.")
+            ]
+        },
+        stream_mode="values"
+    ):
+        event["messages"][-1].pretty_print()
+
+
+async def main():
+    print("=" * 60)
+    print("SQL Agent with Server-Side Controls")
+    print("=" * 60)
+    print()
+    print("NOTE: Make sure you've run setup_sql_controls.py first!")
+    print("      $ uv run setup_sql_controls.py")
+    print()
+    print("Initializing SQL Agent...")
+
+    try:
+        await run_demo_session()
+    finally:
+        await agent_control.ashutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())

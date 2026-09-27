@@ -555,3 +555,1117 @@ async def _validate_control_definition(
                         f"with agent '{agent_namespace}'"
                     ),
                     resource="Evaluator",
+                    hint=(
+                        f"Register it via initAgent first. "
+                        f"Available evaluators: {available or 'none'}."
+                    ),
+                    errors=[
+                        ValidationErrorItem(
+                            resource="Control",
+                            field=f"{field_prefix}.evaluator.name",
+                            code="evaluator_not_found",
+                            message=(
+                                f"Evaluator '{parsed.local_name}' not found "
+                                f"on agent '{agent_namespace}'"
+                            ),
+                            value=evaluator_ref,
+                        )
+                    ],
+                )
+
+            if evaluator.config_schema:
+                try:
+                    validate_config_against_schema(
+                        evaluator_spec.config,
+                        evaluator.config_schema,
+                    )
+                except JSONSchemaValidationError:
+                    raise APIValidationError(
+                        error_code=ErrorCode.INVALID_CONFIG,
+                        detail=f"Config validation failed for evaluator '{evaluator_ref}'",
+                        resource="Control",
+                        hint=(
+                            "Check the evaluator's config schema for required fields and types."
+                        ),
+                        errors=[
+                            ValidationErrorItem(
+                                resource="Control",
+                                field=f"{field_prefix}.evaluator.config",
+                                code="schema_validation_error",
+                                message=_SCHEMA_VALIDATION_FAILED_MESSAGE,
+                            )
+                        ],
+                    )
+            continue
+
+        evaluator_cls = available_evaluators.get(parsed.name)
+        if evaluator_cls is None:
+            # Global (builtin / external) evaluators may be absent from this runtime
+            # (optional packages, forward compatibility). Store the definition without
+            # config validation; evaluation will fail later if the evaluator is missing.
+            continue
+
+        try:
+            evaluator_cls.config_model(**evaluator_spec.config)
+        except ValidationError as e:
+            raise APIValidationError(
+                error_code=ErrorCode.INVALID_CONFIG,
+                detail=f"Config validation failed for evaluator '{parsed.name}'",
+                resource="Control",
+                hint="Check the evaluator's config schema for required fields and types.",
+                errors=[
+                    ValidationErrorItem(
+                        resource="Control",
+                        field=(
+                            f"{field_prefix}.evaluator.config."
+                            f"{format_field_path(err.get('loc', ())) or ''}"
+                        ).rstrip("."),
+                        code=err.get("type", "validation_error"),
+                        message=err.get("msg", "Validation failed"),
+                    )
+                    for err in e.errors()
+                ],
+            )
+        except TypeError:
+            _logger.warning(
+                "Config validation raised TypeError for evaluator '%s'",
+                parsed.name,
+                exc_info=True,
+            )
+            raise APIValidationError(
+                error_code=ErrorCode.INVALID_CONFIG,
+                detail=f"Invalid config parameters for evaluator '{parsed.name}'",
+                resource="Control",
+                hint="Check the evaluator's config schema for valid parameter names.",
+                errors=[
+                    ValidationErrorItem(
+                        resource="Control",
+                        field=f"{field_prefix}.evaluator.config",
+                        code="invalid_parameters",
+                        message=_INVALID_PARAMETERS_MESSAGE,
+                    )
+                ],
+            )
+
+
+@template_router.post(
+    "/render",
+    response_model=RenderControlTemplateResponse,
+    response_model_exclude_none=True,
+    summary="Render a control template preview",
+    response_description="Rendered control preview",
+)
+# Rendering is part of the authoring flow, so require create access.
+async def render_control_template(
+    request: RenderControlTemplateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_CREATE)),
+) -> RenderControlTemplateResponse:
+    """Render a template-backed control without persisting it."""
+    control_def = await _render_and_validate_template_input(
+        TemplateControlInput(
+            template=request.template,
+            template_values=request.template_values,
+        ),
+        db=db,
+        namespace_key=principal.namespace_key,
+        enabled=True,
+    )
+    return RenderControlTemplateResponse(control=control_def)
+
+
+@router.put(
+    "",
+    response_model=CreateControlResponse,
+    summary="Create a new control",
+    response_description="Created control ID",
+)
+async def create_control(
+    request: CreateControlRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_CREATE)),
+) -> CreateControlResponse:
+    """
+    Create a new control with a unique name.
+
+    Controls define protection logic and can be added to policies.
+    Control data is required and is validated before anything is inserted.
+
+    Args:
+        request: Control creation request with unique name and data
+        db: Database session (injected)
+
+    Returns:
+        CreateControlResponse with the new control's ID
+
+    Raises:
+        HTTPException 409: Control with this name already exists
+        HTTPException 500: Database error during creation
+    """
+    control_service = ControlService(db)
+
+    # Uniqueness check
+    namespace_key = principal.namespace_key
+    if await control_service.active_control_name_exists(
+        request.name, namespace_key=namespace_key
+    ):
+        raise ConflictError(
+            error_code=ErrorCode.CONTROL_NAME_CONFLICT,
+            detail=f"Control with name '{request.name}' already exists",
+            resource="Control",
+            resource_id=request.name,
+            hint="Choose a different name or update the existing control.",
+        )
+
+    control_def = await _materialize_control_input(
+        request.data,
+        db=db,
+        namespace_key=namespace_key,
+    )
+    control_data = _serialize_control_data(control_def)
+
+    control = control_service.create_control(
+        namespace_key=namespace_key,
+        name=request.name,
+        data=control_data,
+    )
+    try:
+        await control_service.create_version(
+            control,
+            event_type="created",
+            note="Initial creation",
+        )
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if _is_control_name_conflict(exc):
+            raise ConflictError(
+                error_code=ErrorCode.CONTROL_NAME_CONFLICT,
+                detail=f"Control with name '{request.name}' already exists",
+                resource="Control",
+                resource_id=request.name,
+                hint="Choose a different name or update the existing control.",
+            )
+        _logger.error(
+            "Failed to create control '%s' due to integrity error",
+            request.name,
+            exc_info=True,
+        )
+        raise DatabaseError(
+            detail=f"Failed to create control '{request.name}': database error",
+            resource="Control",
+            operation="create",
+        )
+    except Exception:
+        await db.rollback()
+        _logger.error(
+            f"Failed to create control '{request.name}'",
+            exc_info=True,
+        )
+        raise DatabaseError(
+            detail=f"Failed to create control '{request.name}': database error",
+            resource="Control",
+            operation="create",
+        )
+    return CreateControlResponse(control_id=control.id)
+
+
+@router.post(
+    "/{control_id}/clone-and-bind",
+    response_model=CloneAndBindControlResponse,
+    summary="Clone a control and bind the clone to a target",
+    response_description="Created clone and binding identifiers",
+)
+async def clone_and_bind_control(
+    control_id: int,
+    request: CloneAndBindControlRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_CREATE)),
+    read_principal: Principal = Depends(require_operation(Operation.CONTROLS_READ)),
+    binding_principal: Principal = Depends(
+        require_operation(
+            Operation.CONTROL_BINDINGS_WRITE,
+            context_builder=_clone_and_bind_context,
+        )
+    ),
+) -> CloneAndBindControlResponse:
+    """Clone an active control and attach the clone to an opaque target."""
+    _ensure_same_namespace_authorization(
+        principal,
+        read_principal,
+        binding_principal,
+        detail="Clone authorization resolved to different namespaces.",
+        hint=(
+            "Use credentials that grant source read, control creation, and target "
+            "binding in the same namespace."
+        ),
+    )
+
+    namespace_key = principal.namespace_key
+    control_service = ControlService(db)
+    bindings_service = ControlBindingsService(db)
+
+    source = await control_service.get_active_control_or_404(
+        control_id,
+        namespace_key=namespace_key,
+        for_update=True,
+    )
+    clone_name = await _resolve_clone_name(
+        control_service,
+        namespace_key=namespace_key,
+        source_id=source.id,
+        source_name=source.name,
+        requested_name=request.name,
+    )
+
+    clone = control_service.create_control(
+        namespace_key=namespace_key,
+        name=clone_name,
+        data=deepcopy(source.data),
+        cloned_from_control_id=source.id,
+    )
+    try:
+        await control_service.create_version(
+            clone,
+            event_type="cloned",
+            note=f"Cloned from control {source.id}",
+        )
+        binding = await bindings_service.create_binding(
+            namespace_key=namespace_key,
+            target_type=request.target_binding.target_type,
+            target_id=request.target_binding.target_id,
+            control_id=clone.id,
+            enabled=request.target_binding.enabled,
+        )
+        await db.commit()
+    except APIError:
+        await db.rollback()
+        raise
+    except IntegrityError as exc:
+        await db.rollback()
+        if _is_control_name_conflict(exc):
+            raise ConflictError(
+                error_code=ErrorCode.CONTROL_NAME_CONFLICT,
+                detail=f"Control with name '{clone_name}' already exists",
+                resource="Control",
+                resource_id=clone_name,
+                hint="Choose a different clone name.",
+            )
+        _logger.error(
+            "Failed to clone control '%s' due to integrity error",
+            source.name,
+            exc_info=True,
+        )
+        raise DatabaseError(
+            detail=f"Failed to clone control '{source.id}': database error",
+            resource="Control",
+            operation="clone_and_bind",
+        )
+    except Exception:
+        await db.rollback()
+        _logger.error(
+            "Failed to clone and bind control '%s'",
+            source.name,
+            exc_info=True,
+        )
+        raise DatabaseError(
+            detail=f"Failed to clone control '{source.id}': database error",
+            resource="Control",
+            operation="clone_and_bind",
+        )
+
+    return CloneAndBindControlResponse(
+        id=clone.id,
+        name=clone.name,
+        cloned_from_control_id=source.id,
+        binding_id=binding.id,
+    )
+
+
+@router.get(
+    "/schema",
+    response_model=GetControlSchemaResponse,
+    summary="Get control definition JSON schema",
+    response_description="JSON schema for ControlDefinition",
+)
+# Public schema metadata: no tenant state, no auth operation.
+async def get_control_schema() -> GetControlSchemaResponse:
+    """Return the canonical JSON schema for ControlDefinition."""
+    return GetControlSchemaResponse(
+        schema=ControlDefinition.model_json_schema(by_alias=True)
+    )
+
+
+@router.get(
+    "/{control_id}",
+    response_model=GetControlResponse,
+    summary="Get control details",
+    response_description="Control metadata and configuration",
+)
+async def get_control(
+    control_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_READ)),
+) -> GetControlResponse:
+    """
+    Retrieve a control by ID including its name and configuration data.
+
+    Args:
+        control_id: ID of the control
+        db: Database session (injected)
+
+    Returns:
+        GetControlResponse with control id, name, and data
+
+    Raises:
+        HTTPException 404: Control not found
+    """
+    control = await ControlService(db).get_active_control_or_404(
+        control_id, namespace_key=principal.namespace_key
+    )
+    control_data = _parse_stored_control_data(
+        control.data,
+        control_name=control.name,
+        control_id=control_id,
+    )
+
+    return GetControlResponse(
+        id=control.id,
+        name=control.name,
+        cloned_from_control_id=control.cloned_from_control_id,
+        data=control_data,
+    )
+
+
+@router.get(
+    "/{control_id}/data",
+    response_model=GetControlDataResponse,
+    response_model_exclude_none=True,
+    summary="Get control configuration data",
+    response_description="Control data payload",
+)
+async def get_control_data(
+    control_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_READ)),
+) -> GetControlDataResponse:
+    """
+    Retrieve the configuration data for a control.
+
+    Control data is a JSONB field that must follow the ControlDefinition schema.
+
+    Args:
+        control_id: ID of the control
+        db: Database session (injected)
+
+    Returns:
+        GetControlDataResponse with validated ControlDefinition
+
+    Raises:
+        HTTPException 404: Control not found
+        HTTPException 422: Control data is corrupted
+    """
+    control = await ControlService(db).get_active_control_or_404(
+        control_id, namespace_key=principal.namespace_key
+    )
+    control_data = _parse_stored_control_data(
+        control.data,
+        control_name=control.name,
+        control_id=control_id,
+    )
+    return GetControlDataResponse(data=control_data)
+
+
+@router.get(
+    "/{control_id}/versions",
+    response_model=ListControlVersionsResponse,
+    summary="List control version history",
+    response_description="Paginated control version summaries",
+)
+async def list_control_versions(
+    control_id: int,
+    cursor: int | None = Query(
+        None, description="Version number to start after (newest-first pagination)"
+    ),
+    limit: int = Query(_DEFAULT_PAGINATION_LIMIT, ge=1, le=_MAX_PAGINATION_LIMIT),
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_READ)),
+) -> ListControlVersionsResponse:
+    """List control versions ordered newest-first using cursor-based pagination."""
+    page = await ControlService(db).list_versions(
+        control_id,
+        namespace_key=principal.namespace_key,
+        cursor=cursor,
+        limit=limit,
+    )
+
+    return ListControlVersionsResponse(
+        versions=[
+            ControlVersionSummary(
+                version_num=version.version_num,
+                event_type=version.event_type,
+                note=version.note,
+                created_at=version.created_at.isoformat(),
+            )
+            for version in page.versions
+        ],
+        pagination=PaginationInfo(
+            limit=limit,
+            total=page.total,
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        ),
+    )
+
+
+@router.get(
+    "/{control_id}/versions/{version_num}",
+    response_model=GetControlVersionResponse,
+    summary="Get a specific control version",
+    response_description="Full control version snapshot",
+)
+async def get_control_version(
+    control_id: int,
+    version_num: int,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_READ)),
+) -> GetControlVersionResponse:
+    """Return a specific control version, including its raw persisted snapshot."""
+    version = await ControlService(db).get_version_or_404(
+        control_id, version_num, namespace_key=principal.namespace_key
+    )
+    return GetControlVersionResponse(
+        version_num=version.version_num,
+        event_type=version.event_type,
+        note=version.note,
+        created_at=version.created_at.isoformat(),
+        snapshot=version.snapshot,
+    )
+
+
+@router.put(
+    "/{control_id}/data",
+    response_model=SetControlDataResponse,
+    summary="Update control configuration data",
+    response_description="Success confirmation",
+)
+async def set_control_data(
+    control_id: int,
+    request: SetControlDataRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_UPDATE)),
+) -> SetControlDataResponse:
+    """
+    Update the configuration data for a control.
+
+    This replaces the entire data payload. The data is validated against
+    the ControlDefinition schema.
+
+    Args:
+        control_id: ID of the control
+        request: New control data (replaces existing)
+        db: Database session (injected)
+
+    Returns:
+        SetControlDataResponse with success flag
+
+    Raises:
+        HTTPException 404: Control not found
+        HTTPException 500: Database error during update
+    """
+    control_service = ControlService(db)
+    control = await control_service.get_active_control_or_404(
+        control_id, namespace_key=principal.namespace_key, for_update=True
+    )
+
+    control_def = await _materialize_control_input(
+        request.data,
+        db=db,
+        namespace_key=principal.namespace_key,
+        current_payload=control.data,
+        control_id=control_id,
+    )
+
+    control_service.replace_control_data(
+        control,
+        data=_serialize_control_data(control_def),
+    )
+    control_name = control.name
+    try:
+        await control_service.create_version(
+            control,
+            event_type="updated",
+            note="Edited",
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        _logger.error(
+            f"Failed to update data for control '{control_name}' ({control_id})",
+            exc_info=True,
+        )
+        raise DatabaseError(
+            detail=f"Failed to update data for control '{control_name}': database error",
+            resource="Control",
+            operation="update data",
+        )
+    return SetControlDataResponse(success=True)
+
+
+@router.post(
+    "/validate",
+    response_model=ValidateControlDataResponse,
+    summary="Validate control configuration",
+    response_description="Validation result",
+)
+# Validation uses the authoring path, so require create access.
+async def validate_control_data(
+    request: ValidateControlDataRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_CREATE)),
+) -> ValidateControlDataResponse:
+    """
+    Validate control configuration data without saving it.
+
+    Args:
+        request: Control configuration data to validate
+        db: Database session (injected)
+
+    Returns:
+        ValidateControlDataResponse with success=True if valid
+    """
+    # Validate mirrors create: complete template values trigger a full render,
+    # incomplete values validate structure only (matching unrendered create).
+    await _materialize_control_input(
+        request.data,
+        db=db,
+        namespace_key=principal.namespace_key,
+    )
+    return ValidateControlDataResponse(success=True)
+
+
+@router.get(
+    "",
+    response_model=ListControlsResponse,
+    summary="List all controls",
+    response_description="Paginated list of controls",
+)
+async def list_controls(
+    cursor: int | None = Query(None, description="Control ID to start after"),
+    limit: int = Query(_DEFAULT_PAGINATION_LIMIT, ge=1, le=_MAX_PAGINATION_LIMIT),
+    name: str | None = Query(None, description="Filter by name (partial, case-insensitive)"),
+    enabled: bool | None = Query(None, description="Filter by enabled status"),
+    template_backed: bool | None = Query(
+        None,
+        description="Filter by whether the control is template-backed",
+    ),
+    cloned: bool | None = Query(
+        None,
+        description="Filter by whether the control was cloned from another control",
+    ),
+    step_type: str | None = Query(
+        None, description="Filter by step type (built-ins: 'tool', 'llm')"
+    ),
+    stage: str | None = Query(None, description="Filter by stage ('pre' or 'post')"),
+    execution: str | None = Query(None, description="Filter by execution ('server' or 'sdk')"),
+    tag: str | None = Query(None, description="Filter by tag"),
+    include_attachments: bool = Query(
+        False,
+        description=(
+            "When true, include direct agent associations, policy associations, "
+            "and, when target filters are supplied, target bindings for each "
+            "listed control."
+        ),
+    ),
+    attachment_target_type: str | None = Query(
+        None,
+        min_length=1,
+        max_length=255,
+        description=(
+            "Optional target_type filter applied to the returned controls and "
+            "expanded target bindings. "
+            "Only used when include_attachments=true."
+        ),
+    ),
+    attachment_target_id: str | None = Query(
+        None,
+        min_length=1,
+        max_length=255,
+        description=(
+            "Optional target_id filter applied to the returned controls and "
+            "expanded target bindings. "
+            "Only used when include_attachments=true."
+        ),
+    ),
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_READ)),
+    target_principal: Principal | None = Depends(_optional_attachment_target_principal),
+) -> ListControlsResponse:
+    """
+    List all controls with optional filtering and cursor-based pagination.
+
+    Controls are returned ordered by ID descending (newest first).
+
+    Args:
+        cursor: ID of the last control from the previous page (for pagination)
+        limit: Maximum number of controls to return (default 20, max 100)
+        name: Optional filter by name (partial, case-insensitive match)
+        enabled: Optional filter by enabled status
+        template_backed: Optional filter by whether the control is template-backed
+        cloned: Optional filter by whether the control was cloned from another control
+        step_type: Optional filter by step type (built-ins: 'tool', 'llm')
+        stage: Optional filter by stage ('pre' or 'post')
+        execution: Optional filter by execution ('server' or 'sdk')
+        tag: Optional filter by tag
+        include_attachments: Whether to include attachment details for listed controls
+        attachment_target_type: Optional target binding type filter for controls and
+            attachments
+        attachment_target_id: Optional target binding ID filter for controls and
+            attachments
+        db: Database session (injected)
+
+    Returns:
+        ListControlsResponse with control summaries and pagination info
+
+    Example:
+        GET /controls?limit=10&enabled=true&step_type=tool
+    """
+    _validate_attachment_filters(
+        include_attachments=include_attachments,
+        attachment_target_type=attachment_target_type,
+        attachment_target_id=attachment_target_id,
+    )
+    if target_principal is not None:
+        _ensure_same_namespace_authorization(
+            principal,
+            target_principal,
+            detail=(
+                "Control and target-binding read authorization resolved "
+                "to different namespaces."
+            ),
+            hint=(
+                "Use credentials that grant control read and target-binding read "
+                "in the same namespace."
+            ),
+        )
+
+    control_service = ControlService(db)
+    namespace_key = principal.namespace_key
+    filter_by_attachment = target_principal is not None and (
+        attachment_target_type is not None or attachment_target_id is not None
+    )
+    page = await control_service.list_controls_page(
+        namespace_key=namespace_key,
+        cursor=cursor,
+        limit=limit,
+        name=name,
+        enabled=enabled,
+        template_backed=template_backed,
+        cloned=cloned,
+        step_type=step_type,
+        stage=stage,
+        execution=execution,
+        tag=tag,
+        attachment_target_type=attachment_target_type if filter_by_attachment else None,
+        attachment_target_id=attachment_target_id if filter_by_attachment else None,
+    )
+    usage_by_control_id = await control_service.list_control_usage(
+        [control.id for control in page.controls],
+        namespace_key=namespace_key,
+    )
+    attachments_by_control_id = (
+        await control_service.list_control_attachments(
+            [control.id for control in page.controls],
+            namespace_key=namespace_key,
+            target_type=attachment_target_type,
+            target_id=attachment_target_id,
+            include_targets=target_principal is not None,
+        )
+        if include_attachments
+        else {}
+    )
+
+    # Build summaries (filtering already done at DB level)
+    summaries: list[ControlSummary] = []
+    for ctrl in page.controls:
+        # Extract summary fields from JSONB data
+        data = ctrl.data or {}
+        scope = data.get("scope") or {}
+        usage = usage_by_control_id.get(ctrl.id)
+        attachments = attachments_by_control_id.get(ctrl.id)
+        summaries.append(
+            ControlSummary(
+                id=ctrl.id,
+                name=ctrl.name,
+                cloned_from_control_id=ctrl.cloned_from_control_id,
+                description=(
+                    data.get("description")
+                    or (data.get("template") or {}).get("description")
+                ),
+                enabled=data.get("enabled", True),
+                execution=data.get("execution"),
+                action=data.get("action"),
+                step_types=scope.get("step_types"),
+                stages=scope.get("stages"),
+                tags=data.get("tags", []),
+                template_backed="template" in data,
+                template_rendered=(
+                    "condition" in data if "template" in data else None
+                ),
+                used_by_agent=(
+                    AgentRef(agent_name=usage.representative_agent_name)
+                    if usage is not None and usage.representative_agent_name is not None
+                    else None
+                ),
+                used_by_agents_count=usage.used_by_agents_count if usage is not None else 0,
+                attachments=(
+                    ControlAttachments(
+                        agents=[
+                            AgentRef(agent_name=agent_name)
+                            for agent_name in attachments.agent_names
+                        ],
+                        policies=[
+                            PolicyRef(policy_id=policy_id)
+                            for policy_id in attachments.policy_ids
+                        ],
+                        targets=[
+                            TargetAttachmentRef(
+                                binding_id=target.binding_id,
+                                target_type=target.target_type,
+                                target_id=target.target_id,
+                                enabled=target.enabled,
+                            )
+                            for target in attachments.targets
+                        ],
+                        targets_total=attachments.targets_total,
+                        targets_truncated=attachments.targets_truncated,
+                    )
+                    if attachments is not None
+                    else None
+                ),
+            )
+        )
+
+    return ListControlsResponse(
+        controls=summaries,
+        pagination=PaginationInfo(
+            limit=limit,
+            total=page.total,
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        ),
+    )
+
+
+@router.delete(
+    "/{control_id}",
+    response_model=DeleteControlResponse,
+    summary="Delete a control",
+    response_description="Deletion confirmation with dissociation info",
+)
+async def delete_control(
+    control_id: int,
+    force: bool = Query(
+        False,
+        description="If true, dissociate from all policy/agent links before deleting. "
+        "If false, fail if control is associated with any policy or agent.",
+    ),
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_DELETE)),
+) -> DeleteControlResponse:
+    """
+    Delete a control by ID.
+
+    By default, deletion fails if the control is associated with any policy or agent.
+    Use force=true to automatically dissociate and delete.
+
+    Args:
+        control_id: ID of the control to delete
+        force: If true, remove associations before deleting
+        db: Database session (injected)
+
+    Returns:
+        DeleteControlResponse with success flag and dissociation details
+
+    Raises:
+        HTTPException 404: Control not found
+        HTTPException 409: Control is in use (and force=false)
+        HTTPException 500: Database error during deletion
+    """
+    control_service = ControlService(db)
+    bindings_service = ControlBindingsService(db)
+    namespace_key = principal.namespace_key
+    control = await control_service.get_active_control_or_404(
+        control_id, namespace_key=namespace_key, for_update=True
+    )
+
+    associations = await control_service.list_control_associations(
+        control_id, namespace_key=namespace_key
+    )
+    associated_policy_ids = associations.policy_ids
+    associated_agent_names = associations.agent_names
+    target_binding_ids = await bindings_service.list_binding_ids_for_control(
+        namespace_key=namespace_key, control_id=control_id
+    )
+
+    if (
+        associated_policy_ids
+        or associated_agent_names
+        or target_binding_ids
+    ) and not force:
+        errors = [
+            ValidationErrorItem(
+                resource="Policy",
+                field="controls",
+                code="control_in_use",
+                message=f"Control is associated with policy ID {pid}",
+                value=pid,
+            )
+            for pid in associated_policy_ids
+        ] + [
+            ValidationErrorItem(
+                resource="Agent",
+                field="controls",
+                code="control_in_use",
+                message=f"Control is directly associated with agent '{agent_name}'",
+                value=agent_name,
+            )
+            for agent_name in associated_agent_names
+        ] + [
+            ValidationErrorItem(
+                resource="ControlBinding",
+                field="control_id",
+                code="control_in_use",
+                message=f"Control is attached to a target via binding ID {bid}",
+                value=bid,
+            )
+            for bid in target_binding_ids
+        ]
+        raise ConflictError(
+            error_code=ErrorCode.CONTROL_IN_USE,
+            detail=(
+                f"Control '{control.name}' is associated with "
+                f"{len(associated_policy_ids)} policy/policies, "
+                f"{len(associated_agent_names)} agent(s), and "
+                f"{len(target_binding_ids)} target binding(s)"
+            ),
+            resource="Control",
+            resource_id=control.name,
+            hint=(
+                "Use force=true to dissociate and delete, or remove associations "
+                "and target bindings manually first."
+            ),
+            errors=errors,
+        )
+
+    # Remove associations if force=true.
+    dissociated_from_policies: list[int] = []
+    dissociated_from_agents: list[str] = []
+    if associated_policy_ids or associated_agent_names:
+        dissociated = await control_service.remove_all_control_associations(
+            control_id, namespace_key=namespace_key
+        )
+        dissociated_from_policies = dissociated.policy_ids
+        dissociated_from_agents = dissociated.agent_names
+    detached_target_bindings: list[int] = []
+    if target_binding_ids:
+        detached_target_bindings = await bindings_service.delete_bindings_for_control(
+            namespace_key=namespace_key, control_id=control_id
+        )
+    if dissociated_from_policies or dissociated_from_agents or detached_target_bindings:
+        _logger.info(
+            "Dissociated control '%s' (%s) from %s policy/policies, %s agent(s), "
+            "and %s target binding(s)",
+            control.name,
+            control_id,
+            len(dissociated_from_policies),
+            len(dissociated_from_agents),
+            len(detached_target_bindings),
+        )
+
+    # Tombstone the control so backfilled version history remains referentially intact.
+    control_service.mark_control_deleted(control, deleted_at=dt.datetime.now(dt.UTC))
+    control_name = control.name
+    try:
+        await control_service.create_version(
+            control,
+            event_type="deleted",
+            note="Deleted",
+        )
+        await db.commit()
+        _logger.info("Soft-deleted control '%s' (%s)", control.name, control_id)
+    except Exception:
+        await db.rollback()
+        _logger.error(
+            f"Failed to soft-delete control '{control_name}' ({control_id})",
+            exc_info=True,
+        )
+        raise DatabaseError(
+            detail=f"Failed to delete control '{control_name}': database error",
+            resource="Control",
+            operation="delete",
+        )
+
+    return DeleteControlResponse(
+        success=True,
+        dissociated_from=dissociated_from_policies,
+        dissociated_from_policies=dissociated_from_policies,
+        dissociated_from_agents=dissociated_from_agents,
+        detached_target_bindings=detached_target_bindings,
+    )
+
+
+@router.patch(
+    "/{control_id}",
+    response_model=PatchControlResponse,
+    summary="Update control metadata",
+    response_description="Updated control information",
+)
+async def patch_control(
+    control_id: int,
+    request: PatchControlRequest,
+    db: AsyncSession = Depends(get_async_db),
+    principal: Principal = Depends(require_operation(Operation.CONTROLS_UPDATE)),
+) -> PatchControlResponse:
+    """
+    Update control metadata (name and/or enabled status).
+
+    This endpoint allows partial updates:
+    - To rename: provide 'name' field
+    - To enable/disable: provide 'enabled' field (updates the control's data)
+
+    Args:
+        control_id: ID of the control to update
+        request: Fields to update (name, enabled)
+        db: Database session (injected)
+
+    Returns:
+        PatchControlResponse with current control state
+
+    Raises:
+        HTTPException 404: Control not found
+        HTTPException 409: New name conflicts with existing control
+        HTTPException 422: Cannot update metadata for corrupted control data
+        HTTPException 500: Database error during update
+    """
+    control_service = ControlService(db)
+    namespace_key = principal.namespace_key
+    control = await control_service.get_active_control_or_404(
+        control_id, namespace_key=namespace_key, for_update=True
+    )
+    parsed_control = _parse_stored_control_data(
+        control.data,
+        control_name=control.name,
+        control_id=control_id,
+    )
+
+    # Track if anything changed
+    updated = False
+
+    # Update name if provided
+    if request.name is not None and request.name != control.name:
+        # Check for name collision
+        if await control_service.active_control_name_exists(
+            request.name,
+            namespace_key=namespace_key,
+            exclude_control_id=control_id,
+        ):
+            raise ConflictError(
+                error_code=ErrorCode.CONTROL_NAME_CONFLICT,
+                detail=f"Control with name '{request.name}' already exists",
+                resource="Control",
+                resource_id=request.name,
+                hint="Choose a different name or update the existing control.",
+            )
+        control_service.rename_control(control, name=request.name)
+        updated = True
+
+    # Update enabled status if provided
+    current_enabled: bool | None = None
+    if request.enabled is not None:
+        if isinstance(parsed_control, UnrenderedTemplateControl):
+            if request.enabled:
+                raise APIValidationError(
+                    error_code=ErrorCode.VALIDATION_ERROR,
+                    detail=(
+                        f"Cannot enable control '{control.name}': "
+                        "unrendered template controls must be rendered first"
+                    ),
+                    resource="Control",
+                    hint=(
+                        "Provide complete parameter values via "
+                        f"PUT /api/v1/controls/{control_id}/data "
+                        "to render the template before enabling."
+                    ),
+                    errors=[
+                        ValidationErrorItem(
+                            resource="Control",
+                            field="enabled",
+                            code="unrendered_template_cannot_enable",
+                            message=(
+                                "Provide parameter values to render "
+                                "the template before enabling."
+                            ),
+                        )
+                    ],
+                )
+            # enabled=False on an unrendered template is a no-op (already false).
+            current_enabled = False
+        else:
+            if parsed_control.enabled != request.enabled:
+                control_service.set_control_enabled(control, enabled=request.enabled)
+                updated = True
+            current_enabled = request.enabled if updated else parsed_control.enabled
+    else:
+        current_enabled = parsed_control.enabled
+
+    # Commit if anything changed
+    if updated:
+        attempted_control_name = control.name
+        try:
+            await control_service.create_version(
+                control,
+                event_type="updated",
+                note="Edited",
+            )
+            await db.commit()
+            _logger.info(f"Updated control '{control.name}' ({control_id})")
+        except IntegrityError as exc:
+            await db.rollback()
+            if _is_control_name_conflict(exc):
+                conflicting_name = request.name or control.name
+                raise ConflictError(
+                    error_code=ErrorCode.CONTROL_NAME_CONFLICT,
+                    detail=f"Control with name '{conflicting_name}' already exists",
+                    resource="Control",
+                    resource_id=conflicting_name,
+                    hint="Choose a different name or update the existing control.",
+                )
+            _logger.error(
+                "Failed to update control '%s' (%s) due to integrity error",
+                attempted_control_name,
+                control_id,
+                exc_info=True,
+            )
+            raise DatabaseError(
+                detail=f"Failed to update control '{attempted_control_name}': database error",
+                resource="Control",
+                operation="update",
+            )
+        except Exception:
+            await db.rollback()
+            _logger.error(
+                f"Failed to update control '{attempted_control_name}' ({control_id})",
+                exc_info=True,
+            )
+            raise DatabaseError(
+                detail=f"Failed to update control '{attempted_control_name}': database error",
+                resource="Control",
+                operation="update",
+            )
+
+    return PatchControlResponse(
+        success=True,
+        name=control.name,
+        enabled=current_enabled,
+    )
