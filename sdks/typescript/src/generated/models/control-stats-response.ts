@@ -17,3 +17,79 @@ import { StatsTotals, StatsTotals$inboundSchema } from "./stats-totals.js";
  *
  * Contains stats for a single control (with optional timeseries).
  *
+ * Attributes:
+ *     agent_name: Agent identifier
+ *     time_range: Time range used
+ *     control_id: Control ID
+ *     control_name: Control name
+ *     stats: Control statistics (includes timeseries when requested)
+ */
+export type ControlStatsResponse = {
+  /**
+   * Agent identifier
+   */
+  agentName: string;
+  /**
+   * Control ID
+   */
+  controlId: number;
+  /**
+   * Control name
+   */
+  controlName: string;
+  /**
+   * Agent-level aggregate statistics.
+   *
+   * @remarks
+   *
+   * Invariant: execution_count = match_count + non_match_count + error_count
+   *
+   * Matches have actions (deny, steer, observe) tracked in action_counts.
+   * sum(action_counts.values()) == match_count
+   *
+   * Attributes:
+   *     execution_count: Total executions across all controls
+   *     match_count: Total matches across all controls (evaluator matched)
+   *     non_match_count: Total non-matches across all controls (evaluator didn't match)
+   *     error_count: Total errors across all controls (evaluation failed)
+   *     action_counts: Breakdown of actions for matched executions
+   *     timeseries: Time-series data points (only when include_timeseries=true)
+   */
+  stats: StatsTotals;
+  /**
+   * Time range used
+   */
+  timeRange: string;
+};
+
+/** @internal */
+export const ControlStatsResponse$inboundSchema: z.ZodMiniType<
+  ControlStatsResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    agent_name: types.string(),
+    control_id: types.number(),
+    control_name: types.string(),
+    stats: StatsTotals$inboundSchema,
+    time_range: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "agent_name": "agentName",
+      "control_id": "controlId",
+      "control_name": "controlName",
+      "time_range": "timeRange",
+    });
+  }),
+);
+
+export function controlStatsResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlStatsResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlStatsResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlStatsResponse' from JSON`,
+  );
+}
