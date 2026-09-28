@@ -34,3 +34,150 @@ class FailingStore(EventStore):
 
     async def query_events(self, query, *, namespace_key):  # pragma: no cover - not used
         raise NotImplementedError
+
+
+class CountingStore(EventStore):
+    def __init__(self) -> None:
+        self.calls: list[list[ControlExecutionEvent]] = []
+
+    async def store(
+        self,
+        events: list[ControlExecutionEvent],
+        *,
+        namespace_key: str,
+    ) -> int:
+        self.calls.append(events)
+        return len(events)
+
+    async def query_stats(
+        self,
+        agent_name,
+        time_range,
+        *,
+        control_id=None,
+        include_timeseries=False,
+        bucket_size=None,
+        namespace_key,
+    ):  # pragma: no cover - not used
+        raise NotImplementedError
+
+    async def query_events(self, query, *, namespace_key):  # pragma: no cover - not used
+        raise NotImplementedError
+
+
+class CountingSink:
+    def __init__(self) -> None:
+        self.calls: list[list[ControlExecutionEvent]] = []
+
+    async def write_events(self, events: list[ControlExecutionEvent]) -> SinkResult:
+        self.calls.append(events)
+        return SinkResult(accepted=len(events), dropped=0)
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_drops_on_store_error() -> None:
+    # Given: an ingestor with a failing store
+    ingestor = DirectEventIngestor(store=FailingStore())
+    events = [
+        ControlExecutionEvent(
+            trace_id="a" * 32,
+            span_id="b" * 16,
+                agent_name="agent-test-01",
+            control_id=1,
+            control_name="c",
+            check_stage="pre",
+            applies_to="llm_call",
+            action="observe",
+            matched=True,
+            confidence=0.9,
+        )
+    ]
+
+    # When: ingesting events
+    result = await ingestor.ingest(events, namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: all events are dropped
+    assert result.received == 1
+    assert result.processed == 0
+    assert result.dropped == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_logs_when_enabled(caplog: pytest.LogCaptureFixture) -> None:
+    # Given: an ingestor with logging enabled
+    store = CountingStore()
+    ingestor = DirectEventIngestor(store=store, log_to_stdout=True)
+    event = ControlExecutionEvent(
+        trace_id="a" * 32,
+        span_id="b" * 16,
+                agent_name="agent-test-01",
+        control_id=1,
+        control_name="c",
+        check_stage="pre",
+        applies_to="llm_call",
+        action="observe",
+        matched=True,
+        confidence=0.9,
+    )
+
+    # When: ingesting events
+    with caplog.at_level(logging.INFO):
+        result = await ingestor.ingest([event], namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: event is stored and a log line is emitted
+    assert result.processed == 1
+    assert store.calls
+    assert any("control_execution" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_empty_events_returns_zeroes() -> None:
+    # Given: an ingestor with any store
+    ingestor = DirectEventIngestor(store=CountingStore())
+
+    # When: ingesting an empty list
+    result = await ingestor.ingest([], namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    # Then: counts are zeroed
+    assert result.received == 0
+    assert result.processed == 0
+    assert result.dropped == 0
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_flush_noop() -> None:
+    # Given: an ingestor
+    ingestor = DirectEventIngestor(store=CountingStore())
+
+    # When: flushing
+    await ingestor.flush()
+
+    # Then: no error is raised
+    assert True
+
+
+@pytest.mark.asyncio
+async def test_direct_ingestor_accepts_control_event_sink() -> None:
+    sink = CountingSink()
+    ingestor = DirectEventIngestor(sink)
+    events = [
+        ControlExecutionEvent(
+            trace_id="a" * 32,
+            span_id="b" * 16,
+            agent_name="agent-test-01",
+            control_id=1,
+            control_name="c",
+            check_stage="pre",
+            applies_to="llm_call",
+            action="observe",
+            matched=True,
+            confidence=0.9,
+        )
+    ]
+
+    result = await ingestor.ingest(events, namespace_key=DEFAULT_NAMESPACE_KEY)
+
+    assert result.received == 1
+    assert result.processed == 1
+    assert result.dropped == 0
+    assert sink.calls == [events]
