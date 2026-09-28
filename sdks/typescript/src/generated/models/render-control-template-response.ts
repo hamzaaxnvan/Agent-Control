@@ -20,3 +20,26 @@ export type RenderControlTemplateResponse = {
    *
    * @remarks
    *
+   * This model contains only the logic and configuration.
+   * Identity fields (id, name) are managed by the database.
+   */
+  control: ControlDefinitionOutput;
+};
+
+/** @internal */
+export const RenderControlTemplateResponse$inboundSchema: z.ZodMiniType<
+  RenderControlTemplateResponse,
+  unknown
+> = z.object({
+  control: ControlDefinitionOutput$inboundSchema,
+});
+
+export function renderControlTemplateResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<RenderControlTemplateResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => RenderControlTemplateResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'RenderControlTemplateResponse' from JSON`,
+  );
+}
