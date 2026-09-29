@@ -24,3 +24,30 @@ def upgrade() -> None:
         sa.Column("cloned_from_control_id", sa.Integer(), nullable=True),
     )
     # No ON DELETE action: hard deletes of clone sources are restricted.
+    # The API soft-deletes controls so clone lineage remains intact.
+    op.create_foreign_key(
+        "controls_cloned_from_control_fkey",
+        "controls",
+        "controls",
+        ["namespace_key", "cloned_from_control_id"],
+        ["namespace_key", "id"],
+    )
+    with op.get_context().autocommit_block():
+        op.execute(
+            """
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_controls_cloned_from
+            ON controls (namespace_key, cloned_from_control_id)
+            WHERE cloned_from_control_id IS NOT NULL
+            """
+        )
+
+
+def downgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_controls_cloned_from")
+    op.drop_constraint(
+        "controls_cloned_from_control_fkey",
+        "controls",
+        type_="foreignkey",
+    )
+    op.drop_column("controls", "cloned_from_control_id")
