@@ -45,3 +45,50 @@ export type InitAgentOverwriteChanges = {
   /**
    * Steps removed by overwrite
    */
+  stepsRemoved?: Array<StepKey> | undefined;
+  /**
+   * Existing steps updated by overwrite
+   */
+  stepsUpdated?: Array<StepKey> | undefined;
+};
+
+/** @internal */
+export const InitAgentOverwriteChanges$inboundSchema: z.ZodMiniType<
+  InitAgentOverwriteChanges,
+  unknown
+> = z.pipe(
+  z.object({
+    evaluator_removals: types.optional(
+      z.array(InitAgentEvaluatorRemoval$inboundSchema),
+    ),
+    evaluators_added: types.optional(z.array(types.string())),
+    evaluators_removed: types.optional(z.array(types.string())),
+    evaluators_updated: types.optional(z.array(types.string())),
+    metadata_changed: z._default(types.boolean(), false),
+    steps_added: types.optional(z.array(StepKey$inboundSchema)),
+    steps_removed: types.optional(z.array(StepKey$inboundSchema)),
+    steps_updated: types.optional(z.array(StepKey$inboundSchema)),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "evaluator_removals": "evaluatorRemovals",
+      "evaluators_added": "evaluatorsAdded",
+      "evaluators_removed": "evaluatorsRemoved",
+      "evaluators_updated": "evaluatorsUpdated",
+      "metadata_changed": "metadataChanged",
+      "steps_added": "stepsAdded",
+      "steps_removed": "stepsRemoved",
+      "steps_updated": "stepsUpdated",
+    });
+  }),
+);
+
+export function initAgentOverwriteChangesFromJSON(
+  jsonString: string,
+): SafeParseResult<InitAgentOverwriteChanges, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => InitAgentOverwriteChanges$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'InitAgentOverwriteChanges' from JSON`,
+  );
+}
