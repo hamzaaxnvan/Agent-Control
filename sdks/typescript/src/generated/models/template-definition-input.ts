@@ -19,3 +19,47 @@ export type TemplateDefinitionInput = {
    */
   definitionTemplate: any;
   /**
+   * Metadata describing the template itself
+   */
+  description?: string | null | undefined;
+  /**
+   * Typed parameter definitions keyed by parameter name
+   */
+  parameters?: { [k: string]: TemplateParameterDefinition } | undefined;
+};
+
+/** @internal */
+export type TemplateDefinitionInput$Outbound = {
+  definition_template: any;
+  description?: string | null | undefined;
+  parameters?:
+    | { [k: string]: TemplateParameterDefinition$Outbound }
+    | undefined;
+};
+
+/** @internal */
+export const TemplateDefinitionInput$outboundSchema: z.ZodMiniType<
+  TemplateDefinitionInput$Outbound,
+  TemplateDefinitionInput
+> = z.pipe(
+  z.object({
+    definitionTemplate: z.any(),
+    description: z.optional(z.nullable(z.string())),
+    parameters: z.optional(
+      z.record(z.string(), TemplateParameterDefinition$outboundSchema),
+    ),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      definitionTemplate: "definition_template",
+    });
+  }),
+);
+
+export function templateDefinitionInputToJSON(
+  templateDefinitionInput: TemplateDefinitionInput,
+): string {
+  return JSON.stringify(
+    TemplateDefinitionInput$outboundSchema.parse(templateDefinitionInput),
+  );
+}
