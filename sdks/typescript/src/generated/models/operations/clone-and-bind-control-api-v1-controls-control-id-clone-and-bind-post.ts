@@ -21,3 +21,26 @@ export type CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest$Out
 /** @internal */
 export const CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest$outboundSchema:
   z.ZodMiniType<
+    CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest$Outbound,
+    CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest
+  > = z.pipe(
+    z.object({
+      controlId: z.int(),
+      body: models.CloneAndBindControlRequest$outboundSchema,
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        controlId: "control_id",
+      });
+    }),
+  );
+
+export function cloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequestToJSON(
+  cloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest:
+    CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest,
+): string {
+  return JSON.stringify(
+    CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest$outboundSchema
+      .parse(cloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest),
+  );
+}
