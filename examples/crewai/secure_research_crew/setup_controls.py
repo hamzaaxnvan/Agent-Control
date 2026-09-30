@@ -122,3 +122,252 @@ def researcher_controls() -> list[tuple[str, dict]]:
         "condition": {
             "selector": {"path": "input.query"},
             "evaluator": {
+                "name": "list",
+                "config": {
+                    "values": ["salary_data", "admin_users", "credentials", "auth_tokens"],
+                    "logic": "any",
+                    "match_mode": "contains",
+                    "case_sensitive": False,
+                },
+            },
+        },
+        "action": {"decision": "deny"},
+    }
+
+    return [
+        ("researcher-sql-safety", sql_safety),
+        ("researcher-restricted-tables", restricted_tables),
+    ]
+
+
+def analyst_controls() -> list[tuple[str, dict]]:
+    """Controls for the Analyst agent's validate_data tool."""
+    required_fields = {
+        "description": "Require dataset, findings, and confidence_score in analysis",
+        "enabled": True,
+        "execution": "server",
+        "scope": {
+            "step_types": ["tool"],
+            "step_names": ["validate_data"],
+            "stages": ["pre"],
+        },
+        "condition": {
+            "selector": {"path": "input.request"},
+            "evaluator": {
+                "name": "json",
+                "config": {
+                    "required_fields": ["dataset", "findings", "confidence_score"],
+                    "field_constraints": {
+                        "confidence_score": {
+                            "type": "number",
+                            "min": 0,
+                            "max": 1,
+                        }
+                    },
+                },
+            },
+        },
+        "action": {"decision": "deny"},
+    }
+
+    missing_methodology = {
+        "description": "Steer analyst to add methodology when missing",
+        "enabled": True,
+        "execution": "server",
+        "scope": {
+            "step_types": ["tool"],
+            "step_names": ["validate_data"],
+            "stages": ["pre"],
+        },
+        "condition": {
+            "selector": {"path": "input.request"},
+            "evaluator": {
+                "name": "json",
+                "config": {
+                    "json_schema": {
+                        "type": "object",
+                        "oneOf": [
+                            {
+                                "required": ["methodology"],
+                                "properties": {
+                                    "methodology": {"type": "string", "minLength": 1}
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+        },
+        "action": {
+            "decision": "steer",
+            "steering_context": {
+                "message": (
+                    '{"required_actions": ["add_methodology"], '
+                    '"reason": "Analysis must include a methodology section '
+                    'describing how data was collected and validated.", '
+                    '"retry_with": {"methodology": '
+                    '"<describe your data collection and validation method>"}}'
+                )
+            },
+        },
+    }
+
+    return [
+        ("analyst-required-fields", required_fields),
+        ("analyst-methodology-check", missing_methodology),
+    ]
+
+
+def writer_controls() -> list[tuple[str, dict]]:
+    """Controls for the Writer agent's write_report tool."""
+    pii_regex = {
+        "description": "Block PII (SSN, email, phone) in report output",
+        "enabled": True,
+        "execution": "server",
+        "scope": {
+            "step_types": ["tool"],
+            "step_names": ["write_report"],
+            "stages": ["post"],
+        },
+        "condition": {
+            "selector": {"path": "output"},
+            "evaluator": {
+                "name": "regex",
+                "config": {
+                    "pattern": (
+                        r"(?:"
+                        r"\b\d{3}-\d{2}-\d{4}\b"           # SSN
+                        r"|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"  # Email
+                        r"|\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"  # Phone
+                        r")"
+                    )
+                },
+            },
+        },
+        "action": {"decision": "deny"},
+    }
+
+    # NOTE: The citation-presence check is handled client-side in the tool
+    # wrapper (write_report in research_crew.py) because the regex evaluator
+    # triggers actions on match, not on non-match. The tool adds citations
+    # if they are missing before returning the report.
+
+    return [
+        ("writer-pii-blocker", pii_regex),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Main setup
+# ---------------------------------------------------------------------------
+
+async def setup():
+    """Create all controls, policies, and agent associations."""
+    async with AgentControlClient(base_url=SERVER_URL) as client:
+        # 1. Register the runtime agent
+        agent = Agent(
+            agent_name=AGENT_NAME,
+            agent_description=(
+                "Multi-agent research crew with per-agent policies: "
+                "Researcher (data access), Analyst (validation), Writer (content safety)"
+            ),
+        )
+        try:
+            await agents.register_agent(client, agent, steps=[])
+            print(f"[agent] Registered: {AGENT_NAME}")
+        except Exception as e:
+            if "409" in str(e) or "already" in str(e).lower():
+                print(f"[agent] Already exists: {AGENT_NAME}")
+            else:
+                raise
+
+        # 2. Create controls grouped by role
+        print("\n[controls] Creating researcher controls...")
+        researcher_ids = []
+        for name, data in researcher_controls():
+            cid = await create_control_idempotent(client, name, data)
+            researcher_ids.append(cid)
+
+        print("\n[controls] Creating analyst controls...")
+        analyst_ids = []
+        for name, data in analyst_controls():
+            cid = await create_control_idempotent(client, name, data)
+            analyst_ids.append(cid)
+
+        print("\n[controls] Creating writer controls...")
+        writer_ids = []
+        for name, data in writer_controls():
+            cid = await create_control_idempotent(client, name, data)
+            writer_ids.append(cid)
+
+        all_control_ids = researcher_ids + analyst_ids + writer_ids
+
+        # 3. Create policies and associate controls
+        print("\n[policies] Creating policies and associating controls...")
+
+        policy_groups = [
+            ("data-access-policy", researcher_ids),
+            ("analysis-validation-policy", analyst_ids),
+            ("content-safety-policy", writer_ids),
+        ]
+
+        for policy_name, control_ids in policy_groups:
+            pid = await create_policy_safe(client, policy_name)
+            if pid is not None:
+                for cid in control_ids:
+                    await policies.add_control_to_policy(client, pid, cid)
+                print(f"    {policy_name}: {len(control_ids)} controls linked")
+                # Assign policy to agent
+                try:
+                    await agents.add_agent_policy(client, AGENT_NAME, pid)
+                    print(f"    {policy_name} -> {AGENT_NAME}")
+                except Exception as e:
+                    if "409" in str(e) or "already" in str(e).lower():
+                        print(f"    {policy_name} already assigned (OK)")
+                    else:
+                        raise
+
+        # 4. Also add controls directly to the agent as a reliable fallback.
+        #    Direct associations are always idempotent and guarantee the controls
+        #    are active even if policy association had issues on re-run.
+        print("\n[agent] Adding direct control associations (idempotent)...")
+        for cid in all_control_ids:
+            try:
+                await agents.add_agent_control(client, AGENT_NAME, cid)
+            except Exception as e:
+                if "409" in str(e) or "already" in str(e).lower():
+                    pass  # Already associated, which is fine
+                else:
+                    raise
+        print(f"  + {len(all_control_ids)} controls directly associated with {AGENT_NAME}")
+
+        # Summary
+        print("\n" + "=" * 60)
+        print("Setup complete!")
+        print("=" * 60)
+        print(f"""
+Agent:    {AGENT_NAME}
+Policies: 3
+Controls: {len(all_control_ids)}
+
+  data-access-policy (Researcher -> query_database):
+    - researcher-sql-safety         [pre, deny]   Block DROP/DELETE, enforce LIMIT
+    - researcher-restricted-tables  [pre, deny]   Block salary_data, admin_users, ...
+
+  analysis-validation-policy (Analyst -> validate_data):
+    - analyst-required-fields       [pre, deny]   Require dataset, findings, confidence_score
+    - analyst-methodology-check     [pre, steer]  Steer if methodology missing
+
+  content-safety-policy (Writer -> write_report):
+    - writer-pii-blocker            [post, deny]  Block SSN, email, phone in output
+
+You can now run:  uv run --active python -m secure_research_crew.main
+""")
+
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Secure Research Crew -- Control & Policy Setup")
+    print("=" * 60)
+    print()
+    asyncio.run(setup())
