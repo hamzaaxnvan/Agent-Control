@@ -41,3 +41,91 @@ function calculateSummary(
     totalExecutions: stats.totals.execution_count,
     totalMatches: stats.totals.match_count,
     totalErrors: stats.totals.error_count,
+    denyRate:
+      stats.totals.execution_count > 0
+        ? ((actionCounts.deny || 0) / stats.totals.execution_count) * 100
+        : 0,
+    actionCounts,
+  };
+}
+
+export function AgentsMonitor({
+  agentUuid,
+  timeRangeValue,
+}: AgentsMonitorProps) {
+  // Convert to API TimeRange only when calling the API
+  const apiTimeRange = useMemo(
+    () => mapTimeRangeTypeToTimeRange(timeRangeValue.type),
+    [timeRangeValue.type]
+  );
+
+  const {
+    data: stats,
+    isLoading,
+    error,
+  } = useAgentMonitor(agentUuid, apiTimeRange, {
+    refetchInterval: 2000, // Poll every 2 seconds
+    includeTimeseries: true, // Always fetch timeseries for trend chart
+  });
+
+  // Calculate summary metrics
+  const summary = useMemo(() => calculateSummary(stats), [stats]);
+
+  if (isLoading && !stats) {
+    return (
+      <Box py="xl">
+        <Stack align="center" gap="md">
+          <Loader size="md" />
+          <Text c="dimmed">Loading stats...</Text>
+        </Stack>
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box py="xl">
+        <Stack align="center" gap="md">
+          <IconAlertCircle size={48} color="var(--mantine-color-red-6)" />
+          <Text c="red" fw={500}>
+            Failed to load stats
+          </Text>
+          <Text size="sm" c="dimmed">
+            {error instanceof Error ? error.message : 'Unknown error'}
+          </Text>
+        </Stack>
+      </Box>
+    );
+  }
+
+  // Create empty summary if no data
+  const displaySummary = summary || {
+    totalExecutions: 0,
+    totalMatches: 0,
+    totalErrors: 0,
+    denyRate: 0,
+    actionCounts: {},
+  };
+
+  return (
+    <Stack gap="lg">
+      {/* Always show the summary card - it handles empty state internally */}
+      <SummaryCard
+        summary={displaySummary}
+        timeseries={stats?.totals.timeseries}
+        timeRange={apiTimeRange}
+      />
+
+      {/* Show table only if there's data, otherwise show empty state message */}
+      {stats && stats.controls.length > 0 ? (
+        <ControlStatsTable stats={stats.controls} />
+      ) : (
+        <Box py="md" ta="center">
+          <Text size="sm" c="dimmed">
+            Per-control statistics will appear here once controls are executed.
+          </Text>
+        </Box>
+      )}
+    </Stack>
+  );
+}
