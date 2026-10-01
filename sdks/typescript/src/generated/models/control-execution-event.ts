@@ -126,3 +126,131 @@ export type ControlExecutionEvent = {
    */
   traceId: string;
 };
+
+/** @internal */
+export const CheckStage$inboundSchema: z.ZodMiniType<CheckStage, unknown> =
+  openEnums.inboundSchema(CheckStage);
+/** @internal */
+export const CheckStage$outboundSchema: z.ZodMiniType<string, CheckStage> =
+  openEnums.outboundSchema(CheckStage);
+
+/** @internal */
+export const ControlExecutionEvent$inboundSchema: z.ZodMiniType<
+  ControlExecutionEvent,
+  unknown
+> = z.pipe(
+  z.object({
+    action: ActionDecision$inboundSchema,
+    agent_name: types.string(),
+    applies_to: types.string(),
+    check_stage: CheckStage$inboundSchema,
+    confidence: types.number(),
+    control_execution_id: types.optional(types.string()),
+    control_id: types.number(),
+    control_name: types.string(),
+    error_message: z.optional(z.nullable(types.string())),
+    evaluator_name: z.optional(z.nullable(types.string())),
+    execution_duration_ms: z.optional(z.nullable(types.number())),
+    matched: types.boolean(),
+    metadata: types.optional(z.record(z.string(), z.any())),
+    selector_path: z.optional(z.nullable(types.string())),
+    span_id: types.string(),
+    timestamp: types.optional(types.date()),
+    trace_id: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "agent_name": "agentName",
+      "applies_to": "appliesTo",
+      "check_stage": "checkStage",
+      "control_execution_id": "controlExecutionId",
+      "control_id": "controlId",
+      "control_name": "controlName",
+      "error_message": "errorMessage",
+      "evaluator_name": "evaluatorName",
+      "execution_duration_ms": "executionDurationMs",
+      "selector_path": "selectorPath",
+      "span_id": "spanId",
+      "trace_id": "traceId",
+    });
+  }),
+);
+/** @internal */
+export type ControlExecutionEvent$Outbound = {
+  action: string;
+  agent_name: string;
+  applies_to: string;
+  check_stage: string;
+  confidence: number;
+  control_execution_id?: string | undefined;
+  control_id: number;
+  control_name: string;
+  error_message?: string | null | undefined;
+  evaluator_name?: string | null | undefined;
+  execution_duration_ms?: number | null | undefined;
+  matched: boolean;
+  metadata?: { [k: string]: any } | undefined;
+  selector_path?: string | null | undefined;
+  span_id: string;
+  timestamp?: string | undefined;
+  trace_id: string;
+};
+
+/** @internal */
+export const ControlExecutionEvent$outboundSchema: z.ZodMiniType<
+  ControlExecutionEvent$Outbound,
+  ControlExecutionEvent
+> = z.pipe(
+  z.object({
+    action: ActionDecision$outboundSchema,
+    agentName: z.string(),
+    appliesTo: z.string(),
+    checkStage: CheckStage$outboundSchema,
+    confidence: z.number(),
+    controlExecutionId: z.optional(z.string()),
+    controlId: z.int(),
+    controlName: z.string(),
+    errorMessage: z.optional(z.nullable(z.string())),
+    evaluatorName: z.optional(z.nullable(z.string())),
+    executionDurationMs: z.optional(z.nullable(z.number())),
+    matched: z.boolean(),
+    metadata: z.optional(z.record(z.string(), z.any())),
+    selectorPath: z.optional(z.nullable(z.string())),
+    spanId: z.string(),
+    timestamp: z.optional(z.pipe(z.date(), z.transform(v => v.toISOString()))),
+    traceId: z.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      agentName: "agent_name",
+      appliesTo: "applies_to",
+      checkStage: "check_stage",
+      controlExecutionId: "control_execution_id",
+      controlId: "control_id",
+      controlName: "control_name",
+      errorMessage: "error_message",
+      evaluatorName: "evaluator_name",
+      executionDurationMs: "execution_duration_ms",
+      selectorPath: "selector_path",
+      spanId: "span_id",
+      traceId: "trace_id",
+    });
+  }),
+);
+
+export function controlExecutionEventToJSON(
+  controlExecutionEvent: ControlExecutionEvent,
+): string {
+  return JSON.stringify(
+    ControlExecutionEvent$outboundSchema.parse(controlExecutionEvent),
+  );
+}
+export function controlExecutionEventFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlExecutionEvent, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlExecutionEvent$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlExecutionEvent' from JSON`,
+  );
+}
