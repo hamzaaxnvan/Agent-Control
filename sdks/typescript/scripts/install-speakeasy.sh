@@ -24,3 +24,29 @@ if [[ -x "${BIN_PATH}" ]]; then
     echo "Speakeasy CLI already present at ${BIN_PATH}"
     exit 0
   fi
+fi
+
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH_RAW="$(uname -m)"
+
+case "${ARCH_RAW}" in
+  x86_64) ARCH="amd64" ;;
+  arm64|aarch64) ARCH="arm64" ;;
+  *)
+    echo "Unsupported architecture: ${ARCH_RAW}" >&2
+    exit 1
+    ;;
+esac
+
+ASSET="speakeasy_${OS}_${ARCH}.zip"
+URL="https://github.com/speakeasy-api/speakeasy/releases/download/${SPEAKEASY_VERSION}/${ASSET}"
+
+mkdir -p "${BIN_DIR}"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+curl -fsSL "${URL}" -o "${TMP_DIR}/speakeasy.zip"
+unzip -q "${TMP_DIR}/speakeasy.zip" -d "${TMP_DIR}"
+install -m 0755 "${TMP_DIR}/speakeasy" "${BIN_PATH}"
+
+echo "Installed Speakeasy CLI ${SPEAKEASY_VERSION} to ${BIN_PATH}"
