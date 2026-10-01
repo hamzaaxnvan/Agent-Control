@@ -21,3 +21,27 @@ dev = [
     "agent-control-engine>=8.6.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+]
+
+[project.entry-points."agent_control.evaluators"]
+"galileo.luna" = "agent_control_evaluator_galileo.luna:LunaEvaluator"
+"galileo.decision_models" = "agent_control_evaluator_galileo.decision_models:DecisionModelsEvaluator"
+"galileo.llm" = "agent_control_evaluator_galileo.llm:LlmEvaluator"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_control_evaluator_galileo"]
+
+# For local dev, use override to resolve from workspace
+[tool.uv.sources]
+agent-control-evaluators = { path = "../../builtin", editable = true }
+agent-control-models = { path = "../../../models", editable = true }
+agent-control-sdk = { path = "../../../sdks/python", editable = true }
+agent-control-telemetry = { path = "../../../telemetry", editable = true }
+agent-control-engine = { path = "../../../engine", editable = true }
