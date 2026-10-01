@@ -24,3 +24,56 @@ export type EvaluatorDefinition<TFormValues = any> = {
 
   /** Execution environment selected when creating a control for this evaluator. */
   defaultExecution?: ControlExecution;
+
+  /** Execution environments supported by this evaluator. */
+  supportedExecutions?: readonly ControlExecution[];
+
+  /**
+   * Validation rules for the form.
+   * Uses Mantine form validation format.
+   * @see https://mantine.dev/form/validation/
+   */
+  validate?: Record<
+    string,
+    (value: unknown, values: TFormValues) => string | null
+  >;
+
+  /**
+   * Convert form values to API config format.
+   * Called when saving the control.
+   */
+  toConfig: (values: TFormValues) => Record<string, unknown>;
+
+  /**
+   * Convert API config to form values.
+   * Called when loading an existing control.
+   */
+  fromConfig: (config: Record<string, unknown>) => TFormValues;
+
+  /**
+   * The form component to render for this evaluator.
+   * Receives the Mantine form instance as a prop.
+   */
+  FormComponent: React.ComponentType<{
+    form: UseFormReturnType<TFormValues>;
+  }>;
+};
+
+/**
+ * Type helper for creating strongly-typed evaluator definitions.
+ * Usage: `const myEvaluator: EvaluatorDefinition<MyFormValues> = { ... }`
+ */
+export type AnyEvaluatorDefinition = EvaluatorDefinition<any>;
+
+/**
+ * Props passed to evaluator form components.
+ */
+export type EvaluatorFormProps<TFormValues> = {
+  form: UseFormReturnType<TFormValues>;
+};
+
+/**
+ * Utility type for extracting form values type from an evaluator definition.
+ */
+export type EvaluatorFormValues<T> =
+  T extends EvaluatorDefinition<infer V> ? V : never;

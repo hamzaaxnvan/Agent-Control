@@ -22,3 +22,100 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  *     non_match_count: Number of times the control did not match
  *     deny_count: Number of deny actions
  *     steer_count: Number of steer actions
+ *     observe_count: Number of observe actions
+ *     error_count: Number of errors during evaluation
+ *     avg_confidence: Average confidence score
+ *     avg_duration_ms: Average execution duration in milliseconds
+ *
+ * Invariant:
+ *     deny_count + steer_count + observe_count == match_count
+ */
+export type ControlStats = {
+  /**
+   * Average confidence
+   */
+  avgConfidence: number;
+  /**
+   * Average duration (ms)
+   */
+  avgDurationMs?: number | null | undefined;
+  /**
+   * Control ID
+   */
+  controlId: number;
+  /**
+   * Control name
+   */
+  controlName: string;
+  /**
+   * Deny actions
+   */
+  denyCount: number;
+  /**
+   * Evaluation errors
+   */
+  errorCount: number;
+  /**
+   * Total executions
+   */
+  executionCount: number;
+  /**
+   * Total matches
+   */
+  matchCount: number;
+  /**
+   * Total non-matches
+   */
+  nonMatchCount: number;
+  /**
+   * Observe actions
+   */
+  observeCount: number;
+  /**
+   * Steer actions
+   */
+  steerCount: number;
+};
+
+/** @internal */
+export const ControlStats$inboundSchema: z.ZodMiniType<ControlStats, unknown> =
+  z.pipe(
+    z.object({
+      avg_confidence: types.number(),
+      avg_duration_ms: z.optional(z.nullable(types.number())),
+      control_id: types.number(),
+      control_name: types.string(),
+      deny_count: types.number(),
+      error_count: types.number(),
+      execution_count: types.number(),
+      match_count: types.number(),
+      non_match_count: types.number(),
+      observe_count: types.number(),
+      steer_count: types.number(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        "avg_confidence": "avgConfidence",
+        "avg_duration_ms": "avgDurationMs",
+        "control_id": "controlId",
+        "control_name": "controlName",
+        "deny_count": "denyCount",
+        "error_count": "errorCount",
+        "execution_count": "executionCount",
+        "match_count": "matchCount",
+        "non_match_count": "nonMatchCount",
+        "observe_count": "observeCount",
+        "steer_count": "steerCount",
+      });
+    }),
+  );
+
+export function controlStatsFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlStats, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlStats$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlStats' from JSON`,
+  );
+}
