@@ -10,3 +10,29 @@ export type ListAgentsApiV1AgentsGetRequest = {
   name?: string | null | undefined;
 };
 
+/** @internal */
+export type ListAgentsApiV1AgentsGetRequest$Outbound = {
+  cursor?: string | null | undefined;
+  limit: number;
+  name?: string | null | undefined;
+};
+
+/** @internal */
+export const ListAgentsApiV1AgentsGetRequest$outboundSchema: z.ZodMiniType<
+  ListAgentsApiV1AgentsGetRequest$Outbound,
+  ListAgentsApiV1AgentsGetRequest
+> = z.object({
+  cursor: z.optional(z.nullable(z.string())),
+  limit: z._default(z.int(), 20),
+  name: z.optional(z.nullable(z.string())),
+});
+
+export function listAgentsApiV1AgentsGetRequestToJSON(
+  listAgentsApiV1AgentsGetRequest: ListAgentsApiV1AgentsGetRequest,
+): string {
+  return JSON.stringify(
+    ListAgentsApiV1AgentsGetRequest$outboundSchema.parse(
+      listAgentsApiV1AgentsGetRequest,
+    ),
+  );
+}
