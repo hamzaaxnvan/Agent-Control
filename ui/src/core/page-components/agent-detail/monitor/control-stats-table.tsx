@@ -39,3 +39,45 @@ export function ControlStatsTable({ stats }: ControlStatsTableProps) {
                   <Table.Td>
                     <Text size="sm">
                       {control.execution_count.toLocaleString()}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" wrap="nowrap">
+                      <Text size="sm" fw={500}>
+                        {control.match_count}
+                      </Text>
+                      {control.execution_count > 0 && (
+                        <DataPill
+                          value={`${triggerRate.toFixed(1)}%`}
+                          size="sm"
+                          variant={
+                            triggerRate < 10
+                              ? 'positive'
+                              : triggerRate <= 20
+                                ? 'orange'
+                                : 'negative'
+                          }
+                        />
+                      )}
+                    </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    {control.error_count > 0 ? (
+                      <Badge color="red" variant="filled" size="sm">
+                        {control.error_count}
+                      </Badge>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        0
+                      </Text>
+                    )}
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
+    </Card>
+  );
+}

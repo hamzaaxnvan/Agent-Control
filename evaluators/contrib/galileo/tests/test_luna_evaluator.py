@@ -955,3 +955,961 @@ class TestGalileoLunaClient:
             return httpx.Response(200, json={"score": 0.5, "status": "success"})
 
         step = Step(
+            type="llm",
+            name="answer",
+            input="complete prompt",
+            output="complete response",
+            tools=[{"name": "search", "input_schema": {}}],
+            ground_truth="expected answer",
+        )
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            await client.invoke(
+                scorer_id=SCORER_ID,
+                input="selected prompt",
+                output="selected response",
+                step=step,
+            )
+        finally:
+            await client.close()
+
+        assert captured["body"] == {
+            "scorer_id": SCORER_ID,
+            "inputs": {
+                "query": "selected prompt",
+                "response": "selected response",
+                "ground_truth": "expected answer",
+                "tools": [{"name": "search", "input_schema": {}}],
+            },
+            "config": {"request_timeout_seconds": 8.0},
+        }
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_normalizes_record_without_changing_legacy_inputs(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+
+        captured: dict[str, object] = {}
+        raw_messages = "{'messages': [{'role': 'user', 'content': 'wire policy'}]}"
+        raw_response = "{'answer': 'approved'}"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.9, "status": "success"})
+
+        step = Step(
+            type="llm",
+            name="answer",
+            input=raw_messages,
+            output=raw_response,
+        )
+        evaluator = LunaEvaluator.from_dict(
+            {"scorer_id": SCORER_ID, "scorer_version_id": SCORER_VERSION_ID}
+        )
+        evaluator._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            result = await evaluator.evaluate_with_context(
+                {"input": raw_messages, "output": raw_response},
+                step,
+            )
+        finally:
+            await evaluator._client.close()
+
+        assert result.error is None
+        body = captured["body"]
+        assert isinstance(body, dict)
+        assert body["inputs"]["query"] == raw_messages
+        assert body["inputs"]["response"] == raw_response
+        assert body["scorer_version_id"] == SCORER_VERSION_ID
+        record = body["record"]
+        assert isinstance(record, dict)
+        assert record["input"] == [{"role": "user", "content": "wire policy"}]
+        assert record["output"] == {"content": raw_response, "role": "assistant"}
+
+    @pytest.mark.asyncio
+    async def test_client_omits_record_for_step_type_orbit_does_not_support(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.4, "status": "success"})
+
+        # Given: a generic Agent Control step whose type is not an Orbit record discriminator
+        step = Step(type="custom", name="custom-step", input="full input", output="full output")
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        # When: the scorer is invoked with selector-selected input
+        try:
+            await client.invoke(scorer_id="scorer-123", input="selected input", step=step)
+        finally:
+            await client.close()
+
+        # Then: the legacy contract remains usable by old and new Orbit versions
+        assert captured["body"] == {
+            "scorer_id": "scorer-123",
+            "inputs": {"query": "selected input", "response": ""},
+            "config": {"request_timeout_seconds": 8.0},
+        }
+
+    @pytest.mark.parametrize(
+        ("step", "record_type"),
+        [
+            (Step(type="llm", name="answer", input="question", output="answer"), "llm"),
+            (Step(type="tool", name="search", input={"query": "q"}, output="result"), "tool"),
+            (
+                Step(type="retriever", name="retrieve", input="question", output=["document"]),
+                "retriever",
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_client_uses_canonical_factory_for_flat_steps(
+        self,
+        step: Step,
+        record_type: str,
+    ) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            await client.invoke(
+                scorer_id="scorer-123",
+                scorer_version_id=SCORER_VERSION_ID,
+                input="selected input",
+                output="selected output",
+                step=step,
+            )
+        finally:
+            await client.close()
+
+        body = captured["body"]
+        assert isinstance(body, dict)
+        record = body["record"]
+        assert isinstance(record, dict)
+        assert record["type"] == record_type
+        assert "context" not in record
+        if record_type in {"tool", "retriever"}:
+            assert record["spans"] == []
+
+    @pytest.mark.asyncio
+    async def test_client_serializes_nested_session_trace_and_tool_spans(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        step = Step(
+            type="session",
+            name="conversation",
+            input="session input",
+            children=[
+                Step(
+                    type="trace",
+                    name="request",
+                    input="trace input",
+                    children=[
+                        Step(
+                            type="tool",
+                            name="search",
+                            input={"query": "q"},
+                            output="result",
+                            children=[Step(type="tool", name="nested", input={"id": 1})],
+                        )
+                    ],
+                )
+            ],
+        )
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            await client.invoke(
+                scorer_id="scorer-123",
+                scorer_version_id=SCORER_VERSION_ID,
+                input={"query": "selected"},
+                output={"answer": "selected"},
+                step=step,
+            )
+        finally:
+            await client.close()
+
+        body = captured["body"]
+        assert isinstance(body, dict)
+        record = body["record"]
+        assert isinstance(record, dict)
+        assert record["type"] == "session"
+        traces = record["traces"]
+        assert isinstance(traces, list)
+        trace = traces[0]
+        assert isinstance(trace, dict)
+        assert trace["type"] == "trace"
+        spans = trace["spans"]
+        assert isinstance(spans, list)
+        tool = spans[0]
+        assert isinstance(tool, dict)
+        assert tool["type"] == "tool"
+        nested_spans = tool["spans"]
+        assert isinstance(nested_spans, list)
+        assert nested_spans[0]["name"] == "nested"
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_posts_trace_with_raw_structured_selector_data(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.8, "status": "success"})
+
+        step = Step(
+            type="trace",
+            name="account_lookup_trace",
+            input={"messages": [{"role": "user", "content": "Find my account information."}]},
+            output={"content": "Your account belongs to Jane Doe."},
+            children=[
+                Step(
+                    type="llm",
+                    name="account_agent",
+                    input=[{"role": "user", "content": "Find my account information."}],
+                    output={"content": "Looking up the account."},
+                ),
+                Step(
+                    type="tool",
+                    name="lookup_account",
+                    input={"account_id": "123"},
+                    output={"name": "Jane Doe"},
+                    children=[
+                        Step(
+                            type="tool",
+                            name="account_service",
+                            input={"account_id": "123"},
+                            output={"name": "Jane Doe"},
+                        )
+                    ],
+                ),
+                Step(
+                    type="retriever",
+                    name="account_docs",
+                    input={"query": "account 123"},
+                    output=[{"content": "Account owner: Jane Doe", "metadata": {"id": "d1"}}],
+                ),
+            ],
+            tools=[{"name": "lookup_account", "description": "Lookup", "input_schema": {}}],
+            ground_truth={"owner": "Jane Doe"},
+        )
+        selected = step.model_dump(mode="json")
+        evaluator = LunaEvaluator.from_dict(
+            {
+                "scorer_id": SCORER_ID,
+                "scorer_version_id": SCORER_VERSION_ID,
+                "scorer_label": "account-check",
+                "threshold": 0.5,
+                "config": {"request_timeout_seconds": 6},
+                "timeout_ms": 9000,
+            }
+        )
+        evaluator._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            result = await evaluator.evaluate_with_extensions(
+                selected,
+                step,
+                {
+                    "namespace_key": "org-1",
+                    "caller_id": "user-2",
+                    "target_type": "log_stream",
+                    "target_id": "run-3",
+                    "metadata": {"project_id": "project-4"},
+                },
+            )
+        finally:
+            await evaluator._client.close()
+
+        assert result.error is None
+        body = captured["body"]
+        assert isinstance(body, dict)
+        assert body["scorer_id"] == SCORER_ID
+        assert body["scorer_version_id"] == SCORER_VERSION_ID
+        assert body["scorer_label"] == "account-check"
+        assert body["execution_context"] == {
+            "organization_id": "org-1",
+            "user_id": "user-2",
+            "project_id": "project-4",
+            "run_id": "run-3",
+        }
+        assert body["inputs"] == {
+            "query": json.dumps(step.input, ensure_ascii=False, sort_keys=True),
+            "response": json.dumps(step.output, ensure_ascii=False, sort_keys=True),
+            "ground_truth": {"owner": "Jane Doe"},
+            "tools": step.tools,
+        }
+        assert body["config"] == {"request_timeout_seconds": 6.0}
+        record = body["record"]
+        assert isinstance(record, dict)
+        assert record["type"] == "trace"
+        assert json.loads(record["input"]) == step.input
+        assert json.loads(record["output"]) == step.output
+        spans = record["spans"]
+        assert isinstance(spans, list)
+        assert [child["type"] for child in spans] == ["llm", "tool", "retriever"]
+        assert spans[0]["input"][0]["content"] == "Find my account information."
+        assert json.loads(spans[1]["input"]) == {"account_id": "123"}
+        assert spans[1]["spans"][0]["name"] == "account_service"
+        assert spans[2]["output"][0]["content"] == "Account owner: Jane Doe"
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_posts_session_with_raw_structured_selector_data(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.8, "status": "success"})
+
+        step = Step(
+            type="session",
+            name="support_session",
+            input={"customer": "Jane Doe"},
+            output={"resolution": "account found"},
+            children=[
+                Step(
+                    type="trace",
+                    name="account_lookup",
+                    input={"query": "account info"},
+                    output={"owner": "Jane Doe"},
+                    children=[
+                        Step(
+                            type="tool",
+                            name="lookup_account",
+                            input={"account_id": "123"},
+                            output={"name": "Jane Doe"},
+                        )
+                    ],
+                )
+            ],
+        )
+        evaluator = LunaEvaluator.from_dict(
+            {"scorer_id": SCORER_ID, "scorer_version_id": SCORER_VERSION_ID}
+        )
+        evaluator._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            result = await evaluator.evaluate_with_context(step.model_dump(mode="json"), step)
+        finally:
+            await evaluator._client.close()
+
+        assert result.error is None
+        body = captured["body"]
+        assert isinstance(body, dict)
+        assert body["inputs"]["query"] == json.dumps(
+            step.input, ensure_ascii=False, sort_keys=True
+        )
+        assert body["inputs"]["response"] == json.dumps(
+            step.output, ensure_ascii=False, sort_keys=True
+        )
+        record = body["record"]
+        assert isinstance(record, dict)
+        assert record["type"] == "session"
+        assert json.loads(record["input"]) == step.input
+        assert json.loads(record["output"]) == step.output
+        traces = record["traces"]
+        assert isinstance(traces, list)
+        assert traces[0]["type"] == "trace"
+        assert traces[0]["spans"][0]["type"] == "tool"
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_does_not_post_trace_for_scalar_selector_or_invalid_hierarchy(
+        self,
+    ) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+
+        request_count = 0
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            return httpx.Response(200, json={"score": 0.8, "status": "success"})
+
+        evaluator = LunaEvaluator.from_dict(
+            {"scorer_id": SCORER_ID, "scorer_version_id": SCORER_VERSION_ID}
+        )
+        evaluator._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        trace = Step(
+            type="trace",
+            name="trace",
+            input={"question": "q"},
+            children=[Step(type="llm", name="answer", input="q", output="a")],
+        )
+        invalid_session = Step(
+            type="session",
+            name="session",
+            input="q",
+            children=[Step(type="tool", name="invalid-child", input={"q": "q"})],
+        )
+
+        try:
+            scalar_result = await evaluator.evaluate_with_context("response text", trace)
+            hierarchy_result = await evaluator.evaluate_with_context(
+                invalid_session.model_dump(mode="json"), invalid_session
+            )
+        finally:
+            await evaluator._client.close()
+
+        assert scalar_result.error is not None
+        assert "structured selector values" in scalar_result.error
+        assert hierarchy_result.error is not None
+        assert "cannot contain 'tool' child steps" in hierarchy_result.error
+        assert request_count == 0
+
+    @pytest.mark.parametrize("field", ["children", "spans", "traces"])
+    @pytest.mark.asyncio
+    async def test_client_rejects_hierarchy_fields_from_step_context(self, field: str) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+        from agent_control_evaluator_galileo.records import RecordFactoryError
+
+        step = Step(
+            type="tool",
+            name="search",
+            input={"query": "q"},
+            context={field: []},
+        )
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"score": 0.5, "status": "success"})
+            )
+        )
+
+        try:
+            with pytest.raises(RecordFactoryError, match="Step.context cannot define"):
+                await client.invoke(
+                    scorer_id="scorer-123",
+                    scorer_version_id=SCORER_VERSION_ID,
+                    input="selected",
+                    step=step,
+                )
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_client_uses_legacy_inputs_when_step_is_missing(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            await client.invoke(scorer_id="scorer-123", input="legacy query")
+        finally:
+            await client.close()
+
+        assert captured["body"] == {
+            "scorer_id": "scorer-123",
+            "inputs": {"query": "legacy query", "response": ""},
+            "config": {"request_timeout_seconds": 8.0},
+        }
+
+    @pytest.mark.asyncio
+    async def test_client_forwards_scorer_version_id_when_configured(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content.decode())
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            await client.invoke(
+                scorer_id="scorer-123",
+                scorer_version_id="version-456",
+                input="hello",
+            )
+        finally:
+            await client.close()
+
+        assert captured["body"]["scorer_version_id"] == "version-456"
+
+    @pytest.mark.asyncio
+    async def test_client_omits_galileo_api_key_even_when_env_is_set(self) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["headers"] = dict(request.headers)
+            return httpx.Response(200, json={"score": 0.5, "status": "success"})
+
+        env = {**LUNA_ENV, "GALILEO_API_KEY": "should-not-be-sent"}
+        with patch.dict(os.environ, env, clear=True):
+            client = GalileoLunaClient()
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        try:
+            await client.invoke(scorer_id="scorer-123", input="hello")
+        finally:
+            await client.close()
+
+        headers = captured["headers"]
+        assert isinstance(headers, dict)
+        assert "galileo-api-key" not in headers
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("empty_value", ["", " ", {}, []])
+    async def test_client_rejects_missing_input_and_output_values(
+        self, empty_value: object
+    ) -> None:
+        from agent_control_evaluator_galileo.luna import GalileoLunaClient
+
+        with patch.dict(os.environ, LUNA_ENV, clear=True):
+            client = GalileoLunaClient()
+
+        with pytest.raises(ValueError, match="At least one of input or output must be provided"):
+            await client.invoke(scorer_id="scorer-123", input=empty_value, output=empty_value)
+
+
+class TestLunaEvaluator:
+    """Tests for direct Luna evaluator behavior."""
+
+    @patch.dict(os.environ, LUNA_ENV)
+    def test_evaluator_metadata(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+
+        assert LunaEvaluator.metadata.name == "galileo.luna"
+        assert LunaEvaluator.metadata.requires_api_key is True
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_evaluator_init_without_auth_raises(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+
+        with pytest.raises(ValueError, match="GALILEO_API_SECRET_KEY or GALILEO_API_SECRET"):
+            LunaEvaluator.from_dict({"scorer_id": "scorer-123", "threshold": 0.5})
+
+    @patch.dict(os.environ, LUNA_ENV, clear=True)
+    def test_evaluator_init_accepts_api_secret(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+
+        evaluator = LunaEvaluator.from_dict({"scorer_id": "scorer-123", "threshold": 0.5})
+
+        assert evaluator.config.scorer_id == "scorer-123"
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_applies_threshold_locally_to_raw_score(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator, ScorerInvokeResponse
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        evaluator = LunaEvaluator.from_dict(
+            {
+                "scorer_id": "scorer-123",
+                "scorer_label": "toxicity",
+                "threshold": 0.7,
+                "operator": "gte",
+                "timeout_ms": 5000,
+            }
+        )
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ScorerInvokeResponse(
+                scorer_label="toxicity",
+                score=0.82,
+                status="success",
+                execution_time=0.1,
+            )
+
+            result = await evaluator.evaluate(
+                {
+                    "input": "user prompt",
+                    "output": "model answer",
+                }
+            )
+
+        assert isinstance(result, EvaluatorResult)
+        assert result.matched is True
+        assert result.confidence == 0.82
+        assert result.metadata == {
+            "scorer_id": "scorer-123",
+            "scorer_label": "toxicity",
+            "score": 0.82,
+            "threshold": 0.7,
+            "operator": "gte",
+            "status": "success",
+            "execution_time_seconds": 0.1,
+            "error_message": None,
+        }
+        mock_invoke.assert_awaited_once_with(
+            scorer_id="scorer-123",
+            scorer_label="toxicity",
+            input="user prompt",
+            output="model answer",
+            config=None,
+            timeout=5.0,
+        )
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_contextual_hook_forwards_complete_step(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator, ScorerInvokeResponse
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        # Given: selected scorer data and complete structured runtime context
+        evaluator = LunaEvaluator.from_dict(
+            {"scorer_id": "scorer-123", "threshold": 0.5, "operator": "gte"}
+        )
+        step = Step(
+            type="llm",
+            name="answer",
+            input="full input",
+            output="full output",
+            tools=[{"name": "search", "description": "Search", "input_schema": {}}],
+            ground_truth="expected",
+        )
+
+        # When: evaluating through the contextual hook
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ScorerInvokeResponse(score=0.8, status="success")
+            result = await evaluator.evaluate_with_context("selected input", step)
+
+        # Then: selector-selected data and the complete Step are both forwarded
+        assert result.matched is True
+        mock_invoke.assert_awaited_once_with(
+            scorer_id="scorer-123",
+            step=step,
+            selected_data="selected input",
+            selected_data_payload_field="input",
+            input="selected input",
+            output=None,
+            config=None,
+            timeout=10.0,
+        )
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("target_type", ["log_stream", "agent_stream"])
+    async def test_evaluator_consumes_verified_opaque_extensions(self, target_type: str) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator, ScorerInvokeResponse
+        from agent_control_evaluator_galileo.luna.client import (
+            GalileoExecutionContext,
+            GalileoLunaClient,
+        )
+
+        evaluator = LunaEvaluator.from_dict(
+            {"scorer_id": "scorer-123", "threshold": 0.5, "operator": "gte"}
+        )
+        extensions = {
+            "namespace_key": "org-1",
+            "caller_id": "verified-user-2",
+            "target_type": target_type,
+            "target_id": "run-4",
+            "metadata": {"project_id": "project-3"},
+        }
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ScorerInvokeResponse(score=0.8, status="success")
+            result = await evaluator.evaluate_with_extensions(
+                "selected input", Step(type="llm", name="answer", input="prompt"), extensions
+            )
+
+        assert result.matched is True
+        mock_invoke.assert_awaited_once_with(
+            scorer_id="scorer-123",
+            step=Step(type="llm", name="answer", input="prompt"),
+            selected_data="selected input",
+            selected_data_payload_field="input",
+            execution_context=GalileoExecutionContext(
+                organization_id="org-1",
+                user_id="verified-user-2",
+                project_id="project-3",
+                run_id="run-4",
+            ),
+            input="selected input",
+            output=None,
+            config=None,
+            timeout=10.0,
+        )
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_allows_missing_caller_id(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator, ScorerInvokeResponse
+        from agent_control_evaluator_galileo.luna.client import (
+            GalileoExecutionContext,
+            GalileoLunaClient,
+        )
+
+        evaluator = LunaEvaluator.from_dict({"scorer_id": "scorer-123"})
+        extensions = {
+            "namespace_key": "org-1",
+            "target_type": "log_stream",
+            "target_id": "run-4",
+            "metadata": {},
+        }
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ScorerInvokeResponse(score=0.8, status="success")
+            result = await evaluator.evaluate_with_extensions(
+                "selected input", Step(type="llm", name="answer", input="prompt"), extensions
+            )
+
+        assert result.error is None
+        mock_invoke.assert_awaited_once_with(
+            scorer_id="scorer-123",
+            step=Step(type="llm", name="answer", input="prompt"),
+            selected_data="selected input",
+            selected_data_payload_field="input",
+            execution_context=GalileoExecutionContext(
+                organization_id="org-1",
+                user_id=None,
+                project_id=None,
+                run_id="run-4",
+            ),
+            input="selected input",
+            output=None,
+            config=None,
+            timeout=10.0,
+        )
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_omits_run_id_for_unsupported_target_type(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator, ScorerInvokeResponse
+        from agent_control_evaluator_galileo.luna.client import (
+            GalileoExecutionContext,
+            GalileoLunaClient,
+        )
+
+        evaluator = LunaEvaluator.from_dict({"scorer_id": "scorer-123"})
+        extensions = {
+            "namespace_key": "org-1",
+            "caller_id": "verified-user-2",
+            "target_type": "environment",
+            "target_id": "prod",
+            "metadata": {"project_id": "project-3"},
+        }
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ScorerInvokeResponse(score=0.8, status="success")
+            result = await evaluator.evaluate_with_extensions(
+                "selected input", Step(type="llm", name="answer", input="prompt"), extensions
+            )
+
+        assert result.error is None
+        mock_invoke.assert_awaited_once_with(
+            scorer_id="scorer-123",
+            step=Step(type="llm", name="answer", input="prompt"),
+            selected_data="selected input",
+            selected_data_payload_field="input",
+            execution_context=GalileoExecutionContext(
+                organization_id="org-1",
+                user_id="verified-user-2",
+                project_id="project-3",
+                run_id=None,
+            ),
+            input="selected input",
+            output=None,
+            config=None,
+            timeout=10.0,
+        )
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_rejects_missing_organization_id(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        evaluator = LunaEvaluator.from_dict({"scorer_id": "scorer-123"})
+        extensions = {
+            "target_type": "log_stream",
+            "target_id": "run-4",
+            "metadata": {"project_id": "project-3"},
+        }
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            result = await evaluator.evaluate_with_extensions(
+                "selected input",
+                Step(type="llm", name="answer", input="prompt"),
+                extensions,
+            )
+
+        assert result.error is not None
+        assert "organization_id" in result.error
+        mock_invoke.assert_not_called()
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_labels_forwarded_scorer_version_id_as_requested(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator, ScorerInvokeResponse
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        evaluator = LunaEvaluator.from_dict(
+            {
+                "scorer_id": "scorer-123",
+                "scorer_version_id": "version-456",
+                "threshold": 0.5,
+                "operator": "gte",
+            }
+        )
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ScorerInvokeResponse(
+                score=0.82,
+                status="success",
+            )
+
+            result = await evaluator.evaluate("hello")
+
+        assert result.matched is True
+        assert result.metadata["requested_scorer_version_id"] == "version-456"
+        assert "scorer_version_id" not in result.metadata
+        mock_invoke.assert_awaited_once_with(
+            scorer_id="scorer-123",
+            scorer_version_id="version-456",
+            input="hello",
+            output=None,
+            config=None,
+            timeout=10.0,
+        )
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_returns_non_match_below_threshold(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator, ScorerInvokeResponse
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        evaluator = LunaEvaluator.from_dict(
+            {"scorer_id": "scorer-123", "threshold": 0.7, "operator": "gte"}
+        )
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.return_value = ScorerInvokeResponse(
+                scorer_label="toxicity",
+                score=0.2,
+                status="success",
+            )
+
+            result = await evaluator.evaluate("hello")
+
+        assert result.matched is False
+        assert result.confidence == 0.2
+        mock_invoke.assert_awaited_once_with(
+            scorer_id="scorer-123",
+            input="hello",
+            output=None,
+            config=None,
+            timeout=10.0,
+        )
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("data", ["", "   "])
+    async def test_evaluator_does_not_call_api_for_empty_data(self, data: str) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        evaluator = LunaEvaluator.from_dict({"scorer_id": "scorer-123", "threshold": 0.5})
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            result = await evaluator.evaluate(data)
+
+        assert result.matched is False
+        assert result.confidence == 1.0
+        assert result.message == "No data to score with Luna"
+        mock_invoke.assert_not_called()
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_fail_open_sets_error(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        evaluator = LunaEvaluator.from_dict({"scorer_id": "scorer-123", "threshold": 0.5})
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.side_effect = RuntimeError("service unavailable")
+
+            result = await evaluator.evaluate("hello")
+
+        assert result.matched is False
+        assert result.error == "service unavailable"
+        assert result.metadata is not None
+        assert "error" not in result.metadata
+        assert result.metadata["error_type"] == "RuntimeError"
+        assert "fallback_action" not in result.metadata
+
+    @patch.dict(os.environ, LUNA_ENV)
+    @pytest.mark.asyncio
+    async def test_evaluator_error_metadata_includes_http_status_context(self) -> None:
+        from agent_control_evaluator_galileo.luna import LunaEvaluator
+        from agent_control_evaluator_galileo.luna.client import GalileoLunaClient
+
+        evaluator = LunaEvaluator.from_dict(
+            {"scorer_id": "scorer-123", "scorer_label": "toxicity", "threshold": 0.5}
+        )
+        request = httpx.Request(
+            "POST",
+            "http://luna-invoke:8090/api/v1/scorers/invoke?token=secret",
+        )
+        response = httpx.Response(
+            503,
+            headers={"content-type": "application/json"},
+            text='{"detail":"busy"}',
+            request=request,
+        )
+
+        with patch.object(GalileoLunaClient, "invoke", new_callable=AsyncMock) as mock_invoke:
+            mock_invoke.side_effect = httpx.HTTPStatusError(
+                "service unavailable",
+                request=request,
+                response=response,
+            )
+
+            result = await evaluator.evaluate("hello")
+
+        assert result.matched is False
+        assert result.metadata is not None
+        assert result.metadata["error_type"] == "HTTPStatusError"
+        assert result.metadata["http_status_code"] == 503
+        assert result.metadata["http_method"] == "POST"
+        assert result.metadata["http_endpoint_path"] == "/api/v1/scorers/invoke"
+        assert result.metadata["http_response_content_type"] == "application/json"
+        assert result.metadata["http_response_body"] == '{"detail":"busy"}'
+        assert result.metadata["http_response_body_truncated"] is False
+        assert "token=secret" not in str(result.metadata)
