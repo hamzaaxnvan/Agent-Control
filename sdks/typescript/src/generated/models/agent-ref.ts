@@ -19,3 +19,24 @@ export type AgentRef = {
   agentName: string;
 };
 
+/** @internal */
+export const AgentRef$inboundSchema: z.ZodMiniType<AgentRef, unknown> = z.pipe(
+  z.object({
+    agent_name: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "agent_name": "agentName",
+    });
+  }),
+);
+
+export function agentRefFromJSON(
+  jsonString: string,
+): SafeParseResult<AgentRef, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => AgentRef$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'AgentRef' from JSON`,
+  );
+}
