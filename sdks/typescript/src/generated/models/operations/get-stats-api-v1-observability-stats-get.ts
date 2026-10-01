@@ -15,3 +15,55 @@ export const TimeRange = {
   Sevend: "7d",
   Thirtyd: "30d",
   OneHundredAndEightyd: "180d",
+  ThreeHundredAndSixtyFived: "365d",
+} as const;
+export type TimeRange = ClosedEnum<typeof TimeRange>;
+
+export type GetStatsApiV1ObservabilityStatsGetRequest = {
+  agentName: string;
+  timeRange?: TimeRange | undefined;
+  includeTimeseries?: boolean | undefined;
+};
+
+/** @internal */
+export const TimeRange$outboundSchema: z.ZodMiniEnum<typeof TimeRange> = z.enum(
+  TimeRange,
+);
+
+/** @internal */
+export type GetStatsApiV1ObservabilityStatsGetRequest$Outbound = {
+  agent_name: string;
+  time_range: string;
+  include_timeseries: boolean;
+};
+
+/** @internal */
+export const GetStatsApiV1ObservabilityStatsGetRequest$outboundSchema:
+  z.ZodMiniType<
+    GetStatsApiV1ObservabilityStatsGetRequest$Outbound,
+    GetStatsApiV1ObservabilityStatsGetRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+      timeRange: z._default(TimeRange$outboundSchema, "5m"),
+      includeTimeseries: z._default(z.boolean(), false),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+        timeRange: "time_range",
+        includeTimeseries: "include_timeseries",
+      });
+    }),
+  );
+
+export function getStatsApiV1ObservabilityStatsGetRequestToJSON(
+  getStatsApiV1ObservabilityStatsGetRequest:
+    GetStatsApiV1ObservabilityStatsGetRequest,
+): string {
+  return JSON.stringify(
+    GetStatsApiV1ObservabilityStatsGetRequest$outboundSchema.parse(
+      getStatsApiV1ObservabilityStatsGetRequest,
+    ),
+  );
+}
