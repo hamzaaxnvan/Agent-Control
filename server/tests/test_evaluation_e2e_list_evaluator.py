@@ -262,3 +262,267 @@ def test_list_evaluator_disallow_name(client: TestClient):
     req_unsafe = EvaluationRequest(
         agent_name=agent_name,
         step=Step(type="tool", name="delete_user", input={"id": "123"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_unsafe.model_dump(mode="json"))
+    # Then: evaluation is unsafe and matches the control
+    assert resp.json()["is_safe"] is False
+    assert resp.json()["matches"][0]["control_name"] == control_name
+
+
+def test_list_evaluator_allow_only_argument_values(client: TestClient):
+    """Test Allowing ONLY specific values for an argument (AllowList on argument)."""
+    # Given: A control allowing only "us-east-1" or "us-west-2" for "region" argument
+    control_data = {
+        "description": "Enforce Allowed Regions",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "selector": {"path": "input.region"},
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": ["us-east-1", "us-west-2"],
+                "logic": "any",
+                "match_on": "no_match" # Trigger if value is NOT in list
+            }
+        },
+        "action": {"decision": "deny"}
+    }
+    agent_name, control_name = create_and_assign_policy(client, control_data, agent_name="RegionPolicy")
+
+    # Case 1: Allowed Value
+    # When: Using an allowed region
+    req_safe = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="deploy", input={"region": "us-east-1"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_safe.model_dump(mode="json"))
+    # Then: evaluation is safe
+    assert resp.json()["is_safe"] is True
+
+    # Case 2: Disallowed Value
+    # When: Using a disallowed region
+    req_unsafe = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="deploy", input={"region": "eu-central-1"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_unsafe.model_dump(mode="json"))
+    # Then: evaluation is unsafe and matches the control
+    assert resp.json()["is_safe"] is False
+    assert resp.json()["matches"][0]["control_name"] == control_name
+
+
+def test_list_evaluator_edge_cases(client: TestClient):
+    """Test edge cases: Empty inputs, Empty controls, Type coercion, Special chars."""
+    # 1. Empty Control Values
+    # Given: Control with empty values list
+    control_empty = {
+        "description": "Empty Values Control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "selector": {"path": "name"},
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": [],
+                "logic": "any",
+                "match_on": "match"
+            }
+        },
+        "action": {"decision": "deny"}
+    }
+    agent_name, _ = create_and_assign_policy(client, control_empty, agent_name="EmptyControlAgent")
+
+    # When: Calling any tool
+    req = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="something", input={}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req.model_dump(mode="json"))
+    # Then: Should be safe (empty list matches nothing)
+    assert resp.json()["is_safe"] is True
+
+    # 2. Type Coercion (Int vs String)
+    # Given: Control with integer values
+    control_types = {
+        "description": "Type Coercion Control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "selector": {"path": "input.count"},
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": [10, 20], # Integers in control
+                "logic": "any",
+                "match_on": "match"
+            }
+        },
+        "action": {"decision": "deny"}
+    }
+    agent_name, control_name = create_and_assign_policy(client, control_types, agent_name="TypeAgent")
+
+    # When: Input is integer 10
+    req_int = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="count", input={"count": 10}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_int.model_dump(mode="json"))
+    # Then: Should match (deny)
+    assert resp.json()["is_safe"] is False
+
+    # When: Input is string "20"
+    req_str = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="count", input={"count": "20"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_str.model_dump(mode="json"))
+    # Then: Should match (deny) - coercion works
+    assert resp.json()["is_safe"] is False
+
+    # 3. Special Characters
+    # Given: Control with regex special characters
+    control_special = {
+        "description": "Special Chars Control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "selector": {"path": "input.query"},
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": ["(test)", "a.b*c"], # Literal parens and dot/star
+                "logic": "any",
+                "match_on": "match"
+            }
+        },
+        "action": {"decision": "deny"}
+    }
+    agent_name, control_name = create_and_assign_policy(client, control_special, agent_name="SpecialCharAgent")
+
+    # When: Input exactly matches "(test)"
+    req_special = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="search", input={"query": "(test)"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_special.model_dump(mode="json"))
+    # Then: Should match (deny)
+    assert resp.json()["is_safe"] is False
+
+    # When: Input is "test" (without parens)
+    req_normal = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="search", input={"query": "test"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_normal.model_dump(mode="json"))
+    # Then: Should NOT match (safe)
+    assert resp.json()["is_safe"] is True
+
+    # 4. Empty/None Input
+    # Given: Control looking for "null" or empty string?
+    # Actually testing if control blows up on None/Empty input
+    control_null = {
+        "description": "Null Input Control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "selector": {"path": "input.missing_arg"}, # Will be None
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": ["something"],
+                "logic": "any",
+                "match_on": "match"
+            }
+        },
+        "action": {"decision": "deny"}
+    }
+    agent_name, _ = create_and_assign_policy(client, control_null, agent_name="NullAgent")
+
+    # When: Selector returns None
+    req_null = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="check", input={}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_null.model_dump(mode="json"))
+    # Then: Should be safe (None input -> empty list -> no match)
+    assert resp.json()["is_safe"] is True
+
+
+def test_list_evaluator_re2_corner_cases(client: TestClient):
+    """Test re2 specific corner cases: Large lists, Null bytes, Newlines."""
+    # 1. Large List (Performance/Limits)
+    # Given: A control with 1000 values
+    large_list = [f"value_{i}" for i in range(1000)]
+    large_list.append("target_value")
+    
+    control_large = {
+        "description": "Large List Control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "selector": {"path": "input.item"},
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": large_list,
+                "logic": "any",
+                "match_on": "match"
+            }
+        },
+        "action": {"decision": "deny"}
+    }
+    agent_name, _ = create_and_assign_policy(client, control_large, agent_name="LargeListAgent")
+
+    # When: Matching the last item
+    req = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="check", input={"item": "target_value"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req.model_dump(mode="json"))
+    # Then: Should match
+    assert resp.json()["is_safe"] is False
+
+
+def test_list_evaluator_newline_strictness(client: TestClient):
+    """Test that list matching is strict about newlines."""
+    # Given: Control matching "exact"
+    control_strict = {
+        "description": "Strict Match Control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["tool"], "stages": ["pre"]},
+        "selector": {"path": "input.val"},
+        "evaluator": {
+            "name": "list",
+            "config": {
+                "values": ["exact"],
+                "logic": "any",
+                "match_on": "match"
+            }
+        },
+        "action": {"decision": "deny"}
+    }
+    agent_name, _ = create_and_assign_policy(client, control_strict, agent_name="StrictAgent")
+
+    # When: Sending "exact\n" (trailing newline)
+    req_newline = EvaluationRequest(
+        agent_name=agent_name,
+        step=Step(type="tool", name="check", input={"val": "exact\n"}, output=None),
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req_newline.model_dump(mode="json"))
+    
+    # Then: Should NOT match (Safe) because ^exact$ does not match "exact\n" in re2 default mode
+    assert resp.json()["is_safe"] is True

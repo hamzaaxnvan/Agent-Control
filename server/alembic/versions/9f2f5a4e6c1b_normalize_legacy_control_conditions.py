@@ -60,3 +60,65 @@ def _sample_rows(bind: sa.engine.Connection, predicate: str) -> list[str]:
                 f"""
                 SELECT id, name
                 FROM controls
+                WHERE {predicate}
+                ORDER BY id
+                LIMIT :limit
+                """
+            ),
+            {"limit": _SAMPLE_LIMIT},
+        )
+        .mappings()
+        .all()
+    )
+    return [f"(id={row['id']}, name={row['name']})" for row in rows]
+
+
+def upgrade() -> None:
+    if context.is_offline_mode():
+        raise RuntimeError(
+            "This migration requires a live database connection and cannot run in offline mode."
+        )
+
+    bind = op.get_bind()
+    invalid_summaries: list[str] = []
+    for bucket_name, predicate in _INVALID_BUCKET_PREDICATES.items():
+        count = _count_rows(bind, predicate)
+        if count == 0:
+            continue
+        samples = ", ".join(_sample_rows(bind, predicate))
+        invalid_summaries.append(
+            f"{bucket_name}={count} samples=[{samples or 'none'}]"
+        )
+
+    if invalid_summaries:
+        raise RuntimeError(
+            "Control condition migration aborted because invalid stored control rows were found: "
+            + "; ".join(invalid_summaries)
+        )
+
+    legacy_count = _count_rows(bind, _LEGACY_VALID_PREDICATE)
+    if legacy_count == 0:
+        return
+
+    bind.execute(
+        sa.text(
+            f"""
+            UPDATE controls
+            SET data = (data - 'selector' - 'evaluator')
+                       || jsonb_build_object(
+                            'condition',
+                            jsonb_build_object(
+                                'selector', data->'selector',
+                                'evaluator', data->'evaluator'
+                            )
+                        )
+            WHERE {_LEGACY_VALID_PREDICATE}
+            """
+        )
+    )
+
+
+def downgrade() -> None:
+    raise NotImplementedError(
+        "This migration is irreversible and does not reconstruct legacy flat control shapes."
+    )
