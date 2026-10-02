@@ -33,3 +33,39 @@ export type UnrenderedTemplateControl = {
   enabled: false;
   /**
    * Reusable template with typed parameters and a JSON definition template.
+   */
+  template: TemplateDefinitionOutput;
+  /**
+   * Partial or empty parameter values
+   */
+  templateValues?: { [k: string]: TemplateValue } | undefined;
+};
+
+/** @internal */
+export const UnrenderedTemplateControl$inboundSchema: z.ZodMiniType<
+  UnrenderedTemplateControl,
+  unknown
+> = z.pipe(
+  z.object({
+    enabled: z._default(types.literal(false), false),
+    template: TemplateDefinitionOutput$inboundSchema,
+    template_values: types.optional(
+      z.record(z.string(), TemplateValue$inboundSchema),
+    ),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "template_values": "templateValues",
+    });
+  }),
+);
+
+export function unrenderedTemplateControlFromJSON(
+  jsonString: string,
+): SafeParseResult<UnrenderedTemplateControl, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => UnrenderedTemplateControl$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'UnrenderedTemplateControl' from JSON`,
+  );
+}
