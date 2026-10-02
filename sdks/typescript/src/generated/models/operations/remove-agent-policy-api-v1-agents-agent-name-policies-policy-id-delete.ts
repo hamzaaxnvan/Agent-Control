@@ -22,3 +22,28 @@ export type RemoveAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest$O
 export const RemoveAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest$outboundSchema:
   z.ZodMiniType<
     RemoveAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest$Outbound,
+    RemoveAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+      policyId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+        policyId: "policy_id",
+      });
+    }),
+  );
+
+export function removeAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequestToJSON(
+  removeAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest:
+    RemoveAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest,
+): string {
+  return JSON.stringify(
+    RemoveAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest$outboundSchema
+      .parse(
+        removeAgentPolicyApiV1AgentsAgentNamePoliciesPolicyIdDeleteRequest,
+      ),
+  );
+}
