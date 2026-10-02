@@ -22,3 +22,15 @@ help:
 
 install:
 	$(PNPM) install --frozen-lockfile
+
+install-no-frozen:
+	$(PNPM) install
+
+FORCE:
+	@:
+
+Makefile makefile GNUmakefile:
+	@:
+
+%: FORCE
+	$(PNPM) run $(subst --,:,$@)
