@@ -136,3 +136,420 @@ class TestEvaluatorsEndpoint:
         set_authorizer(authorizer)
         client = TestClient(app, raise_server_exceptions=True)
 
+        # When:
+        response = client.get("/api/v1/evaluators")
+
+        # Then:
+        assert response.status_code == 200
+        assert authorizer.calls == [(Operation.EVALUATORS_READ, None)]
+
+
+class TestAuthDisabled:
+    """When auth is disabled, all requests should succeed."""
+
+    @pytest.fixture(autouse=True)
+    def disable_auth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Disable auth for tests in this class."""
+        monkeypatch.setattr(auth_settings, "api_key_enabled", False)
+
+    def test_no_key_allowed_when_disabled(self, unauthenticated_client: TestClient) -> None:
+        """Given auth disabled, when requesting without API key, then request succeeds."""
+        # When:
+        response = unauthenticated_client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then: (404 for non-existent resource, but NOT 401)
+        assert response.status_code == 404
+
+    def test_evaluators_accessible_when_disabled(self, unauthenticated_client: TestClient) -> None:
+        """Given auth disabled, when listing evaluators without API key, then returns 200."""
+        # When:
+        response = unauthenticated_client.get("/api/v1/evaluators")
+
+        # Then:
+        assert response.status_code == 200
+
+
+_VALID_CONTROL_DATA = {
+    "description": "Test Control",
+    "enabled": True,
+    "execution": "server",
+    "scope": {"step_types": ["llm"], "stages": ["pre"]},
+    "condition": {
+        "selector": {"path": "input"},
+        "evaluator": {
+            "name": "regex",
+            "config": {"pattern": "test", "flags": []},
+        },
+    },
+    "action": {"decision": "deny"},
+    "tags": ["test"],
+}
+
+
+class TestAdminWriteEndpointAuthorization:
+    """Mutation endpoints require admin API keys."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "json_body"),
+        [
+            (
+                "PUT",
+                "/api/v1/controls",
+                {"name": "control-authz-blocked", "data": _VALID_CONTROL_DATA},
+            ),
+            ("PUT", "/api/v1/controls/1/data", {"data": _VALID_CONTROL_DATA}),
+            ("PATCH", "/api/v1/controls/1", {"enabled": False}),
+            ("DELETE", "/api/v1/controls/1", None),
+            ("PUT", "/api/v1/policies", {"name": "policy-authz-blocked"}),
+            ("POST", "/api/v1/policies/1/controls/1", None),
+            ("DELETE", "/api/v1/policies/1/controls/1", None),
+            ("POST", "/api/v1/agents/agent-authz-test01/policies/1", None),
+            ("POST", "/api/v1/agents/agent-authz-test01/policy/1", None),
+            ("DELETE", "/api/v1/agents/agent-authz-test01/policies/1", None),
+            ("DELETE", "/api/v1/agents/agent-authz-test01/policies", None),
+            ("DELETE", "/api/v1/agents/agent-authz-test01/policy", None),
+            ("POST", "/api/v1/agents/agent-authz-test01/controls/1", None),
+            ("DELETE", "/api/v1/agents/agent-authz-test01/controls/1", None),
+            (
+                "PATCH",
+                "/api/v1/agents/agent-authz-test01",
+                {"remove_steps": [], "remove_evaluators": []},
+            ),
+        ],
+    )
+    def test_non_admin_key_denied_on_admin_only_mutations(
+        self,
+        non_admin_client: TestClient,
+        method: str,
+        path: str,
+        json_body: dict[str, object] | None,
+    ) -> None:
+        response = non_admin_client.request(method, path, json=json_body)
+
+        assert response.status_code == 403
+        body = response.json()
+        assert body["error_code"] == "AUTH_INSUFFICIENT_PRIVILEGES"
+
+    def test_non_admin_key_can_init_agent_and_fetch_controls(
+        self, non_admin_client: TestClient
+    ) -> None:
+        agent_name = f"runtime-agent-{uuid.uuid4().hex[:8]}"
+        init_payload = {
+            "agent": {
+                "agent_name": agent_name,
+                "agent_description": "Runtime agent",
+                "agent_version": "1.0",
+            },
+            "steps": [
+                {
+                    "type": "tool",
+                    "name": "tool_a",
+                    "input_schema": {"type": "object"},
+                    "output_schema": {"type": "object"},
+                }
+            ],
+            "evaluators": [],
+        }
+
+        init_response = non_admin_client.post("/api/v1/agents/initAgent", json=init_payload)
+        assert init_response.status_code == 200
+
+        controls_response = non_admin_client.get(f"/api/v1/agents/{agent_name}/controls")
+        assert controls_response.status_code == 200
+        assert controls_response.json()["controls"] == []
+
+    def test_admin_key_allowed_on_representative_mutations(self, admin_client: TestClient) -> None:
+        control_name = f"control-authz-{uuid.uuid4().hex[:8]}"
+        control_response = admin_client.put(
+            "/api/v1/controls",
+            json={"name": control_name, "data": VALID_CONTROL_PAYLOAD},
+        )
+        assert control_response.status_code == 200
+        control_id = control_response.json()["control_id"]
+
+        policy_name = f"policy-authz-{uuid.uuid4().hex[:8]}"
+        policy_response = admin_client.put("/api/v1/policies", json={"name": policy_name})
+        assert policy_response.status_code == 200
+        policy_id = policy_response.json()["policy_id"]
+
+        add_control_response = admin_client.post(
+            f"/api/v1/policies/{policy_id}/controls/{control_id}"
+        )
+        assert add_control_response.status_code == 200
+
+        agent_name = f"admin-agent-{uuid.uuid4().hex[:8]}"
+        init_payload = {
+            "agent": {
+                "agent_name": agent_name,
+                "agent_description": "Admin agent",
+                "agent_version": "1.0",
+            },
+            "steps": [],
+            "evaluators": [],
+        }
+        init_response = admin_client.post("/api/v1/agents/initAgent", json=init_payload)
+        assert init_response.status_code == 200
+
+        set_policy_response = admin_client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+        assert set_policy_response.status_code == 200
+
+
+class TestMultipleApiKeys:
+    """Test support for multiple API keys (key rotation)."""
+
+    @pytest.fixture(autouse=True)
+    def setup_multiple_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Configure multiple API keys for key rotation testing."""
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "key1,key2,key3")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "admin1,admin2")
+        # Clear cached properties so they get recomputed with new values
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+    def test_first_key_works(self, app: object) -> None:
+        """Given multiple API keys configured, when using first key, then request succeeds."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "key1"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then: (404 for non-existent resource, but NOT 401)
+        assert response.status_code == 404
+
+    def test_second_key_works(self, app: object) -> None:
+        """Given multiple API keys configured, when using second key, then request succeeds."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "key2"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then: (404 for non-existent resource, but NOT 401)
+        assert response.status_code == 404
+
+    def test_admin_key_works_as_regular_key(self, app: object) -> None:
+        """Given admin API key, when requesting regular endpoint, then request succeeds."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "admin1"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then: (404 for non-existent resource, but NOT 401)
+        assert response.status_code == 404
+
+    def test_unlisted_key_rejected(self, app: object) -> None:
+        """Given unlisted API key, when requesting endpoint, then returns 401."""
+        # Given:
+        client = TestClient(app, headers={"X-API-Key": "key4"})
+
+        # When:
+        response = client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then:
+        assert response.status_code == 401
+
+
+class TestAuthMisconfiguration:
+    """Test behavior when auth is misconfigured."""
+
+    @pytest.fixture(autouse=True)
+    def setup_no_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Enable auth but configure no keys (misconfiguration)."""
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "")
+        # Clear cached properties so they get recomputed with new values
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+    def test_misconfigured_returns_500(self, unauthenticated_client: TestClient) -> None:
+        """Given auth enabled but no keys configured, when requesting, then returns 500."""
+        # When:
+        response = unauthenticated_client.get("/api/v1/agents/00000000-0000-0000-0000-000000000000")
+
+        # Then:
+        assert response.status_code == 500
+        body = response.json()
+        assert body["error_code"] == "AUTH_MISCONFIGURED"
+        assert body["detail"] == "Server authentication is misconfigured. Contact administrator."
+
+
+class TestOptionalApiKey:
+    """Behavioral tests for optional_api_key dependency."""
+
+    def _make_optional_app(self) -> TestClient:
+        from fastapi import Depends, FastAPI
+
+        from agent_control_server.auth import optional_api_key
+
+        app = FastAPI()
+
+        @app.get("/maybe-auth")
+        def maybe_auth(client=Depends(optional_api_key)) -> dict[str, object]:
+            return {
+                "auth": client is not None,
+                "is_admin": client.is_admin if client else False,
+                "key_id": client.key_id if client else None,
+            }
+
+        return TestClient(app)
+
+    def test_optional_api_key_auth_disabled_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Given: auth disabled
+        monkeypatch.setattr(auth_settings, "api_key_enabled", False)
+
+        # When: calling endpoint with optional auth
+        client = self._make_optional_app()
+        response = client.get("/maybe-auth")
+
+        # Then: client is treated as unauthenticated
+        assert response.status_code == 200
+        assert response.json()["auth"] is False
+
+    def test_optional_api_key_missing_header_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Given: auth enabled with configured keys
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "user-key")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "admin-key")
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+        # When: calling endpoint without header
+        client = self._make_optional_app()
+        response = client.get("/maybe-auth")
+
+        # Then: client is treated as unauthenticated
+        assert response.status_code == 200
+        assert response.json()["auth"] is False
+
+    def test_optional_api_key_invalid_header_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Given: auth enabled with configured keys
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "user-key")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "admin-key")
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+        # When: calling endpoint with invalid header
+        client = self._make_optional_app()
+        response = client.get("/maybe-auth", headers={"X-API-Key": "invalid-key"})
+
+        # Then: client is treated as unauthenticated
+        assert response.status_code == 200
+        assert response.json()["auth"] is False
+
+    def test_optional_api_key_admin_header_sets_admin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Given: auth enabled with admin key
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "user-key")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "admin-key-123456789")
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+        # When: calling endpoint with admin header
+        client = self._make_optional_app()
+        response = client.get("/maybe-auth", headers={"X-API-Key": "admin-key-123456789"})
+
+        # Then: client is authenticated as admin with masked key id
+        assert response.status_code == 200
+        body = response.json()
+        assert body["auth"] is True
+        assert body["is_admin"] is True
+        assert body["key_id"].endswith("...")
+
+    def test_require_admin_key_rejects_non_admin(
+        self, app: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Given: auth enabled with a non-admin key
+        monkeypatch.setattr(auth_settings, "api_key_enabled", True)
+        monkeypatch.setattr(auth_settings, "api_keys", "user-key")
+        monkeypatch.setattr(auth_settings, "admin_api_keys", "admin-key")
+        for attr in ("_parsed_api_keys", "_parsed_admin_api_keys", "_all_valid_keys"):
+            auth_settings.__dict__.pop(attr, None)
+
+        # When: requiring admin key on an endpoint
+        from fastapi import Depends, FastAPI
+
+        from agent_control_server.auth import require_admin_key
+
+        local_app = FastAPI()
+
+        @local_app.get("/admin", dependencies=[Depends(require_admin_key)])
+        def admin_route() -> dict[str, bool]:
+            return {"ok": True}
+
+        client = TestClient(local_app, headers={"X-API-Key": "user-key"})
+        response = client.get("/admin")
+
+        # Then: forbidden is returned
+        assert response.status_code == 403
+        assert "admin" in response.json()["detail"].lower()
+
+
+class TestApiKeyHelpers:
+    """Behavioral tests for API key helper utilities."""
+
+    def test_authenticated_client_key_id_masks_short_key(self) -> None:
+        # Given: a client with a short key
+        from agent_control_server.auth import AuthenticatedClient, AuthLevel
+
+        client = AuthenticatedClient(api_key="short", is_admin=False, auth_level=AuthLevel.API_KEY)
+
+        # When: accessing key_id
+        key_id = client.key_id
+
+        # Then: key is masked
+        assert key_id == "***"
+
+    def test_get_api_key_from_header_extracts_value(self) -> None:
+        # Given: a route that returns raw API key header
+        from fastapi import Depends, FastAPI
+
+        from agent_control_server.auth import get_api_key_from_header
+
+        app = FastAPI()
+
+        @app.get("/raw")
+        def raw_key(key: str | None = Depends(get_api_key_from_header)) -> dict[str, str | None]:
+            return {"key": key}
+
+        client = TestClient(app)
+
+        # When: sending a request with API key header
+        response = client.get("/raw", headers={"X-API-Key": "raw-key"})
+
+        # Then: raw key is returned
+        assert response.status_code == 200
+        assert response.json()["key"] == "raw-key"
+
+    def test_get_api_key_from_header_allows_missing(self) -> None:
+        # Given: a route that returns raw API key header
+        from fastapi import Depends, FastAPI
+
+        from agent_control_server.auth import get_api_key_from_header
+
+        app = FastAPI()
+
+        @app.get("/raw")
+        def raw_key(key: str | None = Depends(get_api_key_from_header)) -> dict[str, str | None]:
+            return {"key": key}
+
+        client = TestClient(app)
+
+        # When: sending a request without API key header
+        response = client.get("/raw")
+
+        # Then: key is None
+        assert response.status_code == 200
+        assert response.json()["key"] is None

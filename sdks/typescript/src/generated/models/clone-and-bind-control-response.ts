@@ -13,3 +13,49 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  * Response from cloning and binding a control.
  */
 export type CloneAndBindControlResponse = {
+  /**
+   * Identifier of the created binding.
+   */
+  bindingId: number;
+  /**
+   * Source control ID.
+   */
+  clonedFromControlId: number;
+  /**
+   * Identifier of the cloned control.
+   */
+  id: number;
+  /**
+   * Name of the cloned control.
+   */
+  name: string;
+};
+
+/** @internal */
+export const CloneAndBindControlResponse$inboundSchema: z.ZodMiniType<
+  CloneAndBindControlResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    binding_id: types.number(),
+    cloned_from_control_id: types.number(),
+    id: types.number(),
+    name: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "binding_id": "bindingId",
+      "cloned_from_control_id": "clonedFromControlId",
+    });
+  }),
+);
+
+export function cloneAndBindControlResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<CloneAndBindControlResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => CloneAndBindControlResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'CloneAndBindControlResponse' from JSON`,
+  );
+}
