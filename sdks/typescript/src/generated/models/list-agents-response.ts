@@ -13,3 +13,34 @@ import {
 } from "./pagination-info.js";
 
 /**
+ * Response for listing agents.
+ */
+export type ListAgentsResponse = {
+  /**
+   * List of agent summaries
+   */
+  agents: Array<AgentSummary>;
+  /**
+   * Pagination metadata for cursor-based pagination.
+   */
+  pagination: PaginationInfo;
+};
+
+/** @internal */
+export const ListAgentsResponse$inboundSchema: z.ZodMiniType<
+  ListAgentsResponse,
+  unknown
+> = z.object({
+  agents: z.array(AgentSummary$inboundSchema),
+  pagination: PaginationInfo$inboundSchema,
+});
+
+export function listAgentsResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<ListAgentsResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ListAgentsResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ListAgentsResponse' from JSON`,
+  );
+}
