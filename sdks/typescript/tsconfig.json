@@ -7,3 +7,13 @@
     "strict": true,
     "noEmit": true,
     "declaration": true,
+    "declarationMap": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "tsup.config.ts"],
+  "exclude": ["dist", "node_modules", "src/generated/**/*"]
+}
