@@ -12,3 +12,62 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 /**
  * Summary of an agent for list responses.
  */
+export type AgentSummary = {
+  /**
+   * Number of active controls for this agent
+   */
+  activeControlsCount: number;
+  /**
+   * Unique identifier of the agent
+   */
+  agentName: string;
+  /**
+   * ISO 8601 timestamp when agent was created
+   */
+  createdAt?: string | null | undefined;
+  /**
+   * Number of evaluators registered with the agent
+   */
+  evaluatorCount: number;
+  /**
+   * IDs of policies associated with the agent
+   */
+  policyIds?: Array<number> | undefined;
+  /**
+   * Number of steps registered with the agent
+   */
+  stepCount: number;
+};
+
+/** @internal */
+export const AgentSummary$inboundSchema: z.ZodMiniType<AgentSummary, unknown> =
+  z.pipe(
+    z.object({
+      active_controls_count: z._default(types.number(), 0),
+      agent_name: types.string(),
+      created_at: z.optional(z.nullable(types.string())),
+      evaluator_count: z._default(types.number(), 0),
+      policy_ids: types.optional(z.array(types.number())),
+      step_count: z._default(types.number(), 0),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        "active_controls_count": "activeControlsCount",
+        "agent_name": "agentName",
+        "created_at": "createdAt",
+        "evaluator_count": "evaluatorCount",
+        "policy_ids": "policyIds",
+        "step_count": "stepCount",
+      });
+    }),
+  );
+
+export function agentSummaryFromJSON(
+  jsonString: string,
+): SafeParseResult<AgentSummary, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => AgentSummary$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'AgentSummary' from JSON`,
+  );
+}

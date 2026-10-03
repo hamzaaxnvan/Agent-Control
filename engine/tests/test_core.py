@@ -1377,3 +1377,1382 @@ class TestTimeoutEnforcement:
         # And: Error should be captured with timeout message
         assert result.errors is not None
         assert len(result.errors) == 1
+        assert "TimeoutError" in result.errors[0].result.error
+        assert "timeout" in result.errors[0].result.error.lower()
+
+        # And: Should fail closed for deny control
+        assert result.is_safe is False
+        assert result.confidence == 0.0
+
+    @pytest.mark.asyncio
+    async def test_timeout_does_not_affect_fast_evaluators(self):
+        """Test that fast evaluators complete normally without timeout issues.
+
+        Given: A mix of fast and slow (timing out) controls
+        When: The engine processes the request
+        Then: Fast controls complete successfully, slow ones timeout
+        """
+        # Given: One fast allow and one slow timeout
+        controls = [
+            make_control(1, "fast", "test-allow", action="observe", config_value="f1"),
+            MockControlWithIdentity(
+                id=2,
+                name="slow_timeout",
+                control=ControlDefinition(
+                    description="Test timeout",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "selector": {"path": "input"},
+                        "evaluator": EvaluatorSpec(
+                            name="test-timeout",
+                            config={"value": "slow", "timeout_ms": 100},
+                        ),
+                    },
+                    action={"decision": "observe"},  # Observe, not deny - so fails open
+                ),
+            ),
+        ]
+        engine = ControlEngine(controls)
+
+        # When: Processing
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: Fast evaluator should have completed normally
+        assert "allow:f1:start" in _execution_log
+        assert "allow:f1:end" in _execution_log
+
+        # And: Slow evaluator should have timed out
+        assert "timeout:slow:start" in _execution_log
+        assert "timeout:slow:end" not in _execution_log
+
+        # And: Result should have error for slow, success for fast
+        assert result.errors is not None
+        assert len(result.errors) == 1
+        assert result.errors[0].control_name == "slow_timeout"
+
+        # And: Should be safe (observe action fails open)
+        assert result.is_safe is True
+        # Confidence is 0.5 (1 success, 1 error out of 2)
+        assert result.confidence == 0.5
+
+
+# =============================================================================
+# Test: Concurrency Limit
+# =============================================================================
+
+
+class TestConcurrencyLimit:
+    """Tests for semaphore-based concurrency limiting."""
+
+    def test_max_concurrency_env_prefers_agent_control_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The canonical Agent Control env var overrides the legacy short name."""
+        import agent_control_engine.core as core_module
+
+        monkeypatch.setenv("AGENT_CONTROL_MAX_CONCURRENT_EVALUATIONS", "7")
+        monkeypatch.setenv("MAX_CONCURRENT_EVALUATIONS", "2")
+
+        assert (
+            core_module._env_positive_int(
+                "AGENT_CONTROL_MAX_CONCURRENT_EVALUATIONS",
+                "MAX_CONCURRENT_EVALUATIONS",
+                default=3,
+            )
+            == 7
+        )
+
+    def test_max_concurrency_env_reads_legacy_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The existing env var remains supported for compatibility."""
+        import agent_control_engine.core as core_module
+
+        monkeypatch.delenv("AGENT_CONTROL_MAX_CONCURRENT_EVALUATIONS", raising=False)
+        monkeypatch.setenv("MAX_CONCURRENT_EVALUATIONS", "5")
+
+        assert (
+            core_module._env_positive_int(
+                "AGENT_CONTROL_MAX_CONCURRENT_EVALUATIONS",
+                "MAX_CONCURRENT_EVALUATIONS",
+                default=3,
+            )
+            == 5
+        )
+
+    def test_max_concurrency_env_rejects_non_positive_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The concurrency cap must always allow at least one evaluator."""
+        import agent_control_engine.core as core_module
+
+        monkeypatch.setenv("AGENT_CONTROL_MAX_CONCURRENT_EVALUATIONS", "0")
+
+        with pytest.raises(RuntimeError, match="greater than or equal to 1"):
+            core_module._env_positive_int(
+                "AGENT_CONTROL_MAX_CONCURRENT_EVALUATIONS",
+                "MAX_CONCURRENT_EVALUATIONS",
+                default=3,
+            )
+
+    @pytest.mark.asyncio
+    async def test_concurrency_limited_to_max(self, monkeypatch: pytest.MonkeyPatch):
+        """Test that concurrent evaluations are limited by semaphore.
+
+        Given: More controls than MAX_CONCURRENT_EVALUATIONS, each tracking concurrency
+        When: Processing all controls
+        Then: At most MAX_CONCURRENT_EVALUATIONS run simultaneously
+        """
+        import agent_control_engine.core as core_module
+
+        # Set a low concurrency limit for testing
+        monkeypatch.setattr(core_module, "MAX_CONCURRENT_EVALUATIONS", 2)
+
+        # Track max concurrent executions
+        _concurrent_count = 0
+        _max_concurrent = 0
+        _lock = asyncio.Lock()
+
+        class ConcurrencyTracker(Evaluator[SimpleConfig]):
+            """Evaluator that tracks concurrent execution count."""
+
+            metadata = EvaluatorMetadata(
+                name="test-concurrency",
+                version="1.0.0",
+                description="Tracks concurrency",
+            )
+            config_model = SimpleConfig
+
+            async def evaluate(self, data: Any) -> EvaluatorResult:
+                nonlocal _concurrent_count, _max_concurrent
+                async with _lock:
+                    _concurrent_count += 1
+                    _max_concurrent = max(_max_concurrent, _concurrent_count)
+                await asyncio.sleep(0.05)  # Small delay to overlap
+                async with _lock:
+                    _concurrent_count -= 1
+                return EvaluatorResult(matched=False, confidence=1.0, message="ok")
+
+        try:
+            register_evaluator(ConcurrencyTracker)
+        except ValueError:
+            pass
+
+        # Given: 6 controls (more than the limit of 2)
+        controls = [
+            make_control(i, f"ctrl{i}", "test-concurrency", action="observe", config_value=str(i))
+            for i in range(6)
+        ]
+        engine = ControlEngine(controls)
+
+        # When: Processing
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        await engine.process(request)
+
+        # Then: Max concurrent should not exceed the limit
+        assert _max_concurrent <= 2, f"Expected max 2 concurrent, got {_max_concurrent}"
+
+
+# =============================================================================
+# Test: Recursive Condition Trees
+# =============================================================================
+
+
+class TestConditionTrees:
+    """Tests for recursive condition evaluation and trace metadata."""
+
+    @pytest.fixture(autouse=True)
+    def register_error_evaluator(self):
+        """Register ErrorEvaluator for these tests."""
+        try:
+            register_evaluator(ErrorEvaluator)
+        except ValueError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_or_short_circuit_records_skipped_trace(self):
+        """A matching OR child should short-circuit later children and mark them skipped."""
+        # Given: an OR tree whose first child matches
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="or_short_circuit",
+                control=ControlDefinition(
+                    description="Short-circuit OR",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "or": [
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-deny", "config": {"value": "match"}},
+                            },
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-slow", "config": {"value": "skip"}},
+                            },
+                        ]
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: later children are short-circuited and marked skipped in the trace
+        assert result.matches is not None
+        assert len(result.matches) == 1
+        assert "slow:skip:start" not in _execution_log
+
+        trace = result.matches[0].result.metadata["condition_trace"]
+        assert trace["type"] == "or"
+        assert trace["matched"] is True
+        assert trace["short_circuit_reason"] == "or_matched"
+        assert trace["children"][0]["evaluated"] is True
+        assert trace["children"][0]["matched"] is True
+        assert trace["children"][1]["evaluated"] is False
+        assert trace["children"][1]["matched"] is None
+        assert trace["children"][1]["short_circuit_reason"] == "or_matched"
+
+    @pytest.mark.asyncio
+    async def test_leaf_metadata_includes_selector_selected_data_preview(self):
+        """Leaf metadata should expose a safe preview of the selected selector.path value."""
+        # Given: a leaf control selecting a nested step input value
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="city_control",
+                control=ControlDefinition(
+                    description="City guardrail",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["tool"], "stages": ["pre"]},
+                    condition={
+                        "selector": {"path": "input.city"},
+                        "evaluator": {"name": "test-deny", "config": {"value": "match"}},
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing a request where input.city has a concrete value
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(
+                type="tool",
+                name="lookup-weather",
+                input={"city": "San Francisco"},
+                output=None,
+            ),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: UI consumers can inspect the selected value without raw data export.
+        assert result.matches is not None
+        metadata = result.matches[0].result.metadata
+        assert metadata is not None
+        assert "selected_data" not in metadata
+        assert metadata["engine_selected_data_preview"] == {
+            "type": "str",
+            "value": "San Francisco",
+            "truncated": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_leaf_selected_data_preview_is_bounded_and_redacted(self):
+        """Selected data previews should cap payload size and redact secret-like keys."""
+        # Given: a leaf control selecting a large object with a secret-like key
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="payload_control",
+                control=ControlDefinition(
+                    description="Payload guardrail",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["tool"], "stages": ["pre"]},
+                    condition={
+                        "selector": {"path": "input"},
+                        "evaluator": {"name": "test-deny", "config": {"value": "match"}},
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(
+                type="tool",
+                name="send-payload",
+                input={
+                    "prompt": "x" * 600,
+                    "api_key": "secret-value",
+                },
+                output=None,
+            ),
+            stage="pre",
+        )
+
+        # When: processing the request
+        result = await engine.process(request)
+
+        # Then: the preview is useful for UI inspection but does not expose the raw payload.
+        assert result.matches is not None
+        metadata = result.matches[0].result.metadata
+        assert metadata is not None
+        preview = metadata["engine_selected_data_preview"]
+        assert preview["type"] == "dict"
+        assert preview["truncated"] is True
+        assert preview["value"]["api_key"] == "<redacted>"
+        assert preview["value"]["prompt"].endswith("...")
+        assert len(preview["value"]["prompt"]) == 500
+
+    @pytest.mark.asyncio
+    async def test_engine_selected_data_does_not_overwrite_evaluator_metadata(self):
+        """Engine-owned selector data should not collide with evaluator-owned metadata."""
+        # Given: an evaluator that deliberately returns its own selected_data key
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="metadata_control",
+                control=ControlDefinition(
+                    description="Metadata guardrail",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "selector": {"path": "input"},
+                        "evaluator": {"name": "test-metadata", "config": {"value": "match"}},
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls, include_raw_selected_data=True)
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="raw input", output=None),
+            stage="pre",
+        )
+
+        # When: processing the request
+        result = await engine.process(request)
+
+        # Then: evaluator-owned metadata remains intact and engine-owned data is namespaced.
+        assert result.matches is not None
+        metadata = result.matches[0].result.metadata
+        assert metadata is not None
+        assert metadata["selected_data"] == "evaluator:raw input"
+        assert metadata["engine_selected_data"] == "raw input"
+        assert metadata["engine_selected_data_preview"] == {
+            "type": "str",
+            "value": "raw input",
+            "truncated": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_composite_results_preserve_decisive_child_metadata(self):
+        """Composite results should retain structured metadata from the decisive child."""
+        # Given: an OR tree where the second child decides the result
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="or_metadata",
+                control=ControlDefinition(
+                    description="Preserve decisive metadata",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "or": [
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {
+                                    "name": "test-metadata",
+                                    "config": {"value": "miss-left"},
+                                },
+                            },
+                            {
+                                "selector": {"path": "output"},
+                                "evaluator": {
+                                    "name": "test-metadata",
+                                    "config": {"value": "match-right"},
+                                },
+                            },
+                            {
+                                "selector": {"path": "name"},
+                                "evaluator": {
+                                    "name": "test-slow",
+                                    "config": {"value": "skip-tail"},
+                                },
+                            },
+                        ]
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output="chosen"),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: the composite retains the metadata from the matching child
+        assert result.matches is not None
+        metadata = result.matches[0].result.metadata
+        assert metadata is not None
+        assert metadata["source"] == "match-right"
+        assert metadata["selected_data"] == "evaluator:chosen"
+        assert metadata["engine_selected_data_preview"] == {
+            "type": "str",
+            "value": "chosen",
+            "truncated": False,
+        }
+        assert metadata["condition_trace"]["type"] == "or"
+        assert "slow:skip-tail:start" not in _execution_log
+
+    @pytest.mark.asyncio
+    async def test_and_condition_all_children_match_records_full_trace(self):
+        """A fully-evaluated AND tree should record every child and produce a match."""
+        # Given: an AND tree where every leaf evaluator matches
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="and_all_match",
+                control=ControlDefinition(
+                    description="All AND children match",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "and": [
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-deny", "config": {"value": "first"}},
+                            },
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-deny", "config": {"value": "second"}},
+                            },
+                        ]
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: the control matches and every child appears as evaluated in the trace
+        assert result.matches is not None
+        assert len(result.matches) == 1
+        trace = result.matches[0].result.metadata["condition_trace"]
+        assert trace["type"] == "and"
+        assert trace["matched"] is True
+        assert "short_circuit_reason" not in trace
+        assert len(trace["children"]) == 2
+        assert all(child["evaluated"] is True for child in trace["children"])
+        assert "deny:first:end" in _execution_log
+        assert "deny:second:end" in _execution_log
+
+    @pytest.mark.asyncio
+    async def test_not_condition_inverts_child_result(self):
+        """NOT should invert the child match result while preserving trace structure."""
+        # Given: a NOT tree whose child returns non-match
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="not_condition",
+                control=ControlDefinition(
+                    description="Invert non-match",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "not": {
+                            "selector": {"path": "input"},
+                            "evaluator": {"name": "test-allow", "config": {"value": "child"}},
+                        }
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: the NOT node inverts the child result and preserves trace structure
+        assert result.matches is not None
+        trace = result.matches[0].result.metadata["condition_trace"]
+        assert trace["type"] == "not"
+        assert trace["matched"] is True
+        assert len(trace["children"]) == 1
+        assert trace["children"][0]["type"] == "leaf"
+        assert trace["children"][0]["matched"] is False
+
+    @pytest.mark.asyncio
+    async def test_not_condition_propagates_child_error_trace(self):
+        """NOT should surface child evaluator failures as composite errors."""
+        # Given: a NOT tree whose child evaluator raises an error
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="not_error",
+                control=ControlDefinition(
+                    description="Invert errored child",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "not": {
+                            "selector": {"path": "input"},
+                            "evaluator": {"name": "test-error", "config": {"value": "boom"}},
+                        }
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: the composite returns an error result and preserves the child trace
+        assert result.errors is not None
+        assert len(result.errors) == 1
+        trace = result.errors[0].result.metadata["condition_trace"]
+        assert trace["type"] == "not"
+        assert trace["matched"] is None
+        assert len(trace["children"]) == 1
+        assert trace["children"][0]["evaluated"] is True
+        assert "Intentional error from boom" in trace["children"][0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_or_condition_all_children_non_match_records_full_trace(self):
+        """A fully-evaluated OR tree should record every child and produce a non-match."""
+        # Given: an OR tree where every leaf evaluator returns non-match
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="or_all_non_match",
+                control=ControlDefinition(
+                    description="All OR children miss",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "or": [
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-allow", "config": {"value": "first"}},
+                            },
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-allow", "config": {"value": "second"}},
+                            },
+                        ]
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: the control is recorded as a non-match and every child is evaluated
+        assert result.non_matches is not None
+        assert len(result.non_matches) == 1
+        trace = result.non_matches[0].result.metadata["condition_trace"]
+        assert trace["type"] == "or"
+        assert trace["matched"] is False
+        assert "short_circuit_reason" not in trace
+        assert len(trace["children"]) == 2
+        assert all(child["evaluated"] is True for child in trace["children"])
+        assert "allow:first:end" in _execution_log
+        assert "allow:second:end" in _execution_log
+
+    @pytest.mark.asyncio
+    async def test_and_error_records_skipped_children_in_trace(self):
+        """Errors in composite conditions should preserve trace context for skipped branches."""
+        # Given: an AND tree whose first child evaluator errors
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="and_error",
+                control=ControlDefinition(
+                    description="Error in AND",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "and": [
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-error", "config": {"value": "boom"}},
+                            },
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-slow", "config": {"value": "skip"}},
+                            },
+                        ]
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: the trace preserves the erroring child and marks remaining children skipped
+        assert result.errors is not None
+        assert len(result.errors) == 1
+        assert "slow:skip:start" not in _execution_log
+
+        trace = result.errors[0].result.metadata["condition_trace"]
+        assert trace["type"] == "and"
+        assert trace["matched"] is None
+        assert trace["short_circuit_reason"] == "error"
+        assert result.errors[0].result.message.startswith(
+            "Condition evaluation aborted due to a child evaluator error:"
+        )
+        assert trace["children"][0]["evaluated"] is True
+        assert "Intentional error from boom" in trace["children"][0]["error"]
+        assert trace["children"][1]["evaluated"] is False
+        assert trace["children"][1]["short_circuit_reason"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_or_error_records_skipped_children_in_trace(self):
+        """OR error traces should be marked indeterminate, not as a definitive non-match."""
+        # Given: an OR tree whose first child evaluator errors
+        controls = [
+            MockControlWithIdentity(
+                id=1,
+                name="or_error",
+                control=ControlDefinition(
+                    description="Error in OR",
+                    enabled=True,
+                    execution="server",
+                    scope={"step_types": ["llm"], "stages": ["pre"]},
+                    condition={
+                        "or": [
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-error", "config": {"value": "boom"}},
+                            },
+                            {
+                                "selector": {"path": "input"},
+                                "evaluator": {"name": "test-allow", "config": {"value": "skip"}},
+                            },
+                        ]
+                    },
+                    action={"decision": "observe"},
+                ),
+            )
+        ]
+        engine = ControlEngine(controls)
+
+        # When: processing the request
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Then: the trace preserves the erroring child and marks remaining children skipped
+        assert result.errors is not None
+        assert len(result.errors) == 1
+        assert "allow:skip:end" not in _execution_log
+
+        trace = result.errors[0].result.metadata["condition_trace"]
+        assert trace["type"] == "or"
+        assert trace["matched"] is None
+        assert trace["short_circuit_reason"] == "error"
+        assert result.errors[0].result.message.startswith(
+            "Condition evaluation aborted due to a child evaluator error:"
+        )
+        assert trace["children"][0]["evaluated"] is True
+        assert "Intentional error from boom" in trace["children"][0]["error"]
+        assert trace["children"][1]["evaluated"] is False
+        assert trace["children"][1]["short_circuit_reason"] == "error"
+
+
+# =============================================================================
+# Test: Context Filtering (local vs server)
+# =============================================================================
+
+
+def make_control_with_execution(
+    control_id: int,
+    name: str,
+    evaluator: str,
+    action: str = "deny",
+    config_value: str = "default",
+    *,
+    execution: str = "server",
+    step_types: list[str] | None = None,
+    stages: list[str] | None = None,
+    step_names: list[str] | None = None,
+    step_name_regex: str | None = None,
+    path: str = "input",
+) -> MockControlWithIdentity:
+    """Create a mock control with the execution field set."""
+    if step_types is None:
+        step_types = ["llm"]
+    if stages is None:
+        stages = ["pre"]
+    scope: dict[str, Any] = {"step_types": step_types, "stages": stages}
+    if step_names is not None:
+        scope["step_names"] = step_names
+    if step_name_regex is not None:
+        scope["step_name_regex"] = step_name_regex
+
+    return MockControlWithIdentity(
+        id=control_id,
+        name=name,
+        control=ControlDefinition(
+            description=f"Test control {name}",
+            enabled=True,
+            execution=execution,
+            scope=scope,
+            condition={
+                "selector": {"path": path},
+                "evaluator": EvaluatorSpec(
+                    name=evaluator,
+                    config={"value": config_value},
+                ),
+            },
+            action={"decision": action},
+        ),
+    )
+
+
+class TestContextFiltering:
+    """Tests for context-based filtering (execution vs server)."""
+
+    @pytest.mark.asyncio
+    async def test_server_context_only_runs_server_controls(self):
+        """Test that server context only runs execution='server' controls.
+
+        Given: Controls with execution='sdk' and execution='server'
+        When: Engine runs with context='server'
+        Then: Only execution='server' controls are executed
+        """
+        controls = [
+            make_control_with_execution(
+                1,
+                "local_ctrl",
+                "test-allow",
+                action="observe",
+                config_value="loc",
+                execution="sdk",
+            ),
+            make_control_with_execution(
+                2,
+                "server_ctrl",
+                "test-allow",
+                action="observe",
+                config_value="srv",
+                execution="server",
+            ),
+        ]
+        engine = ControlEngine(controls, context="server")
+
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        await engine.process(request)
+
+        # Only server_ctrl should have run
+        log = "|".join(_execution_log)
+        assert "allow:srv:start" in log and "allow:srv:end" in log
+        assert "allow:loc:start" not in log and "allow:loc:end" not in log
+
+    @pytest.mark.asyncio
+    async def test_sdk_context_only_runs_sdk_controls(self):
+        """Test that SDK context only runs execution='sdk' controls.
+
+        Given: Controls with execution='sdk' and execution='server'
+        When: Engine runs with context='sdk'
+        Then: Only execution='sdk' controls are executed
+        """
+        controls = [
+            make_control_with_execution(
+                1,
+                "local_ctrl",
+                "test-allow",
+                action="observe",
+                config_value="loc",
+                execution="sdk",
+            ),
+            make_control_with_execution(
+                2,
+                "server_ctrl",
+                "test-allow",
+                action="observe",
+                config_value="srv",
+                execution="server",
+            ),
+        ]
+        engine = ControlEngine(controls, context="sdk")
+
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        await engine.process(request)
+
+        # Only local_ctrl should have run
+        log = "|".join(_execution_log)
+        assert "allow:loc:start" in log and "allow:loc:end" in log
+        assert "allow:srv:start" not in log and "allow:srv:end" not in log
+
+    @pytest.mark.asyncio
+    async def test_default_context_is_server(self):
+        """Test that default context is 'server'.
+
+        Given: Controls with execution='sdk' and execution='server'
+        When: Engine runs with default context (no context param)
+        Then: Only execution='server' controls are executed
+        """
+        controls = [
+            make_control_with_execution(
+                1,
+                "local_ctrl",
+                "test-allow",
+                action="observe",
+                config_value="loc",
+                execution="sdk",
+            ),
+            make_control_with_execution(
+                2,
+                "server_ctrl",
+                "test-allow",
+                action="observe",
+                config_value="srv",
+                execution="server",
+            ),
+        ]
+        engine = ControlEngine(controls)  # No context param
+
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        await engine.process(request)
+
+        # Only server_ctrl should have run (default context is 'server')
+        log = "|".join(_execution_log)
+        assert "allow:srv:start" in log and "allow:srv:end" in log
+        assert "allow:loc:start" not in log and "allow:loc:end" not in log
+
+    @pytest.mark.asyncio
+    async def test_sdk_context_empty_when_no_local_controls(self):
+        """Test that SDK context returns early when no local controls exist.
+
+        Given: Controls that are all execution='server'
+        When: Engine runs with context='sdk'
+        Then: No controls are executed, result is safe with full confidence
+        """
+        controls = [
+            make_control_with_execution(
+                1, "server1", "test-deny", action="deny", config_value="s1", execution="server"
+            ),
+            make_control_with_execution(
+                2, "server2", "test-deny", action="deny", config_value="s2", execution="server"
+            ),
+        ]
+        engine = ControlEngine(controls, context="sdk")
+
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # No controls should run
+        assert len(_execution_log) == 0
+        # Result should be safe (no applicable controls)
+        assert result.is_safe is True
+        assert result.confidence == 1.0
+        assert result.matches is None
+
+    @pytest.mark.asyncio
+    async def test_server_context_empty_when_all_local_controls(self):
+        """Test that server context returns early when all controls are local.
+
+        Given: Controls that are all execution='sdk'
+        When: Engine runs with context='server'
+        Then: No controls are executed, result is safe with full confidence
+        """
+        controls = [
+            make_control_with_execution(
+                1, "local1", "test-deny", action="deny", config_value="l1", execution="sdk"
+            ),
+            make_control_with_execution(
+                2, "local2", "test-deny", action="deny", config_value="l2", execution="sdk"
+            ),
+        ]
+        engine = ControlEngine(controls, context="server")
+
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # No controls should run
+        assert len(_execution_log) == 0
+        # Result should be safe (no applicable controls)
+        assert result.is_safe is True
+        assert result.confidence == 1.0
+        assert result.matches is None
+
+    @pytest.mark.asyncio
+    async def test_sdk_deny_works_in_sdk_context(self):
+        """Test that execution='sdk' deny controls work correctly in SDK context.
+
+        Given: A deny control that runs in the SDK
+        When: Engine runs with context='sdk'
+        Then: The deny is detected and is_safe=False
+        """
+        controls = [
+            make_control_with_execution(
+                1, "local_deny", "test-deny", action="deny", config_value="ld", execution="sdk"
+            ),
+        ]
+        engine = ControlEngine(controls, context="sdk")
+
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+            stage="pre",
+        )
+        result = await engine.process(request)
+
+        # Deny should be detected
+        assert "deny:ld:start" in _execution_log
+        assert "deny:ld:end" in _execution_log
+        assert result.is_safe is False
+        assert result.matches is not None
+        assert len(result.matches) == 1
+        assert result.matches[0].control_name == "local_deny"
+
+    @pytest.mark.asyncio
+    async def test_context_filtering_combined_with_step_scoping(self):
+        """Test that context filtering works together with step name scoping.
+
+        Given: Controls with execution='sdk' and step_names scoping
+        When: Engine runs with context='sdk' and a matching tool step
+        Then: Only matching SDK controls for that step are executed
+        """
+        controls = [
+            make_control_with_execution(
+                1, "local_copy", "test-allow",
+                action="observe",
+                config_value="lc",
+                execution="sdk",
+                step_types=["tool"],
+                step_names=["copy_file"],
+            ),
+            make_control_with_execution(
+                2, "server_copy", "test-allow",
+                action="observe",
+                config_value="sc",
+                execution="server",
+                step_types=["tool"],
+                step_names=["copy_file"],
+            ),
+        ]
+
+        engine = ControlEngine(controls, context="sdk")
+
+        request = EvaluationRequest(
+            agent_name="00000000-0000-0000-0000-000000000001",
+            step=Step(type="tool", name="copy_file", input={}, output=None),
+            stage="pre",
+        )
+        await engine.process(request)
+
+        # Only local_copy should run (sdk context + matching step)
+        log = "|".join(_execution_log)
+        assert "allow:lc:start" in log and "allow:lc:end" in log
+        assert "allow:sc:start" not in log and "allow:sc:end" not in log
+
+
+# =============================================================================
+# Test: Regex Caching
+# =============================================================================
+
+
+class TestRegexCaching:
+    """Tests for regex pattern caching."""
+
+    def test_compile_regex_returns_pattern(self):
+        """Test that _compile_regex returns a valid pattern."""
+        pattern = _compile_regex(r"test.*pattern")
+        assert pattern is not None
+        assert pattern.search("test_foo_pattern") is not None
+        assert pattern.search("no match") is None
+
+    def test_compile_regex_caches_same_pattern(self):
+        """Test that _compile_regex caches repeated patterns."""
+        # Clear cache first
+        _compile_regex.cache_clear()
+
+        pattern1 = _compile_regex(r"cached_pattern")
+        pattern2 = _compile_regex(r"cached_pattern")
+
+        # Should be same object (cached)
+        assert pattern1 is pattern2
+
+        # Check cache info
+        info = _compile_regex.cache_info()
+        assert info.hits == 1
+        assert info.misses == 1
+
+    def test_compile_regex_different_patterns_cached_separately(self):
+        """Test that different patterns are cached separately."""
+        _compile_regex.cache_clear()
+
+        pattern1 = _compile_regex(r"pattern_one")
+        pattern2 = _compile_regex(r"pattern_two")
+
+        # Should be different objects
+        assert pattern1 is not pattern2
+
+        # Both should be misses
+        info = _compile_regex.cache_info()
+        assert info.hits == 0
+        assert info.misses == 2
+
+# =============================================================================
+# Test: Steer Error Handling
+# =============================================================================
+
+
+class TestSteerErrorHandling:
+    """Tests for steer control error handling (lines 299, 340-344)."""
+
+    @pytest.mark.asyncio
+    async def test_steer_control_error_non_blocking(self):
+        """Test that steer control errors don't block execution (unlike deny errors).
+
+        Given: A steer control with an evaluator that errors
+        When: Engine processes the request
+        Then: Result is still safe (steer errors are non-blocking)
+              Error is logged for observability
+        Coverage: Lines 299 (steer_errored = True), 340-344 (logging)
+        """
+        reset_test_state()
+        register_evaluator(ErrorEvaluator)
+
+        controls = [
+            make_control(
+                1,
+                "steer-with-error",
+                evaluator="test-error",
+                config_value="steer",
+                action="steer",
+                steering_context=SteeringContext(message="Steering guidance"),
+            ),
+        ]
+
+        engine = ControlEngine(controls)
+        request = EvaluationRequest(
+            agent_name="test-agent",
+            stage="pre",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+        )
+
+        # Capture logs to verify warning is logged
+        import logging
+        from io import StringIO
+
+        log_capture = StringIO()
+        handler = logging.StreamHandler(log_capture)
+        handler.setLevel(logging.WARNING)
+        logger = logging.getLogger("agent_control_engine.core")
+        logger.addHandler(handler)
+
+        try:
+            result = await engine.process(request)
+
+            # Steer errors are NON-BLOCKING - result should still be safe
+            assert result.is_safe is True
+
+            # Error should be captured in errors list
+            assert result.errors is not None
+            assert len(result.errors) == 1
+            assert result.errors[0].control_name == "steer-with-error"
+            assert result.errors[0].action == "steer"
+            assert result.errors[0].result.error is not None
+
+            # Verify warning was logged (lines 340-344)
+            log_output = log_capture.getvalue()
+            assert "Steer control evaluation failed (non-blocking)" in log_output
+            assert "steer-with-error" in log_output
+
+        finally:
+            logger.removeHandler(handler)
+
+    @pytest.mark.asyncio
+    async def test_deny_control_error_blocks(self):
+        """Test that deny control errors DO block execution (fail closed).
+
+        Given: A deny control with an evaluator that errors
+        When: Engine processes the request
+        Then: Result is unsafe (deny errors fail closed)
+        """
+        reset_test_state()
+        register_evaluator(ErrorEvaluator)
+
+        controls = [
+            make_control(
+                1,
+                "deny-with-error",
+                evaluator="test-error",
+                config_value="deny",
+                action="deny",
+            ),
+        ]
+
+        engine = ControlEngine(controls)
+        request = EvaluationRequest(
+            agent_name="test-agent",
+            stage="pre",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+        )
+
+        result = await engine.process(request)
+
+        # Deny errors BLOCK - result should be unsafe (fail closed)
+        assert result.is_safe is False
+
+        # Error should be captured
+        assert result.errors is not None
+        assert len(result.errors) == 1
+        assert result.errors[0].control_name == "deny-with-error"
+
+    @pytest.mark.asyncio
+    async def test_mixed_deny_and_steer_errors(self):
+        """Test that both deny and steer errors are handled correctly together.
+
+        Given: One deny control that errors and one steer control that errors
+        When: Engine processes the request
+        Then: Result is unsafe (deny error fails closed)
+              Both errors are captured
+              Steer error warning is logged
+        Coverage: Lines 299, 340-344
+        """
+        reset_test_state()
+        register_evaluator(ErrorEvaluator)
+
+        controls = [
+            make_control(
+                1,
+                "deny-error",
+                evaluator="test-error",
+                config_value="deny",
+                action="deny",
+            ),
+            make_control(
+                2,
+                "steer-error",
+                evaluator="test-error",
+                config_value="steer",
+                action="steer",
+                steering_context=SteeringContext(message="Steer guidance"),
+            ),
+        ]
+
+        engine = ControlEngine(controls)
+        request = EvaluationRequest(
+            agent_name="test-agent",
+            stage="pre",
+            step=Step(type="llm", name="test-step", input="test", output=None),
+        )
+
+        # Capture logs
+        import logging
+        from io import StringIO
+
+        log_capture = StringIO()
+        handler = logging.StreamHandler(log_capture)
+        handler.setLevel(logging.WARNING)
+        logger = logging.getLogger("agent_control_engine.core")
+        logger.addHandler(handler)
+
+        try:
+            result = await engine.process(request)
+
+            # Deny error fails closed
+            assert result.is_safe is False
+
+            # Both errors captured
+            assert result.errors is not None
+            assert len(result.errors) == 2
+            error_names = {e.control_name for e in result.errors}
+            assert error_names == {"deny-error", "steer-error"}
+
+            # Steer error warning logged (lines 340-344)
+            log_output = log_capture.getvalue()
+            assert "Steer control evaluation failed (non-blocking)" in log_output
+            assert "steer-error" in log_output
+
+        finally:
+            logger.removeHandler(handler)
+
+
+# =============================================================================
+# Test: Invalid Regex Handling
+# =============================================================================
+
+
+class TestInvalidRegexHandling:
+    """Tests for invalid step_name_regex error handling (line 139)."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_step_name_regex_captured_in_selector_errors(self):
+        """Test that invalid step_name_regex is captured in selector_errors.
+
+        Given: A control with an invalid step_name_regex pattern
+        When: Engine gets applicable controls with selector_errors list
+        Then: The invalid regex error is added to selector_errors
+              Control is skipped
+        Coverage: Line 139 (continue after regex error)
+        """
+
+        @dataclass
+        class MockControl:
+            id: int
+            name: str
+            control: ControlDefinition
+
+        # Create ControlDefinition with model_validate to bypass validation
+        control_data = {
+            "description": "Control with invalid regex",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "stages": ["pre"],
+                "step_types": ["llm"],
+                "step_name_regex": "[invalid(regex",  # Invalid regex pattern
+            },
+            "condition": {
+                "selector": {"path": "input"},
+                "evaluator": {
+                    "name": "test-allow",
+                    "config": {"value": "test"},
+                },
+            },
+            "action": {"decision": "deny"},
+        }
+
+        # Use model_validate with context to allow invalid regex
+        control_def = ControlDefinition.model_validate(
+            control_data,
+            context={"allow_invalid_step_name_regex": True}
+        )
+
+        controls = [
+            MockControl(
+                id=1,
+                name="invalid-regex-control",
+                control=control_def,
+            ),
+        ]
+
+        engine = ControlEngine(controls)
+        request = EvaluationRequest(
+            agent_name="test-agent",
+            stage="pre",
+            step=Step(
+                type="llm",
+                name="matching-step-name",
+                input="test input",
+                output=None,
+            ),
+        )
+
+        selector_errors = []
+        applicable = engine.get_applicable_controls(request, selector_errors=selector_errors)
+
+        # Control should be skipped (not in applicable list)
+        assert len(applicable) == 0
+
+        # Error should be captured in selector_errors (line 139 coverage)
+        assert len(selector_errors) == 1
+        assert selector_errors[0].control_name == "invalid-regex-control"
+        assert selector_errors[0].result.error is not None
+        assert "Invalid step_name_regex" in selector_errors[0].result.error
+        assert "[invalid(regex" in selector_errors[0].result.message
