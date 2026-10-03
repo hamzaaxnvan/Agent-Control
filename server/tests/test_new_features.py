@@ -302,3 +302,308 @@ def test_policy_assignment_with_builtin_evaluator(client: TestClient) -> None:
     resp = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
 
     # Then:
+    assert resp.status_code == 200
+
+
+def test_policy_assignment_with_registered_agent_evaluator(client: TestClient) -> None:
+    """Given an agent with custom evaluator and matching policy, when assigning policy, then succeeds."""
+    # Given:
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    agent_name = agent_name
+    payload = make_agent_payload(
+        agent_name=agent_name,
+        name=agent_name,
+        evaluators=[{"name": "custom-eval", "config_schema": {"type": "object"}}],
+    )
+    client.post("/api/v1/agents/initAgent", json=payload)
+
+    policy_id, _ = _create_policy_with_control(
+        client,
+        f"policy-{uuid.uuid4().hex[:8]}",
+        f"control-{uuid.uuid4().hex[:8]}",
+        {
+            "execution": "server",
+            "scope": {"step_types": ["llm"], "stages": ["pre"]},
+            "selector": {"path": "input"},
+            "evaluator": {"name": f"{agent_name}:custom-eval", "config": {}},
+            "action": {"decision": "deny"},
+        },
+    )
+
+    # When:
+    resp = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+
+    # Then:
+    assert resp.status_code == 200
+
+
+def test_control_creation_with_unregistered_evaluator_fails(client: TestClient) -> None:
+    """Given an agent without evaluator, when creating a control that uses it, then fails."""
+    # Given:
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    agent_name = agent_name
+    payload = make_agent_payload(agent_name=agent_name, name=agent_name)
+    client.post("/api/v1/agents/initAgent", json=payload)
+
+    # When:
+    data_resp = client.put(
+        "/api/v1/controls",
+        json={
+            "name": f"control-{uuid.uuid4().hex[:8]}",
+            "data": {
+                "execution": "server",
+                "scope": {"step_types": ["llm"], "stages": ["pre"]},
+                "condition": {
+                    "selector": {"path": "input"},
+                    "evaluator": {"name": f"{agent_name}:nonexistent-eval", "config": {}},
+                },
+                "action": {"decision": "deny"},
+            }
+        },
+    )
+
+    # Then: (RFC 7807 format)
+    assert data_resp.status_code == 422
+    response_data = data_resp.json()
+    # Check detail message or errors array
+    assert "not registered" in response_data.get("detail", "")
+
+
+def test_policy_assignment_cross_agent_evaluator_fails(client: TestClient) -> None:
+    """Given policy with Agent A's evaluator, when assigning to Agent B, then fails."""
+    # Given: Agent A has evaluator, Agent B does not
+    agent_a_id = f"agent-a-{uuid.uuid4().hex[:12]}"
+    agent_a_name = agent_a_id
+    payload_a = make_agent_payload(
+        agent_name=agent_a_id,
+        name=agent_a_name,
+        evaluators=[{"name": "shared-eval", "config_schema": {"type": "object"}}],
+    )
+    client.post("/api/v1/agents/initAgent", json=payload_a)
+
+    agent_b_id = f"agent-b-{uuid.uuid4().hex[:12]}"
+    agent_b_name = agent_b_id
+    payload_b = make_agent_payload(agent_name=agent_b_id, name=agent_b_name)
+    client.post("/api/v1/agents/initAgent", json=payload_b)
+
+    policy_id, _ = _create_policy_with_control(
+        client,
+        f"policy-{uuid.uuid4().hex[:8]}",
+        f"control-{uuid.uuid4().hex[:8]}",
+        {
+            "execution": "server",
+            "scope": {"step_types": ["llm"], "stages": ["pre"]},
+            "selector": {"path": "input"},
+            "evaluator": {"name": f"{agent_a_name}:shared-eval", "config": {}},
+            "action": {"decision": "deny"},
+        },
+    )
+
+    # When: Assign to Agent A (should succeed)
+    resp_a = client.post(f"/api/v1/agents/{agent_a_id}/policy/{policy_id}")
+
+    # Then:
+    assert resp_a.status_code == 200
+
+    # When: Assign same policy to Agent B (should fail)
+    resp_b = client.post(f"/api/v1/agents/{agent_b_id}/policy/{policy_id}")
+
+    # Then: (RFC 7807 format)
+    assert resp_b.status_code == 400
+    response_data = resp_b.json()
+    assert "incompatible" in response_data.get("detail", "").lower()
+    errors = response_data.get("errors", [])
+    assert any(agent_a_name in e.get("message", "") for e in errors)
+
+
+# =============================================================================
+# Nested schema compatibility tests
+# =============================================================================
+
+
+def test_schema_compat_nested_additional_properties_compatible(client: TestClient) -> None:
+    """Given a nested schema, when adding optional property in nested object, then compatible."""
+    # Given:
+    agent_name = str(uuid.uuid4())
+    name = f"Test Agent {uuid.uuid4().hex[:8]}"
+    payload1 = make_agent_payload(
+        agent_name=agent_name,
+        name=name,
+        evaluators=[
+            {
+                "name": "nested-eval",
+                "config_schema": {
+                    "type": "object",
+                    "properties": {
+                        "options": {
+                            "type": "object",
+                            "properties": {"level": {"type": "number"}},
+                        }
+                    },
+                },
+            }
+        ],
+    )
+    client.post("/api/v1/agents/initAgent", json=payload1)
+
+    # When: add optional property in nested object
+    payload2 = make_agent_payload(
+        agent_name=agent_name,
+        name=name,
+        evaluators=[
+            {
+                "name": "nested-eval",
+                "config_schema": {
+                    "type": "object",
+                    "properties": {
+                        "options": {
+                            "type": "object",
+                            "properties": {
+                                "level": {"type": "number"},
+                                "extra": {"type": "string"},
+                            },
+                        }
+                    },
+                },
+            }
+        ],
+    )
+    resp2 = client.post("/api/v1/agents/initAgent", json=payload2)
+
+    # Then:
+    assert resp2.status_code == 200
+
+
+def test_schema_compat_nested_type_change_incompatible(client: TestClient) -> None:
+    """Given a nested schema, when changing nested property type, then rejected as incompatible."""
+    # Given:
+    agent_name = str(uuid.uuid4())
+    name = f"Test Agent {uuid.uuid4().hex[:8]}"
+    payload1 = make_agent_payload(
+        agent_name=agent_name,
+        name=name,
+        evaluators=[
+            {
+                "name": "nested-eval",
+                "config_schema": {
+                    "type": "object",
+                    "properties": {
+                        "settings": {
+                            "type": "object",
+                            "properties": {"count": {"type": "integer"}},
+                        }
+                    },
+                },
+            }
+        ],
+    )
+    client.post("/api/v1/agents/initAgent", json=payload1)
+
+    # When: change nested type from integer to string
+    payload2 = make_agent_payload(
+        agent_name=agent_name,
+        name=name,
+        evaluators=[
+            {
+                "name": "nested-eval",
+                "config_schema": {
+                    "type": "object",
+                    "properties": {
+                        "settings": {
+                            "type": "object",
+                            "properties": {"count": {"type": "string"}},
+                        }
+                    },
+                },
+            }
+        ],
+    )
+    resp2 = client.post("/api/v1/agents/initAgent", json=payload2)
+
+    # Then:
+    assert resp2.status_code == 409
+    assert "not backward compatible" in resp2.json()["detail"]
+
+
+# =============================================================================
+# Evaluator removal protection
+# =============================================================================
+
+
+def test_patch_agent_remove_evaluator_blocked_by_control(client: TestClient) -> None:
+    """Given an agent with evaluator used by a control, when removing evaluator, then rejected.
+
+    Given: An agent with evaluator "my-eval" and a control using that evaluator
+    When: Trying to remove "my-eval" via PATCH
+    Then: Returns 409 with error message about referencing control
+    """
+    # Given: Agent with custom evaluator
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    agent_name = agent_name
+    payload = make_agent_payload(
+        agent_name=agent_name,
+        name=agent_name,
+        evaluators=[{"name": "my-eval", "config_schema": {"type": "object"}}],
+    )
+    client.post("/api/v1/agents/initAgent", json=payload)
+
+    # And: A control set up to use that evaluator
+    policy_id, _ = _create_policy_with_control(
+        client,
+        f"policy-{uuid.uuid4().hex[:8]}",
+        f"control-{uuid.uuid4().hex[:8]}",
+        {
+            "execution": "server",
+            "scope": {"step_types": ["llm"], "stages": ["pre"]},
+            "selector": {"path": "input"},
+            "evaluator": {"name": f"{agent_name}:my-eval", "config": {}},
+            "action": {"decision": "deny"},
+        },
+    )
+
+    # And: Policy assigned to agent
+    assign_resp = client.post(f"/api/v1/agents/{agent_name}/policy/{policy_id}")
+    assert assign_resp.status_code == 200
+
+    # When: Trying to remove the evaluator
+    patch_resp = client.patch(
+        f"/api/v1/agents/{agent_name}",
+        json={"remove_evaluators": ["my-eval"]},
+    )
+
+    # Then: Should be rejected with 409 (RFC 7807 format)
+    assert patch_resp.status_code == 409
+    response_data = patch_resp.json()
+    detail = response_data.get("detail", "")
+    errors = response_data.get("errors", [])
+    assert "Cannot remove evaluators" in detail
+    # Check errors array contains reference to the evaluator
+    assert any("my-eval" in e.get("message", "") for e in errors)
+
+
+def test_patch_agent_remove_evaluator_allowed_without_policy(client: TestClient) -> None:
+    """Given an agent with evaluator but no policy, when removing evaluator, then succeeds.
+
+    Given: An agent with evaluator "my-eval" but no policy assigned
+    When: Trying to remove "my-eval" via PATCH
+    Then: Succeeds since no controls can reference it
+    """
+    # Given: Agent with custom evaluator but no policy
+    agent_name = f"agent-{uuid.uuid4().hex[:12]}"
+    agent_name = agent_name
+    payload = make_agent_payload(
+        agent_name=agent_name,
+        name=agent_name,
+        evaluators=[{"name": "my-eval", "config_schema": {"type": "object"}}],
+    )
+    client.post("/api/v1/agents/initAgent", json=payload)
+
+    # When: Removing the evaluator (no policy = no controls can reference it)
+    patch_resp = client.patch(
+        f"/api/v1/agents/{agent_name}",
+        json={"remove_evaluators": ["my-eval"]},
+    )
+
+    # Then: Should succeed
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["evaluators_removed"] == ["my-eval"]
