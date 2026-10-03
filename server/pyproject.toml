@@ -35,3 +35,79 @@ license = {text = "Apache-2.0"}
 [project.optional-dependencies]
 galileo = ["agent-control-evaluator-galileo>=7.5.0"]
 binary = ["psycopg[binary]>=3.1"]
+c = ["psycopg[c]>=3.1"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "types-jsonschema>=4.23.0",
+    "agent-control-models",
+    "agent-control-engine",
+    "agent-control-telemetry",
+    "agent-control-evaluators",
+]
+
+[project.scripts]
+agent-control-server = "agent_control_server.main:run"
+agent-control-migrate = "agent_control_server.migrate:main"
+
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Note: agent_control_models, agent_control_engine, and agent_control_telemetry
+# are copied by scripts/build.py
+# Note: agent_control_evaluators is a runtime dep, not vendored
+packages = [
+    "src/agent_control_server",
+    "src/agent_control_models",
+    "src/agent_control_engine",
+    "src/agent_control_telemetry",
+]
+
+# Ship Alembic migration scripts and config inside the wheel so that
+# non-Docker consumers (e.g. wheel-based deployments) can run migrations
+# via the `agent-control-migrate` console script without vendoring.
+[tool.hatch.build.targets.wheel.force-include]
+"alembic" = "agent_control_server/_alembic"
+"alembic.ini" = "agent_control_server/_alembic.ini"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+concurrency = ["thread", "greenlet"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent_control_server"]
+
+# For local development, use workspace packages
+[tool.uv.sources]
+agent-control-models = { workspace = true }
+agent-control-engine = { workspace = true }
+agent-control-telemetry = { workspace = true }
+agent-control-evaluators = { workspace = true }
+# For local dev: use local galileo package instead of PyPI
+agent-control-evaluator-galileo = { path = "../evaluators/contrib/galileo", editable = true }
