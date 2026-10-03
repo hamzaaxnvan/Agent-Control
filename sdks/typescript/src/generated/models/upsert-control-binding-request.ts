@@ -22,3 +22,51 @@ export type UpsertControlBindingRequest = {
   /**
    * Whether the binding is active.
    */
+  enabled?: boolean | undefined;
+  /**
+   * Opaque external identifier within the target_type.
+   */
+  targetId: string;
+  /**
+   * Opaque attachment kind.
+   */
+  targetType: string;
+};
+
+/** @internal */
+export type UpsertControlBindingRequest$Outbound = {
+  control_id: number;
+  enabled: boolean;
+  target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const UpsertControlBindingRequest$outboundSchema: z.ZodMiniType<
+  UpsertControlBindingRequest$Outbound,
+  UpsertControlBindingRequest
+> = z.pipe(
+  z.object({
+    controlId: z.int(),
+    enabled: z._default(z.boolean(), true),
+    targetId: z.string(),
+    targetType: z.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      controlId: "control_id",
+      targetId: "target_id",
+      targetType: "target_type",
+    });
+  }),
+);
+
+export function upsertControlBindingRequestToJSON(
+  upsertControlBindingRequest: UpsertControlBindingRequest,
+): string {
+  return JSON.stringify(
+    UpsertControlBindingRequest$outboundSchema.parse(
+      upsertControlBindingRequest,
+    ),
+  );
+}
