@@ -20,3 +20,26 @@ export type GetPolicyControlsResponse = {
 };
 
 /** @internal */
+export const GetPolicyControlsResponse$inboundSchema: z.ZodMiniType<
+  GetPolicyControlsResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    control_ids: z.array(types.number()),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "control_ids": "controlIds",
+    });
+  }),
+);
+
+export function getPolicyControlsResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetPolicyControlsResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetPolicyControlsResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetPolicyControlsResponse' from JSON`,
+  );
+}
