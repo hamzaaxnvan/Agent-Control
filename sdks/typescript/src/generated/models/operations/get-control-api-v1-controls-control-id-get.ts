@@ -12,3 +12,31 @@ export type GetControlApiV1ControlsControlIdGetRequest = {
 /** @internal */
 export type GetControlApiV1ControlsControlIdGetRequest$Outbound = {
   control_id: number;
+};
+
+/** @internal */
+export const GetControlApiV1ControlsControlIdGetRequest$outboundSchema:
+  z.ZodMiniType<
+    GetControlApiV1ControlsControlIdGetRequest$Outbound,
+    GetControlApiV1ControlsControlIdGetRequest
+  > = z.pipe(
+    z.object({
+      controlId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        controlId: "control_id",
+      });
+    }),
+  );
+
+export function getControlApiV1ControlsControlIdGetRequestToJSON(
+  getControlApiV1ControlsControlIdGetRequest:
+    GetControlApiV1ControlsControlIdGetRequest,
+): string {
+  return JSON.stringify(
+    GetControlApiV1ControlsControlIdGetRequest$outboundSchema.parse(
+      getControlApiV1ControlsControlIdGetRequest,
+    ),
+  );
+}
