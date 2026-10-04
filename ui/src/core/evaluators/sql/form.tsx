@@ -188,3 +188,194 @@ export const SqlForm = ({ form }: EvaluatorFormProps<SqlFormValues>) => {
         size="sm"
         disabled={!!form.values.allowed_schemas}
         {...form.getInputProps('blocked_schemas')}
+      />
+
+      <Divider label="Column Presence Controls" labelPosition="left" />
+
+      <TextInput
+        label={
+          <LabelWithTooltip
+            label="Required columns"
+            tooltip="Columns that must be present (e.g., for multi-tenant security)"
+          />
+        }
+        labelProps={labelPropsInline}
+        placeholder="tenant_id, user_id"
+        size="sm"
+        {...form.getInputProps('required_columns')}
+      />
+
+      <Select
+        label={
+          <LabelWithTooltip
+            label="Column presence logic"
+            tooltip="How to combine required columns (any vs all)"
+          />
+        }
+        labelProps={labelPropsInline}
+        data={[
+          { value: 'any', label: 'Any (at least one required column)' },
+          { value: 'all', label: 'All (all required columns)' },
+        ]}
+        size="sm"
+        {...form.getInputProps('column_presence_logic')}
+        onChange={(value) =>
+          form.setFieldValue(
+            'column_presence_logic',
+            (value as SqlFormValues['column_presence_logic']) || 'any'
+          )
+        }
+      />
+
+      <Select
+        label={
+          <LabelWithTooltip
+            label="Column context"
+            tooltip="Where required columns must appear"
+          />
+        }
+        labelProps={labelPropsInline}
+        data={[
+          { value: '', label: 'Anywhere in query' },
+          { value: 'where', label: 'WHERE clause only' },
+          { value: 'select', label: 'SELECT clause only' },
+        ]}
+        size="sm"
+        clearable
+        {...form.getInputProps('column_context')}
+        onChange={(value) =>
+          form.setFieldValue(
+            'column_context',
+            (value as SqlFormValues['column_context']) || ''
+          )
+        }
+      />
+
+      <Select
+        label={
+          <LabelWithTooltip
+            label="Column context scope"
+            tooltip="Whether to check only top-level or all clauses"
+          />
+        }
+        labelProps={labelPropsInline}
+        data={[
+          { value: 'all', label: 'All (including subqueries)' },
+          {
+            value: 'top_level',
+            label: 'Top level only (recommended for RLS)',
+          },
+        ]}
+        size="sm"
+        {...form.getInputProps('column_context_scope')}
+        onChange={(value) =>
+          form.setFieldValue(
+            'column_context_scope',
+            (value as SqlFormValues['column_context_scope']) || 'all'
+          )
+        }
+      />
+
+      <Divider label="Limit Controls" labelPosition="left" />
+
+      <Checkbox
+        label={
+          <LabelWithTooltip
+            label="Require LIMIT clause"
+            tooltip="Require SELECT queries to have a LIMIT clause"
+          />
+        }
+        size="sm"
+        {...form.getInputProps('require_limit', { type: 'checkbox' })}
+      />
+
+      <NumberInput
+        label={
+          <LabelWithTooltip
+            label="Max LIMIT value"
+            tooltip="Maximum allowed LIMIT value"
+          />
+        }
+        labelProps={labelPropsInline}
+        placeholder="1000"
+        min={1}
+        size="sm"
+        {...form.getInputProps('max_limit')}
+      />
+
+      <NumberInput
+        label={
+          <LabelWithTooltip
+            label="Max result window (LIMIT + OFFSET)"
+            tooltip="Maximum value of (LIMIT + OFFSET) for pagination control"
+          />
+        }
+        labelProps={labelPropsInline}
+        placeholder="10000"
+        min={1}
+        size="sm"
+        {...form.getInputProps('max_result_window')}
+      />
+
+      <Divider label="Query Complexity Limits" labelPosition="left" />
+
+      <NumberInput
+        label={
+          <LabelWithTooltip
+            label="Max subquery depth"
+            tooltip="Maximum nesting depth for subqueries"
+          />
+        }
+        labelProps={labelPropsInline}
+        placeholder="5"
+        min={1}
+        max={100}
+        size="sm"
+        {...form.getInputProps('max_subquery_depth')}
+      />
+
+      <NumberInput
+        label={
+          <LabelWithTooltip
+            label="Max JOINs"
+            tooltip="Maximum number of JOIN operations"
+          />
+        }
+        labelProps={labelPropsInline}
+        placeholder="10"
+        min={1}
+        max={100}
+        size="sm"
+        {...form.getInputProps('max_joins')}
+      />
+
+      <NumberInput
+        label={
+          <LabelWithTooltip
+            label="Max UNION/INTERSECT/EXCEPT"
+            tooltip="Maximum number of set operations"
+          />
+        }
+        labelProps={labelPropsInline}
+        placeholder="10"
+        min={1}
+        max={100}
+        size="sm"
+        {...form.getInputProps('max_union_count')}
+      />
+
+      <Divider label="Options" labelPosition="left" />
+
+      <Checkbox
+        label={
+          <LabelWithTooltip
+            label="Case sensitive"
+            tooltip="Case-sensitive table, column, and schema matching"
+          />
+        }
+        size="sm"
+        {...form.getInputProps('case_sensitive', { type: 'checkbox' })}
+      />
+    </Stack>
+  );
+};

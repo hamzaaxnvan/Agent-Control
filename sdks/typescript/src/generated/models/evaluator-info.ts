@@ -16,3 +16,57 @@ export type EvaluatorInfo = {
   /**
    * JSON Schema for config
    */
+  configSchema: { [k: string]: any };
+  /**
+   * Evaluator description
+   */
+  description: string;
+  /**
+   * Evaluator name
+   */
+  name: string;
+  /**
+   * Whether evaluator requires API key
+   */
+  requiresApiKey: boolean;
+  /**
+   * Default timeout in milliseconds
+   */
+  timeoutMs: number;
+  /**
+   * Evaluator version
+   */
+  version: string;
+};
+
+/** @internal */
+export const EvaluatorInfo$inboundSchema: z.ZodMiniType<
+  EvaluatorInfo,
+  unknown
+> = z.pipe(
+  z.object({
+    config_schema: z.record(z.string(), z.any()),
+    description: types.string(),
+    name: types.string(),
+    requires_api_key: types.boolean(),
+    timeout_ms: types.number(),
+    version: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "config_schema": "configSchema",
+      "requires_api_key": "requiresApiKey",
+      "timeout_ms": "timeoutMs",
+    });
+  }),
+);
+
+export function evaluatorInfoFromJSON(
+  jsonString: string,
+): SafeParseResult<EvaluatorInfo, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => EvaluatorInfo$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'EvaluatorInfo' from JSON`,
+  );
+}
