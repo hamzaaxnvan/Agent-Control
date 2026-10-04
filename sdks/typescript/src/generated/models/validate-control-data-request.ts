@@ -14,3 +14,68 @@ import {
   TemplateControlInput$Outbound,
   TemplateControlInput$outboundSchema,
 } from "./template-control-input.js";
+
+/**
+ * Control configuration data to validate
+ */
+export type ValidateControlDataRequestData =
+  | ControlDefinitionInput
+  | TemplateControlInput;
+
+/**
+ * Request to validate control configuration data without saving.
+ */
+export type ValidateControlDataRequest = {
+  /**
+   * Control configuration data to validate
+   */
+  data: ControlDefinitionInput | TemplateControlInput;
+};
+
+/** @internal */
+export type ValidateControlDataRequestData$Outbound =
+  | ControlDefinitionInput$Outbound
+  | TemplateControlInput$Outbound;
+
+/** @internal */
+export const ValidateControlDataRequestData$outboundSchema: z.ZodMiniType<
+  ValidateControlDataRequestData$Outbound,
+  ValidateControlDataRequestData
+> = smartUnion([
+  ControlDefinitionInput$outboundSchema,
+  TemplateControlInput$outboundSchema,
+]);
+
+export function validateControlDataRequestDataToJSON(
+  validateControlDataRequestData: ValidateControlDataRequestData,
+): string {
+  return JSON.stringify(
+    ValidateControlDataRequestData$outboundSchema.parse(
+      validateControlDataRequestData,
+    ),
+  );
+}
+
+/** @internal */
+export type ValidateControlDataRequest$Outbound = {
+  data: ControlDefinitionInput$Outbound | TemplateControlInput$Outbound;
+};
+
+/** @internal */
+export const ValidateControlDataRequest$outboundSchema: z.ZodMiniType<
+  ValidateControlDataRequest$Outbound,
+  ValidateControlDataRequest
+> = z.object({
+  data: smartUnion([
+    ControlDefinitionInput$outboundSchema,
+    TemplateControlInput$outboundSchema,
+  ]),
+});
+
+export function validateControlDataRequestToJSON(
+  validateControlDataRequest: ValidateControlDataRequest,
+): string {
+  return JSON.stringify(
+    ValidateControlDataRequest$outboundSchema.parse(validateControlDataRequest),
+  );
+}
