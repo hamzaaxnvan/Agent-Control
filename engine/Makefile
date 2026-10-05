@@ -19,3 +19,25 @@ help:
 	@echo ""
 	@echo "Build:"
 	@echo "  make build           - build package"
+	@echo "  make publish         - publish package"
+
+sync:
+	uv sync
+
+test:
+	uv run pytest --cov=src --cov-report=xml:../coverage-engine.xml -q
+
+lint:
+	uv run ruff check --config ../pyproject.toml src/
+
+lint-fix:
+	uv run ruff check --config ../pyproject.toml --fix src/
+
+typecheck:
+	uv run mypy --config-file ../pyproject.toml src/
+
+build:
+	uv build
+
+publish:
+	uv publish
