@@ -27,3 +27,62 @@ members = [
 [tool.uv]
 # Require resolution to be compatible with the following environments so that CI and local dev
 # pick versions with wheels available across platforms (fixes ruff wheel mismatch on Linux x86_64).
+required-environments = [
+  "sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.uv.sources]
+agent-control-models = { workspace = true }
+agent-control-engine = { workspace = true }
+agent-control-evaluators = { workspace = true }
+agent-control-telemetry = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+# Allow late imports in examples (after sys.path manipulation)
+"examples/**/*.py" = ["E402"]
+# Allow late imports in tests (for test fixtures)
+"**/tests/**/*.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "re2"
+ignore_missing_imports = true
+
+# Semantic Release Configuration
+[tool.semantic_release]
+version_toml = [
+    "pyproject.toml:project.version",
+    "models/pyproject.toml:project.version",
+    "engine/pyproject.toml:project.version",
+    "sdks/python/pyproject.toml:project.version",
+    "telemetry/pyproject.toml:project.version",
+    "server/pyproject.toml:project.version",
+    "evaluators/builtin/pyproject.toml:project.version",
+    "evaluators/contrib/budget/pyproject.toml:project.version",
+    "evaluators/contrib/cisco/pyproject.toml:project.version",
+    "evaluators/contrib/defenseclaw/pyproject.toml:project.version",
+    "evaluators/contrib/galileo/pyproject.toml:project.version",
+]
+version_source = "tag"
+commit_message = "chore(release): v{version}"
+tag_format = "v{version}"
+
+[tool.semantic_release.commit_parser_options]
+# feat = minor, fix/perf/refactor = patch, breaking (!) = major
+allowed_tags = ["feat", "fix", "perf", "chore", "docs", "style", "refactor", "test", "ci"]
+patch_tags = ["fix", "perf", "chore", "refactor"]
