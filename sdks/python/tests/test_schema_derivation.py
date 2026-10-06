@@ -429,3 +429,434 @@ class TestArgsSchemaOverride:
             ...
 
         my_func.args_schema = BrokenArgsSchema()  # type: ignore[attr-defined]
+
+        # When schema derivation runs with warning capture enabled.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then derivation falls back to signature inference and emits a warning.
+        assert schemas.input_schema["properties"]["query"]["type"] == "string"
+        assert "args_schema.model_json_schema() failed" in caplog.text
+
+    def test_args_schema_override_wins_for_wrapped_function(self) -> None:
+        # Given a wrapped function with args_schema on the wrapper and typed signature on the base.
+        class _WrapperArgsSchema:
+            @staticmethod
+            def model_json_schema() -> dict[str, Any]:
+                return {
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                    "required": ["q"],
+                }
+
+        def base(query: str, limit: int = 3) -> str:
+            ...
+
+        @functools.wraps(base)
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            return base(*args, **kwargs)
+
+        wrapped.args_schema = _WrapperArgsSchema()  # type: ignore[attr-defined]
+
+        # When schemas are derived from the wrapped callable.
+        schemas = derive_schemas(wrapped)
+
+        # Then wrapper args_schema is used for input while output is inferred from unwrapped return.
+        assert schemas.input_schema == {
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+            "required": ["q"],
+        }
+        assert schemas.output_schema["type"] == "string"
+
+
+class TestFallbackWarnings:
+    """Warnings and fallback behavior for unresolved/incomplete typing."""
+
+    def test_missing_return_annotation_warns_and_falls_back(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given a callable without an explicit return type annotation.
+        def my_func(query: str):
+            ...
+
+        # When schemas are derived while warnings are captured.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then output falls back to a permissive schema and a warning is emitted.
+        assert schemas.output_schema == {}
+        assert "missing return type annotation" in caplog.text
+
+    def test_unresolved_type_hints_warn_and_fall_back(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given a callable that references an unresolved forward type hint.
+        def my_func(query: DoesNotExist) -> str:
+            ...
+
+        # When schema derivation attempts to resolve type hints.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then both schemas fall back to permissive defaults and a warning is emitted.
+        assert schemas.input_schema == {"type": "object", "additionalProperties": True}
+        assert schemas.output_schema == {}
+        assert "failed to resolve type hints" in caplog.text
+
+
+class TestAdditionalFallbackBranches:
+    """Additional branch coverage for defensive schema fallback paths."""
+
+    def test_args_schema_without_model_json_schema_is_ignored(self) -> None:
+        # Given a callable with an args_schema object that is missing model_json_schema().
+        class _MissingArgsSchemaMethod:
+            pass
+
+        def my_func(query: str) -> str:
+            ...
+
+        my_func.args_schema = _MissingArgsSchemaMethod()  # type: ignore[attr-defined]
+
+        # When schemas are derived.
+        schemas = derive_schemas(my_func)
+
+        # Then derivation ignores args_schema and falls back to signature inference.
+        assert schemas.input_schema["properties"]["query"]["type"] == "string"
+        assert schemas.output_schema == {"type": "string"}
+
+    def test_args_schema_non_dict_warns_and_falls_back(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given a callable whose args_schema returns a non-dict payload.
+        class _NonDictArgsSchema:
+            @staticmethod
+            def model_json_schema() -> list[str]:
+                return ["not-a-dict"]
+
+        def my_func(query: str) -> str:
+            ...
+
+        my_func.args_schema = _NonDictArgsSchema()  # type: ignore[attr-defined]
+
+        # When schemas are derived with warning capture.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then derivation warns and uses signature-based input inference.
+        assert schemas.input_schema["properties"]["query"]["type"] == "string"
+        assert "returned non-dict" in caplog.text
+
+    def test_args_schema_override_kept_when_type_hints_resolution_fails(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given a callable with args_schema override but unresolved type hints.
+        class _GoodArgsSchema:
+            @staticmethod
+            def model_json_schema() -> dict[str, Any]:
+                return {"type": "object", "properties": {"q": {"type": "string"}}}
+
+        def my_func(query: DoesNotExist) -> str:
+            ...
+
+        my_func.args_schema = _GoodArgsSchema()  # type: ignore[attr-defined]
+
+        # When derivation attempts to resolve type hints.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then input stays overridden while output falls back with warning.
+        assert schemas.input_schema == {"type": "object", "properties": {"q": {"type": "string"}}}
+        assert schemas.output_schema == {}
+        assert "failed to resolve type hints" in caplog.text
+
+    def test_signature_inspection_failure_uses_input_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given inspect.signature raises while deriving input fields.
+        def _broken_signature(_func: Any) -> Any:
+            raise RuntimeError("signature failed")
+
+        def my_func(query: str) -> str:
+            ...
+
+        monkeypatch.setattr(schema_derivation.inspect, "signature", _broken_signature)
+
+        # When schemas are derived.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then input falls back to permissive schema and warning is emitted.
+        assert schemas.input_schema == {"type": "object", "additionalProperties": True}
+        assert "failed to inspect function signature" in caplog.text
+
+    def test_self_cls_varargs_and_kwargs_are_excluded_from_input_schema(self) -> None:
+        # Given a callable containing self/cls placeholders and variadic parameters.
+        def my_func(self, cls, query: str, *args: Any, **kwargs: Any) -> str:  # noqa: ANN001
+            ...
+
+        # When schemas are derived.
+        schemas = derive_schemas(my_func)
+
+        # Then only concrete named fields remain in the inferred input schema.
+        assert set(schemas.input_schema["properties"]) == {"query"}
+        assert schemas.input_schema.get("required") == ["query"]
+
+    def test_input_model_creation_failure_uses_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given dynamic input model creation raises unexpectedly.
+        def _broken_create_model(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("create_model failed")
+
+        def my_func(query: str) -> str:
+            ...
+
+        monkeypatch.setattr(schema_derivation, "create_model", _broken_create_model)
+
+        # When schemas are derived.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then derivation emits warning and returns permissive input fallback.
+        assert schemas.input_schema == {"type": "object", "additionalProperties": True}
+        assert "failed to infer schema from signature" in caplog.text
+
+    def test_input_non_dict_schema_from_model_uses_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given create_model returns a model whose model_json_schema() is non-dict.
+        class _NonDictModel:
+            @staticmethod
+            def model_json_schema() -> list[str]:
+                return ["not-a-dict"]
+
+        def _fake_create_model(*_args: Any, **_kwargs: Any) -> _NonDictModel:
+            return _NonDictModel()
+
+        def my_func(query: str) -> str:
+            ...
+
+        monkeypatch.setattr(schema_derivation, "create_model", _fake_create_model)
+
+        # When schemas are derived.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then input inference falls back after warning about non-dict schema output.
+        assert schemas.input_schema == {"type": "object", "additionalProperties": True}
+        assert "inferred input schema is not a dict" in caplog.text
+
+    def test_output_type_adapter_failure_uses_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given output TypeAdapter json_schema() raises unexpectedly.
+        class _BrokenTypeAdapter:
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            @staticmethod
+            def json_schema() -> dict[str, Any]:
+                raise RuntimeError("adapter failed")
+
+        def my_func(query: str) -> str:
+            ...
+
+        monkeypatch.setattr(schema_derivation, "TypeAdapter", _BrokenTypeAdapter)
+
+        # When schemas are derived.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then output derivation falls back and emits a warning.
+        assert schemas.output_schema == {}
+        assert "failed to infer output schema from return annotation" in caplog.text
+
+    def test_output_non_dict_schema_from_type_adapter_uses_fallback(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Given output TypeAdapter returns a non-dict JSON schema.
+        class _NonDictTypeAdapter:
+            def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            @staticmethod
+            def json_schema() -> list[str]:
+                return ["not-a-dict"]
+
+        def my_func(query: str) -> str:
+            ...
+
+        monkeypatch.setattr(schema_derivation, "TypeAdapter", _NonDictTypeAdapter)
+
+        # When schemas are derived.
+        with caplog.at_level(logging.WARNING):
+            schemas = derive_schemas(my_func)
+
+        # Then output derivation falls back after warning about non-dict schema output.
+        assert schemas.output_schema == {}
+        assert "inferred output schema is not a dict" in caplog.text
+
+
+class TestGoldenSchemas:
+    """Golden-style schema snapshots for representative function signatures."""
+
+    def test_golden_primitive_defaults_snapshot(self) -> None:
+        # Given a primitive+default function with stable module-level identity.
+        # When schemas are derived.
+        schemas = derive_schemas(golden_primitive_defaults)
+
+        # Then the full input/output schema snapshots match exactly.
+        assert schemas.input_schema == {
+            "properties": {
+                "query": {"title": "Query", "type": "string"},
+                "limit": {"default": 10, "title": "Limit", "type": "integer"},
+            },
+            "required": ["query"],
+            "title": "tests_test_schema_derivation_golden_primitive_defaults_Input",
+            "type": "object",
+        }
+        assert schemas.output_schema == {"type": "string"}
+
+
+class TestJsonSchemaContract:
+    """Validate derived schemas are valid JSON Schemas."""
+
+    def test_derived_schemas_are_json_schema_valid(self) -> None:
+        # Given a representative set of callables and their derived schemas.
+        jsonschema = pytest.importorskip("jsonschema")
+        draft202012_validator = jsonschema.Draft202012Validator
+
+        def enum_case(state: _OrderState) -> _OrderState:
+            ...
+
+        def tuple_case(pair: tuple[str, int]) -> tuple[str, int]:
+            ...
+
+        def dataclass_case(payload: _DataPayload) -> _DataPayload:
+            ...
+
+        async def async_case(message: str) -> str:
+            return message
+
+        cases = [
+            golden_primitive_defaults,
+            golden_optional_union,
+            golden_collections,
+            golden_nested_models,
+            enum_case,
+            tuple_case,
+            dataclass_case,
+            async_case,
+        ]
+
+        # When each callable is passed through schema derivation.
+        for func in cases:
+            schemas = derive_schemas(func)
+
+            # Then both input and output schemas pass Draft 2020-12 structural validation.
+            draft202012_validator.check_schema(schemas.input_schema)
+            draft202012_validator.check_schema(schemas.output_schema)
+
+    def test_golden_optional_union_snapshot(self) -> None:
+        # Given an optional-union input and explicit `None` return annotation.
+        # When schemas are derived.
+        schemas = derive_schemas(golden_optional_union)
+
+        # Then the full schema snapshots preserve nullable input and null output types.
+        assert schemas.input_schema == {
+            "properties": {
+                "conversation_id": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                    "default": None,
+                    "title": "Conversation Id",
+                }
+            },
+            "title": "tests_test_schema_derivation_golden_optional_union_Input",
+            "type": "object",
+        }
+        assert schemas.output_schema == {"type": "null"}
+
+    def test_golden_collection_snapshot(self) -> None:
+        # Given list/dict input collections and a list return annotation.
+        # When schemas are derived.
+        schemas = derive_schemas(golden_collections)
+
+        # Then the full schema snapshots preserve array/object structures exactly.
+        assert schemas.input_schema == {
+            "properties": {
+                "tags": {"items": {"type": "string"}, "title": "Tags", "type": "array"},
+                "metadata": {
+                    "additionalProperties": {"type": "integer"},
+                    "title": "Metadata",
+                    "type": "object",
+                },
+            },
+            "required": ["tags", "metadata"],
+            "title": "tests_test_schema_derivation_golden_collections_Input",
+            "type": "object",
+        }
+        assert schemas.output_schema == {"items": {"type": "string"}, "type": "array"}
+
+    def test_golden_nested_pydantic_model_snapshot(self) -> None:
+        # Given nested Pydantic input/output models.
+        # When schemas are derived.
+        schemas = derive_schemas(golden_nested_models)
+
+        # Then `$defs` and `$ref` are preserved in the exact schema snapshot.
+        assert schemas.input_schema == {
+            "$defs": {
+                "_InputModel": {
+                    "properties": {
+                        "query": {"title": "Query", "type": "string"},
+                        "limit": {"default": 5, "title": "Limit", "type": "integer"},
+                    },
+                    "required": ["query"],
+                    "title": "_InputModel",
+                    "type": "object",
+                }
+            },
+            "properties": {"payload": {"$ref": "#/$defs/_InputModel"}},
+            "required": ["payload"],
+            "title": "tests_test_schema_derivation_golden_nested_models_Input",
+            "type": "object",
+        }
+        assert schemas.output_schema == {
+            "properties": {"answer": {"title": "Answer", "type": "string"}},
+            "required": ["answer"],
+            "title": "_OutputModel",
+            "type": "object",
+        }
+
+    def test_golden_args_schema_override_snapshot(self) -> None:
+        # Given a callable with an explicit framework-style args_schema override.
+        class _GoldenArgsSchema:
+            @staticmethod
+            def model_json_schema() -> dict[str, Any]:
+                return {
+                    "type": "object",
+                    "properties": {
+                        "q": {"type": "string"},
+                        "limit": {"type": "integer", "default": 5},
+                    },
+                    "required": ["q"],
+                }
+
+        def golden_args_schema_override(query: str) -> str:
+            raise NotImplementedError
+
+        golden_args_schema_override.args_schema = _GoldenArgsSchema()  # type: ignore[attr-defined]
+
+        # When schemas are derived.
+        schemas = derive_schemas(golden_args_schema_override)
+
+        # Then the full input snapshot is sourced from args_schema and output remains inferred.
+        assert schemas.input_schema == {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string"},
+                "limit": {"type": "integer", "default": 5},
+            },
+            "required": ["q"],
+        }
+        assert schemas.output_schema == {"type": "string"}
