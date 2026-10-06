@@ -28,3 +28,34 @@ export type PaginationInfo = {
   /**
    * Total number of items
    */
+  total: number;
+};
+
+/** @internal */
+export const PaginationInfo$inboundSchema: z.ZodMiniType<
+  PaginationInfo,
+  unknown
+> = z.pipe(
+  z.object({
+    has_more: types.boolean(),
+    limit: types.number(),
+    next_cursor: z.optional(z.nullable(types.string())),
+    total: types.number(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "has_more": "hasMore",
+      "next_cursor": "nextCursor",
+    });
+  }),
+);
+
+export function paginationInfoFromJSON(
+  jsonString: string,
+): SafeParseResult<PaginationInfo, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => PaginationInfo$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'PaginationInfo' from JSON`,
+  );
+}
