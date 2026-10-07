@@ -19,3 +19,24 @@ export type RemoveAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest$Outb
 export const RemoveAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest$outboundSchema:
   z.ZodMiniType<
     RemoveAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest$Outbound,
+    RemoveAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+      });
+    }),
+  );
+
+export function removeAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequestToJSON(
+  removeAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest:
+    RemoveAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest,
+): string {
+  return JSON.stringify(
+    RemoveAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest$outboundSchema
+      .parse(removeAllAgentPoliciesApiV1AgentsAgentNamePoliciesDeleteRequest),
+  );
+}
