@@ -59,3 +59,250 @@ DEMO_CONTROLS = [
             "description": "Blocks common prompt injection attempts (path: input)",
             "enabled": True,
             "execution": "server",
+            "scope": {"step_types": ["llm"], "stages": ["pre"]},
+            "condition": {
+                "selector": {"path": "input"},
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        "pattern": r"(?i)(ignore.{0,20}(previous|prior|above).{0,20}instructions|you are now|system:|forget everything|disregard)"
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        },
+    },
+    {
+        "name": "block-credit-card",
+        "description": "Blocks messages containing credit card numbers (path: input)",
+        "definition": {
+            "description": "Blocks messages containing credit card numbers (path: input)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {"step_types": ["llm"], "stages": ["pre"]},
+            "condition": {
+                "selector": {"path": "input"},
+                "evaluator": {
+                    "name": "regex",
+                    "config": {"pattern": r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"},
+                },
+            },
+            "action": {"decision": "deny"},
+        },
+    },
+    # ==========================================================================
+    # TOOL CALL CONTROLS - using scope.step_names (exact match)
+    # ==========================================================================
+    {
+        "name": "block-sql-injection-customer-lookup",
+        "description": "Blocks SQL injection in customer lookup (scope.step_names: exact match)",
+        "definition": {
+            "description": "Blocks SQL injection in customer lookup (scope.step_names: exact match)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["lookup_customer"],
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "input.query",
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        "pattern": r"(?i)(select|insert|update|delete|drop|union|--|;)"
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        },
+    },
+    {
+        "name": "observe-ticket-creation",
+        "description": "Observes all ticket creation for audit (scope.step_names: exact match)",
+        "definition": {
+            "description": "Observes all ticket creation for audit (scope.step_names: exact match)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["create_ticket"],
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "*",  # Observe entire payload
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {"pattern": r".*"},  # Always matches
+                },
+            },
+            "action": {"decision": "observe"},
+        },
+    },
+    # ==========================================================================
+    # TOOL CALL CONTROLS - using scope.step_name_regex (pattern match)
+    # ==========================================================================
+    {
+        "name": "block-profanity-in-search",
+        "description": "Blocks profanity in any search/lookup tool (scope.step_name_regex: pattern)",
+        "definition": {
+            "description": "Blocks profanity in any search/lookup tool (scope.step_name_regex: pattern)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_name_regex": r"(search|lookup)",
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "input.query",
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        # Simple profanity pattern for demo
+                        "pattern": r"(?i)\b(badword|offensive|inappropriate)\b"
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        },
+    },
+    {
+        "name": "observe-high-priority-ticket",
+        "description": "Observes high priority tickets (path: arguments.priority)",
+        "definition": {
+            "description": "Observes high priority tickets (path: input.priority)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_name_regex": r".*ticket.*",
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "input.priority",
+                },
+                "evaluator": {
+                    "name": "list",
+                    "config": {
+                        "values": ["high", "critical", "urgent"],
+                        "logic": "any",
+                        "match_on": "match",
+                        "match_mode": "exact",
+                        "case_sensitive": False,
+                    },
+                },
+            },
+            "action": {"decision": "observe"},
+        },
+    },
+    # ==========================================================================
+    # TOOL CALL CONTROLS - using 'path' with nested arguments
+    # ==========================================================================
+    {
+        "name": "observe-pii-in-ticket-description",
+        "description": "Observes PII in ticket descriptions (path: arguments.description)",
+        "definition": {
+            "description": "Observes PII in ticket descriptions (path: input.description)",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["create_ticket"],
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "input.description",
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        # Email pattern
+                        "pattern": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+                    },
+                },
+            },
+            "action": {"decision": "observe"},
+        },
+    },
+]
+
+
+async def setup_demo(quiet: bool = False):
+    """Set up the demo agent with controls."""
+    agent_name = AGENT_NAME
+
+    async with AgentControlClient(base_url=SERVER_URL, timeout=30.0) as client:
+        # Check server health
+        try:
+            await client.health_check()
+        except Exception as e:
+            print(f"Error: Cannot connect to server at {SERVER_URL}")
+            print(f"  {e}")
+            print("\nMake sure the server is running: ./demo.sh start")
+            return False
+
+        # Register the agent
+        try:
+            agent = Agent(
+                agent_name=agent_name,
+                agent_description=AGENT_DESCRIPTION,
+            )
+            result = await agents.register_agent(client, agent, steps=DEMO_STEPS)
+            status = "Created" if result.get("created") else "Updated"
+            print(f"  {status} agent: {AGENT_NAME}")
+        except Exception as e:
+            print(f"  Error registering agent: {e}")
+            return False
+
+        # Create controls and directly associate them to the agent
+        controls_created = 0
+        for control_spec in DEMO_CONTROLS:
+            control_name = control_spec["name"]
+            definition = control_spec["definition"]
+
+            try:
+                control_result = await controls.create_control(
+                    client, name=control_name, data=definition
+                )
+                control_id = control_result["control_id"]
+                if control_result.get("configured"):
+                    controls_created += 1
+            except Exception as e:
+                if "409" in str(e):
+                    control_list = await controls.list_controls(client, name=control_name, limit=1)
+                    existing = control_list.get("controls", [])
+                    if not existing:
+                        continue
+                    control_id = existing[0]["id"]
+                    await controls.set_control_data(client, control_id, definition)
+                else:
+                    print(f"  Error with control '{control_name}': {e}")
+                    continue
+
+            try:
+                await agents.add_agent_control(client, agent_name, control_id)
+            except Exception as e:
+                if "409" in str(e) or "already" in str(e).lower():
+                    continue
+                print(f"  Error adding control '{control_name}' to agent: {e}")
+                continue
+
+        if controls_created > 0:
+            print(f"  Created {controls_created} control(s)")
+        print(f"  Agent has {len(DEMO_CONTROLS)} demo control(s) configured")
+
+        return True
+
+
+if __name__ == "__main__":
+    success = asyncio.run(setup_demo())
+    exit(0 if success else 1)
