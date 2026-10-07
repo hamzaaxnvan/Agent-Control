@@ -35,3 +35,40 @@ export type ConditionNodeInput = {
    */
   or?: Array<ConditionNodeInput> | null | undefined;
   /**
+   * Leaf selector. Must be provided together with evaluator.
+   */
+  selector?: ControlSelector | null | undefined;
+};
+
+/** @internal */
+export type ConditionNodeInput$Outbound = {
+  and?: Array<ConditionNodeInput$Outbound> | null | undefined;
+  evaluator?: EvaluatorSpec$Outbound | null | undefined;
+  not?: ConditionNodeInput$Outbound | null | undefined;
+  or?: Array<ConditionNodeInput$Outbound> | null | undefined;
+  selector?: ControlSelector$Outbound | null | undefined;
+};
+
+/** @internal */
+export const ConditionNodeInput$outboundSchema: z.ZodMiniType<
+  ConditionNodeInput$Outbound,
+  ConditionNodeInput
+> = z.object({
+  and: z.optional(
+    z.nullable(z.array(z.lazy(() => ConditionNodeInput$outboundSchema))),
+  ),
+  evaluator: z.optional(z.nullable(EvaluatorSpec$outboundSchema)),
+  not: z.optional(z.nullable(z.lazy(() => ConditionNodeInput$outboundSchema))),
+  or: z.optional(
+    z.nullable(z.array(z.lazy(() => ConditionNodeInput$outboundSchema))),
+  ),
+  selector: z.optional(z.nullable(ControlSelector$outboundSchema)),
+});
+
+export function conditionNodeInputToJSON(
+  conditionNodeInput: ConditionNodeInput,
+): string {
+  return JSON.stringify(
+    ConditionNodeInput$outboundSchema.parse(conditionNodeInput),
+  );
+}
