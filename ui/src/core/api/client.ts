@@ -86,3 +86,181 @@ export const authApi = {
     const data = (await res.json()) as LoginResponse;
     return { status: res.status, data };
   },
+
+  logout: async (): Promise<void> => {
+    await fetch(`${authBaseUrl}/api/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  },
+};
+
+// ------------------------------------------------------------------
+// Typed API methods
+// ------------------------------------------------------------------
+
+export const api = {
+  agents: {
+    list: (params?: ListAgentsQueryParams) =>
+      apiClient.GET('/api/v1/agents', {
+        params: { query: params },
+      }),
+    get: (agentName: GetAgentPathParams['agent_name']) =>
+      apiClient.GET('/api/v1/agents/{agent_name}', {
+        params: { path: { agent_name: agentName } },
+      }),
+    initAgent: (data: InitAgentRequestBody) =>
+      apiClient.POST('/api/v1/agents/initAgent', { body: data }),
+    getControls: (agentName: GetAgentControlsPathParams['agent_name']) =>
+      apiClient.GET('/api/v1/agents/{agent_name}/controls', {
+        params: { path: { agent_name: agentName } },
+      }),
+    getPolicies: (agentName: GetAgentPathParams['agent_name']) =>
+      apiClient.GET('/api/v1/agents/{agent_name}/policies', {
+        params: { path: { agent_name: agentName } },
+      }),
+    addPolicy: (
+      agentName: GetAgentPathParams['agent_name'],
+      policyId: number
+    ) =>
+      apiClient.POST('/api/v1/agents/{agent_name}/policies/{policy_id}', {
+        params: { path: { agent_name: agentName, policy_id: policyId } },
+      }),
+    removePolicy: (
+      agentName: GetAgentPathParams['agent_name'],
+      policyId: number
+    ) =>
+      apiClient.DELETE('/api/v1/agents/{agent_name}/policies/{policy_id}', {
+        params: { path: { agent_name: agentName, policy_id: policyId } },
+      }),
+    clearPolicies: (agentName: GetAgentPathParams['agent_name']) =>
+      apiClient.DELETE('/api/v1/agents/{agent_name}/policies', {
+        params: { path: { agent_name: agentName } },
+      }),
+    addControl: (
+      agentName: GetAgentPathParams['agent_name'],
+      controlId: number
+    ) =>
+      apiClient.POST('/api/v1/agents/{agent_name}/controls/{control_id}', {
+        params: { path: { agent_name: agentName, control_id: controlId } },
+      }),
+    removeControl: (
+      agentName: GetAgentPathParams['agent_name'],
+      controlId: number
+    ) =>
+      apiClient.DELETE('/api/v1/agents/{agent_name}/controls/{control_id}', {
+        params: { path: { agent_name: agentName, control_id: controlId } },
+      }),
+  },
+  evaluators: {
+    list: () => apiClient.GET('/api/v1/evaluators'),
+  },
+  controls: {
+    list: (params?: {
+      cursor?: number;
+      limit?: number;
+      name?: string;
+      enabled?: boolean;
+      step_type?: string;
+      stage?: string;
+      execution?: string;
+      tag?: string;
+    }) =>
+      apiClient.GET('/api/v1/controls', {
+        params: params ? { query: params } : undefined,
+      }),
+    create: (data: CreateControlRequest) =>
+      apiClient.PUT('/api/v1/controls', { body: data }),
+    getSchema: () =>
+      apiClient.GET('/api/v1/controls/schema') as Promise<{
+        data?: GetControlSchemaResponse;
+        error?: unknown;
+        response: Response;
+      }>,
+    getData: (controlId: number) =>
+      apiClient.GET('/api/v1/controls/{control_id}/data', {
+        params: { path: { control_id: controlId } },
+      }),
+    updateMetadata: (controlId: number, data: PatchControlRequest) =>
+      apiClient.PATCH('/api/v1/controls/{control_id}', {
+        params: { path: { control_id: controlId } },
+        body: data,
+      }),
+    setData: (controlId: number, data: SetControlDataRequest) =>
+      apiClient.PUT('/api/v1/controls/{control_id}/data', {
+        params: { path: { control_id: controlId } },
+        body: data,
+      }),
+    validateData: ({
+      data,
+      signal,
+    }: {
+      data: ValidateControlDataRequest['data'];
+      signal?: AbortSignal;
+    }) =>
+      apiClient.POST('/api/v1/controls/validate', {
+        body: { data },
+        signal,
+      }) as Promise<{
+        data?: ValidateControlDataResponse;
+        error?: unknown;
+        response: Response;
+      }>,
+    delete: (controlId: number, options?: { force?: boolean }) =>
+      apiClient.DELETE('/api/v1/controls/{control_id}', {
+        params: {
+          path: { control_id: controlId },
+          query:
+            options?.force !== undefined ? { force: options.force } : undefined,
+        },
+      }),
+  },
+  controlTemplates: {
+    render: async (data: RenderControlTemplateRequest) => {
+      const res = await fetch(`${API_URL}/api/v1/control-templates/render`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const body = await res.json();
+      if (!res.ok) return { data: undefined, error: body, response: res };
+      return {
+        data: body as RenderControlTemplateResponse,
+        error: undefined,
+        response: res,
+      };
+    },
+  },
+  policies: {
+    create: (name: string) =>
+      apiClient.PUT('/api/v1/policies', { body: { name } }),
+    addControl: (policyId: number, controlId: number) =>
+      apiClient.POST('/api/v1/policies/{policy_id}/controls/{control_id}', {
+        params: { path: { policy_id: policyId, control_id: controlId } },
+      }),
+    removeControl: (policyId: number, controlId: number) =>
+      apiClient.DELETE('/api/v1/policies/{policy_id}/controls/{control_id}', {
+        params: { path: { policy_id: policyId, control_id: controlId } },
+      }),
+  },
+  observability: {
+    getStats: (params: {
+      agent_name: string;
+      time_range?:
+        | '1m'
+        | '5m'
+        | '15m'
+        | '1h'
+        | '24h'
+        | '7d'
+        | '30d'
+        | '180d'
+        | '365d';
+      include_timeseries?: boolean;
+    }) =>
+      apiClient.GET('/api/v1/observability/stats', {
+        params: { query: params },
+      }),
+  },
+};
