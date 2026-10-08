@@ -24,3 +24,56 @@ export type SetControlDataRequestData =
 
 /**
  * Request to update control configuration data.
+ */
+export type SetControlDataRequest = {
+  /**
+   * Control configuration data (replaces existing)
+   */
+  data: ControlDefinitionInput | TemplateControlInput;
+};
+
+/** @internal */
+export type SetControlDataRequestData$Outbound =
+  | ControlDefinitionInput$Outbound
+  | TemplateControlInput$Outbound;
+
+/** @internal */
+export const SetControlDataRequestData$outboundSchema: z.ZodMiniType<
+  SetControlDataRequestData$Outbound,
+  SetControlDataRequestData
+> = smartUnion([
+  ControlDefinitionInput$outboundSchema,
+  TemplateControlInput$outboundSchema,
+]);
+
+export function setControlDataRequestDataToJSON(
+  setControlDataRequestData: SetControlDataRequestData,
+): string {
+  return JSON.stringify(
+    SetControlDataRequestData$outboundSchema.parse(setControlDataRequestData),
+  );
+}
+
+/** @internal */
+export type SetControlDataRequest$Outbound = {
+  data: ControlDefinitionInput$Outbound | TemplateControlInput$Outbound;
+};
+
+/** @internal */
+export const SetControlDataRequest$outboundSchema: z.ZodMiniType<
+  SetControlDataRequest$Outbound,
+  SetControlDataRequest
+> = z.object({
+  data: smartUnion([
+    ControlDefinitionInput$outboundSchema,
+    TemplateControlInput$outboundSchema,
+  ]),
+});
+
+export function setControlDataRequestToJSON(
+  setControlDataRequest: SetControlDataRequest,
+): string {
+  return JSON.stringify(
+    SetControlDataRequest$outboundSchema.parse(setControlDataRequest),
+  );
+}
