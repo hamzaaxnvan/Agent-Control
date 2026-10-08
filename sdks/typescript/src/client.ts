@@ -48,3 +48,53 @@ export class AgentControlClient {
     return this.sdk !== null;
   }
 
+  get config(): AgentControlInitOptions | null {
+    return this.options;
+  }
+
+  get agents(): AgentsApi {
+    return this.requireSDK().agents;
+  }
+
+  get auth(): AuthApi {
+    return this.requireSDK().auth;
+  }
+
+  get controlBindings(): ControlBindingsApi {
+    return this.requireSDK().controlBindings;
+  }
+
+  get controls(): ControlsApi {
+    return this.requireSDK().controls;
+  }
+
+  get evaluation(): EvaluationApi {
+    return this.requireSDK().evaluation;
+  }
+
+  get evaluators(): EvaluatorsApi {
+    return this.requireSDK().evaluators;
+  }
+
+  get observability(): ObservabilityApi {
+    return this.requireSDK().observability;
+  }
+
+  get policies(): PoliciesApi {
+    return this.requireSDK().policies;
+  }
+
+  get system(): SystemApi {
+    return this.requireSDK().system;
+  }
+
+  private requireSDK(): AgentControlSDK {
+    if (!this.sdk) {
+      throw new Error(
+        "AgentControlClient is not initialized. Call init(...) before making API calls.",
+      );
+    }
+
+    return this.sdk;
+  }
+}
