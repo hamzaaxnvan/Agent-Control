@@ -116,3 +116,122 @@ class JSONEvaluatorConfig(EvaluatorConfig):
         for path, type_name in v.items():
             if type_name not in valid_types:
                 raise ValueError(f"Invalid type '{type_name}' for field '{path}'")
+        return v
+
+    @field_validator("field_patterns")
+    @classmethod
+    def validate_patterns(
+        cls, v: dict[str, str | dict[str, Any]] | None
+    ) -> dict[str, str | dict[str, Any]] | None:
+        """Validate all regex patterns compile."""
+        if v is None:
+            return v
+
+        for path, pattern_config in v.items():
+            # Support both string (simple) and dict (with flags) formats
+            if isinstance(pattern_config, str):
+                pattern = pattern_config
+                flags = None
+            elif isinstance(pattern_config, dict):
+                if "pattern" not in pattern_config:
+                    raise ValueError(
+                        f"Pattern config for field '{path}' must have 'pattern' key"
+                    )
+                pattern = pattern_config["pattern"]
+                flags = pattern_config.get("flags")
+
+                # Validate flags if provided
+                if flags is not None:
+                    if not isinstance(flags, list):
+                        raise ValueError(f"Flags for field '{path}' must be a list")
+                    valid_flags = {"IGNORECASE"}
+                    for flag in flags:
+                        if flag not in valid_flags:
+                            raise ValueError(
+                                f"Invalid flag '{flag}' for field '{path}'. "
+                                f"Valid flags: {valid_flags}"
+                            )
+            else:
+                raise ValueError(
+                    f"Pattern for field '{path}' must be string or dict"
+                )
+
+            # Validate pattern compiles
+            try:
+                re2.compile(pattern)
+            except re2.error as e:
+                raise ValueError(f"Invalid regex for field '{path}': {e}") from e
+
+        return v
+
+    @field_validator("field_constraints")
+    @classmethod
+    def validate_constraints(
+        cls, v: dict[str, dict[str, Any]] | None
+    ) -> dict[str, dict[str, Any]] | None:
+        """Validate constraint definitions."""
+        if v is None:
+            return v
+
+        for field_path, constraints in v.items():
+            # Must have at least one constraint type
+            valid_keys = {"type", "min", "max", "enum", "min_length", "max_length"}
+            if not any(k in constraints for k in valid_keys):
+                raise ValueError(
+                    f"Constraint for '{field_path}' must specify at least one constraint"
+                )
+
+            # Validate numeric constraints
+            if "min" in constraints or "max" in constraints:
+                if "type" in constraints and constraints["type"] not in (
+                    "number",
+                    "integer",
+                ):
+                    raise ValueError(
+                        f"min/max constraints require type 'number' or 'integer' for '{field_path}'"
+                    )
+
+            # Validate enum
+            if "enum" in constraints:
+                if (
+                    not isinstance(constraints["enum"], list)
+                    or len(constraints["enum"]) == 0
+                ):
+                    raise ValueError(
+                        f"enum constraint must be a non-empty list for '{field_path}'"
+                    )
+
+            # Validate string length
+            if "min_length" in constraints or "max_length" in constraints:
+                if "min_length" in constraints and not isinstance(
+                    constraints["min_length"], int
+                ):
+                    raise ValueError(
+                        f"min_length must be an integer for '{field_path}'"
+                    )
+                if "max_length" in constraints and not isinstance(
+                    constraints["max_length"], int
+                ):
+                    raise ValueError(
+                        f"max_length must be an integer for '{field_path}'"
+                    )
+
+        return v
+
+    @model_validator(mode="after")
+    def validate_has_checks(self) -> "JSONEvaluatorConfig":
+        """Ensure at least one validation check is configured."""
+        if not any(
+            [
+                self.json_schema,
+                self.field_types,
+                self.required_fields,
+                self.field_constraints,
+                self.field_patterns,
+            ]
+        ):
+            raise ValueError(
+                "At least one validation check must be configured: "
+                "json_schema, field_types, required_fields, field_constraints, or field_patterns"
+            )
+        return self
