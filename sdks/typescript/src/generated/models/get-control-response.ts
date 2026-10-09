@@ -22,3 +22,77 @@ import {
  * Control configuration data. A ControlDefinition for raw/rendered controls or an UnrenderedTemplateControl for unrendered templates.
  */
 export type GetControlResponseData =
+  | ControlDefinitionOutput
+  | UnrenderedTemplateControl;
+
+/**
+ * Response containing control details.
+ */
+export type GetControlResponse = {
+  /**
+   * Source control ID when this control is a clone.
+   */
+  clonedFromControlId?: number | null | undefined;
+  /**
+   * Control configuration data. A ControlDefinition for raw/rendered controls or an UnrenderedTemplateControl for unrendered templates.
+   */
+  data: ControlDefinitionOutput | UnrenderedTemplateControl;
+  /**
+   * Control ID
+   */
+  id: number;
+  /**
+   * Control name
+   */
+  name: string;
+};
+
+/** @internal */
+export const GetControlResponseData$inboundSchema: z.ZodMiniType<
+  GetControlResponseData,
+  unknown
+> = smartUnion([
+  ControlDefinitionOutput$inboundSchema,
+  UnrenderedTemplateControl$inboundSchema,
+]);
+
+export function getControlResponseDataFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlResponseData, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlResponseData$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlResponseData' from JSON`,
+  );
+}
+
+/** @internal */
+export const GetControlResponse$inboundSchema: z.ZodMiniType<
+  GetControlResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    cloned_from_control_id: z.optional(z.nullable(types.number())),
+    data: smartUnion([
+      ControlDefinitionOutput$inboundSchema,
+      UnrenderedTemplateControl$inboundSchema,
+    ]),
+    id: types.number(),
+    name: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "cloned_from_control_id": "clonedFromControlId",
+    });
+  }),
+);
+
+export function getControlResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlResponse' from JSON`,
+  );
+}

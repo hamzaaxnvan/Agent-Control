@@ -33,3 +33,39 @@ def create_sql_tool():
     """Build the SQL query tool with @control protection."""
 
     async def _run_sql_query(query: str) -> str:
+        """Execute a SQL query against the database (protected)."""
+        # Simulate: if query touches customers_full, return PII results
+        if "customers_full" in query.lower():
+            return SIMULATED_RESULTS["pii"]
+        return SIMULATED_RESULTS["safe"]
+
+    _run_sql_query.name = "run_sql_query"  # type: ignore[attr-defined]
+    _run_sql_query.tool_name = "run_sql_query"  # type: ignore[attr-defined]
+    controlled_fn = control()(_run_sql_query)
+
+    @tool("run_sql_query")
+    def run_sql_query_tool(query: str) -> str:
+        """Run a SQL query against the company database.
+
+        Args:
+            query: The SQL query to execute
+        """
+        if isinstance(query, dict):
+            query = query.get("query", str(query))
+
+        print(f"\n  [SQL TOOL] Query: {query[:80]}...")
+
+        try:
+            result = asyncio.run(controlled_fn(query=query))
+            print(f"  [SQL TOOL] Query executed successfully")
+            return result
+
+        except ControlViolationError as e:
+            print(f"  [SQL TOOL] BLOCKED by {e.control_name}: {e.message[:100]}")
+            return f"QUERY BLOCKED: {e.message}"
+
+        except Exception as e:
+            print(f"  [SQL TOOL] Error: {e}")
+            return f"Query error: {e}"
+
+    return run_sql_query_tool
