@@ -34,3 +34,13 @@ export const SetAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest$outboun
       });
     }),
   );
+
+export function setAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequestToJSON(
+  setAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest:
+    SetAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest,
+): string {
+  return JSON.stringify(
+    SetAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest$outboundSchema
+      .parse(setAgentPolicyApiV1AgentsAgentNamePolicyPolicyIdPostRequest),
+  );
+}
