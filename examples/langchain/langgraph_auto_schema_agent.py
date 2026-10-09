@@ -139,3 +139,144 @@ async def lookup_order_status(order_id: str, include_history: bool = False) -> O
         "order_id": result.order_id,
         "status": result.status,
         "estimated_delivery_days": result.estimated_delivery_days,
+        "history": result.history,
+    }
+
+
+@tool("issue_refund")
+async def issue_refund(
+    order_id: str,
+    reason: Literal["damaged", "late", "cancelled"],
+    requested_amount: float | None = None,
+) -> RefundDecisionPayload:
+    """LangGraph tool wrapper for refund decisions."""
+    result = await _issue_refund_checked(
+        order_id=order_id,
+        reason=reason,
+        requested_amount=requested_amount,
+    )
+    return {
+        "order_id": result.order_id,
+        "reason": result.reason,
+        "approved": result.approved,
+        "approved_amount": result.approved_amount,
+    }
+
+
+def _build_graph():
+    """Build a simple deterministic LangGraph flow with ToolNode."""
+    tool_node = ToolNode([lookup_order_status, issue_refund])
+
+    def planner(state: AgentState) -> dict[str, list[AIMessage]]:
+        last_message = state["messages"][-1]
+        user_text = str(last_message.content)
+        lower = user_text.lower()
+        order_id = _parse_order_id(user_text)
+
+        if "refund" in lower:
+            reason: Literal["damaged", "late", "cancelled"] = "late"
+            if "damaged" in lower:
+                reason = "damaged"
+            elif "cancel" in lower:
+                reason = "cancelled"
+
+            requested_amount: float | None = 49.0 if "49" in lower else None
+            tool_call = {
+                "name": "issue_refund",
+                "args": {
+                    "order_id": order_id,
+                    "reason": reason,
+                    "requested_amount": requested_amount,
+                },
+                "id": "call-refund-1",
+                "type": "tool_call",
+            }
+        else:
+            include_history = "history" in lower or "timeline" in lower
+            tool_call = {
+                "name": "lookup_order_status",
+                "args": {
+                    "order_id": order_id,
+                    "include_history": include_history,
+                },
+                "id": "call-status-1",
+                "type": "tool_call",
+            }
+
+        return {"messages": [AIMessage(content="", tool_calls=[tool_call])]}  # type: ignore[arg-type]
+
+    def finalize(state: AgentState) -> dict[str, list[AIMessage]]:
+        tool_message = next(
+            message for message in reversed(state["messages"]) if isinstance(message, ToolMessage)
+        )
+        return {
+            "messages": [
+                AIMessage(content=f"Tool `{tool_message.name}` returned: {tool_message.content}")
+            ]
+        }
+
+    graph = StateGraph(AgentState)
+    graph.add_node("planner", planner)
+    graph.add_node("tools", tool_node)
+    graph.add_node("finalize", finalize)
+
+    graph.add_edge(START, "planner")
+    graph.add_edge("planner", "tools")
+    graph.add_edge("tools", "finalize")
+    graph.add_edge("finalize", END)
+    return graph.compile()
+
+
+def _print_auto_derived_steps() -> None:
+    """Show the step schemas auto-derived from @control-decorated functions."""
+    print("\nAuto-derived step schemas from @control():")
+    for step in get_registered_steps():
+        print("-" * 80)
+        print(json.dumps(step, indent=2, sort_keys=True))
+
+
+async def main() -> None:
+    """Run the demo end-to-end."""
+    try:
+        await run_demo_session()
+    finally:
+        await agent_control.ashutdown()
+
+
+async def run_demo_session() -> None:
+    """Initialize the SDK and run the LangGraph scenarios."""
+    print("Initializing Agent Control (no explicit steps passed)...")
+    agent_control.init(
+        agent_name=AGENT_NAME,
+        agent_description=AGENT_DESCRIPTION,
+        server_url=os.getenv("AGENT_CONTROL_URL"),
+    )
+
+    _print_auto_derived_steps()
+
+    app = _build_graph()
+    scenarios = [
+        "Track order 1001 and include its history",
+        "Issue a refund for order 2048 because it was late (49 dollars)",
+    ]
+
+    print("\nRunning LangGraph scenarios...")
+    for prompt in scenarios:
+        print("=" * 80)
+        print(f"User: {prompt}")
+        try:
+            result = await app.ainvoke({"messages": [HumanMessage(content=prompt)]})
+            final_message = result["messages"][-1]
+            print(f"Assistant: {final_message.content}")
+        except ControlViolationError as exc:
+            print(f"Assistant: Request blocked by control rules: {exc.message}")
+        except RuntimeError as exc:
+            print(
+                "Assistant: Control evaluation is unavailable. "
+                f"Start the Agent Control server and retry. Details: {exc}"
+            )
+            break
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
