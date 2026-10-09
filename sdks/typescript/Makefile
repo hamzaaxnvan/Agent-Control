@@ -24,3 +24,56 @@ install:
 install-no-frozen:
 	pnpm install
 
+speakeasy-install:
+	./scripts/install-speakeasy.sh
+
+generate: speakeasy-install
+	./scripts/generate-sdk.sh
+
+overlay-test:
+	cd ../.. && uv run --package agent-control-server pytest \
+		sdks/typescript/tests/test_generate_method_names_overlay.py \
+		sdks/typescript/tests/test_normalize_generated_sdk.py
+
+name-check:
+	@if command -v rg >/dev/null 2>&1; then \
+		MATCH_CMD="rg -n --no-heading"; \
+	else \
+		MATCH_CMD="grep -REn"; \
+	fi; \
+	if eval "$$MATCH_CMD 'async\\s+[A-Za-z0-9]+(ApiV[0-9]+|Get|Post|Put|Patch|Delete)\\b' src/generated/sdk"; then \
+		echo "Found verbose generated method names. Update generate-method-names-overlay.py rules."; \
+		exit 1; \
+	fi
+
+generate-check: generate name-check
+	git diff --exit-code -- src/generated overlays/method-names.overlay.yaml
+
+lint:
+	pnpm run lint
+
+typecheck:
+	pnpm run typecheck
+
+test:
+	pnpm run test
+
+build:
+	pnpm run build
+
+release-check:
+	$(MAKE) overlay-test
+	$(MAKE) -C ../.. sdk-ts-generate-check
+	$(MAKE) lint
+	$(MAKE) typecheck
+	$(MAKE) test
+	$(MAKE) build
+
+publish-dry-run: release-check
+	npm publish --dry-run
+
+publish: release-check
+	npm publish --provenance
+
+clean:
+	rm -rf dist .speakeasy/tmp-generated
