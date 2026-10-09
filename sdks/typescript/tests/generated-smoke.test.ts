@@ -12,3 +12,59 @@ describe("generated client layout", () => {
     expect(existsSync(generatedIndex)).toBe(true);
   });
 
+  it("generated entrypoint export specifiers map to generated sources", () => {
+    const generatedRoot = path.resolve(process.cwd(), "src/generated");
+    const generatedIndex = path.resolve(generatedRoot, "index.ts");
+    const source = readFileSync(generatedIndex, "utf8");
+
+    const exportSpecifiers = [...source.matchAll(/from\s+"(\.[^"]+)";/g)].map((match) => match[1]);
+    expect(exportSpecifiers.length).toBeGreaterThan(0);
+
+    for (const specifier of exportSpecifiers) {
+      const tsSourcePath = path.resolve(generatedRoot, specifier.replace(/\.js$/, ".ts"));
+      if (!existsSync(tsSourcePath)) {
+        throw new Error(`Generated source missing for export specifier '${specifier}': ${tsSourcePath}`);
+      }
+    }
+  });
+
+  it("serializes structured Step scorer context", () => {
+    const serialized = stepToJSON({
+      type: "llm",
+      name: "answer",
+      input: "question",
+      output: "answer",
+      groundTruth: "expected",
+      tools: [
+        {
+          name: "search",
+          description: "Search documents",
+          input_schema: { type: "object" },
+        },
+      ],
+    });
+
+    expect(JSON.parse(serialized)).toEqual({
+      type: "llm",
+      name: "answer",
+      input: "question",
+      output: "answer",
+      ground_truth: "expected",
+      tools: [
+        {
+          name: "search",
+          description: "Search documents",
+          input_schema: { type: "object" },
+        },
+      ],
+    });
+  });
+
+  it("serializes custom observability step types", () => {
+    const serialized = eventQueryRequestToJSON({
+      appliesTo: ["retriever_call", "trace_call"],
+    });
+
+    expect(JSON.parse(serialized).applies_to).toEqual(["retriever_call", "trace_call"]);
+  });
+});

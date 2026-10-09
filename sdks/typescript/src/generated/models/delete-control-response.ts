@@ -15,3 +15,54 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
 export type DeleteControlResponse = {
   /**
    * Control binding IDs that were removed before deletion
+   */
+  detachedTargetBindings?: Array<number> | undefined;
+  /**
+   * Deprecated: policy IDs the control was removed from before deletion
+   */
+  dissociatedFrom?: Array<number> | undefined;
+  /**
+   * Agent names the control was removed from before deletion
+   */
+  dissociatedFromAgents?: Array<string> | undefined;
+  /**
+   * Policy IDs the control was removed from before deletion
+   */
+  dissociatedFromPolicies?: Array<number> | undefined;
+  /**
+   * Whether the control was deleted
+   */
+  success: boolean;
+};
+
+/** @internal */
+export const DeleteControlResponse$inboundSchema: z.ZodMiniType<
+  DeleteControlResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    detached_target_bindings: types.optional(z.array(types.number())),
+    dissociated_from: types.optional(z.array(types.number())),
+    dissociated_from_agents: types.optional(z.array(types.string())),
+    dissociated_from_policies: types.optional(z.array(types.number())),
+    success: types.boolean(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "detached_target_bindings": "detachedTargetBindings",
+      "dissociated_from": "dissociatedFrom",
+      "dissociated_from_agents": "dissociatedFromAgents",
+      "dissociated_from_policies": "dissociatedFromPolicies",
+    });
+  }),
+);
+
+export function deleteControlResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<DeleteControlResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => DeleteControlResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'DeleteControlResponse' from JSON`,
+  );
+}
