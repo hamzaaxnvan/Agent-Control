@@ -74,3 +74,234 @@ class AuthSettings(BaseSettings):
         return self._parsed_api_keys
 
     def get_admin_api_keys(self) -> set[str]:
+        """Get parsed admin API keys (cached)."""
+        return self._parsed_admin_api_keys
+
+    def is_valid_api_key(self, key: str) -> bool:
+        """Check if key is a valid API key (regular or admin). O(1) lookup."""
+        return key in self._all_valid_keys
+
+    def is_admin_api_key(self, key: str) -> bool:
+        """Check if key is an admin API key. O(1) lookup."""
+        return key in self._parsed_admin_api_keys
+
+    @cached_property
+    def _resolved_session_secret(self) -> str:
+        """Resolve session secret, generating an ephemeral one if not configured."""
+        if self.session_secret:
+            return self.session_secret
+        _config_logger.warning(
+            "AGENT_CONTROL_SESSION_SECRET is not set. Using an ephemeral random secret. "
+            "Sessions will not survive server restarts or work across multiple instances. "
+            "Set AGENT_CONTROL_SESSION_SECRET for production deployments."
+        )
+        return secrets.token_urlsafe(32)
+
+    def get_session_secret(self) -> str:
+        """Get the JWT signing secret (cached)."""
+        return self._resolved_session_secret
+
+
+class AgentControlServerDatabaseConfig(BaseSettings):
+    """Database configuration for the server."""
+
+    model_config = SettingsConfigDict(**_COMMON_SETTINGS_CONFIG, env_prefix="AGENT_CONTROL_DB_")
+
+    # Allow direct URL override for SQLite in local dev
+    url: str | None = _env_alias_field(None, "AGENT_CONTROL_DB_URL", "DATABASE_URL", "DB_URL")
+
+    # PostgreSQL settings (only used if url is not set)
+    host: str = _env_alias_field("localhost", "AGENT_CONTROL_DB_HOST", "DB_HOST")
+    port: int = _env_alias_field(5432, "AGENT_CONTROL_DB_PORT", "DB_PORT")
+    user: str = _env_alias_field("agent_control", "AGENT_CONTROL_DB_USER", "DB_USER")
+    password: str = _env_alias_field(
+        "agent_control",
+        "AGENT_CONTROL_DB_PASSWORD",
+        "DB_PASSWORD",
+    )
+    database: str = _env_alias_field(
+        "agent_control",
+        "AGENT_CONTROL_DB_DATABASE",
+        "DB_DATABASE",
+    )
+    driver: str = _env_alias_field("psycopg", "AGENT_CONTROL_DB_DRIVER", "DB_DRIVER")
+    pool_size: int = Field(
+        default=5,
+        ge=1,
+        validation_alias=AliasChoices("AGENT_CONTROL_DB_POOL_SIZE", "DB_POOL_SIZE"),
+    )
+    max_overflow: int = Field(
+        default=10,
+        ge=0,
+        validation_alias=AliasChoices("AGENT_CONTROL_DB_MAX_OVERFLOW", "DB_MAX_OVERFLOW"),
+    )
+    pool_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias=AliasChoices(
+            "AGENT_CONTROL_DB_POOL_TIMEOUT_SECONDS",
+            "DB_POOL_TIMEOUT_SECONDS",
+        ),
+    )
+    connect_timeout_seconds: int = Field(
+        default=5,
+        ge=1,
+        validation_alias=AliasChoices(
+            "AGENT_CONTROL_DB_CONNECT_TIMEOUT_SECONDS",
+            "DB_CONNECT_TIMEOUT_SECONDS",
+        ),
+    )
+    # 0 disables the server-side statement timeout.
+    statement_timeout_seconds: float = Field(
+        default=50.0,
+        ge=0,
+        validation_alias=AliasChoices(
+            "AGENT_CONTROL_DB_STATEMENT_TIMEOUT_SECONDS",
+            "DB_STATEMENT_TIMEOUT_SECONDS",
+        ),
+    )
+
+    def get_url(self) -> str:
+        """Get database URL, preferring an explicit URL if configured."""
+        if self.url:
+            return self.url
+        return (
+            f"postgresql+{self.driver}://{self.user}:{self.password}@{self.host}:{self.port}/{self.database}"
+        )
+
+
+class Settings(BaseSettings):
+    """Server configuration settings."""
+
+    model_config = SettingsConfigDict(**_COMMON_SETTINGS_CONFIG, env_prefix="AGENT_CONTROL_")
+
+    # Server settings
+    host: str = _env_alias_field("0.0.0.0", "AGENT_CONTROL_HOST", "HOST")
+    port: int = _env_alias_field(8000, "AGENT_CONTROL_PORT", "PORT")
+    debug: bool = _env_alias_field(False, "AGENT_CONTROL_DEBUG", "DEBUG")
+
+    # API settings
+    api_version: str = _env_alias_field("v1", "AGENT_CONTROL_API_VERSION", "API_VERSION")
+    api_prefix: str = _env_alias_field("/api", "AGENT_CONTROL_API_PREFIX", "API_PREFIX")
+    out_of_box_bootstrap_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        validation_alias=AliasChoices(
+            "AGENT_CONTROL_OUT_OF_BOX_BOOTSTRAP_TIMEOUT_SECONDS",
+        ),
+    )
+
+    # Prometheus metrics settings
+    prometheus_metrics_prefix: str = _env_alias_field(
+        "agent_control_server",
+        "AGENT_CONTROL_PROMETHEUS_METRICS_PREFIX",
+        "PROMETHEUS_METRICS_PREFIX",
+    )
+
+    # CORS settings
+    cors_origins: list[str] | str = _env_alias_field(
+        "*",
+        "AGENT_CONTROL_CORS_ORIGINS",
+        "CORS_ORIGINS",
+    )
+    allow_methods: list[str] | str = _env_alias_field(
+        ["*"],
+        "AGENT_CONTROL_ALLOW_METHODS",
+        "ALLOW_METHODS",
+    )
+    allow_headers: list[str] | str = _env_alias_field(
+        ["*"],
+        "AGENT_CONTROL_ALLOW_HEADERS",
+        "ALLOW_HEADERS",
+    )
+
+    def get_cors_origins(self) -> list[str]:
+        """Parse CORS origins from string or list."""
+        return self._parse_list_setting(self.cors_origins)
+
+    def get_allow_methods(self) -> list[str]:
+        """Parse allow_methods from string or list."""
+        return self._parse_list_setting(self.allow_methods)
+
+    def get_allow_headers(self) -> list[str]:
+        """Parse allow_headers from string or list."""
+        return self._parse_list_setting(self.allow_headers)
+
+    @staticmethod
+    def _parse_list_setting(value: list[str] | str) -> list[str]:
+        """Parse wildcard/comma-separated settings from string or list."""
+        if isinstance(value, str):
+            if value == "*":
+                return ["*"]
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+
+class ObservabilitySettings(BaseSettings):
+    """Observability configuration settings."""
+
+    model_config = SettingsConfigDict(
+        **_COMMON_SETTINGS_CONFIG,
+        env_prefix="AGENT_CONTROL_OBSERVABILITY_",
+    )
+
+    # Enable/disable observability features
+    enabled: bool = True
+
+    # Event sink selection. These use server-specific env names so SDK sink
+    # selections do not leak into server startup in shared deployments.
+    server_sink_name: str = _env_alias_field(
+        DEFAULT_CONTROL_EVENT_SINK_NAME,
+        "AGENT_CONTROL_SERVER_OBSERVABILITY_SINK_NAME",
+    )
+    server_sink_config: JSONObject = _env_alias_field(
+        {},
+        "AGENT_CONTROL_SERVER_OBSERVABILITY_SINK_CONFIG",
+    )
+
+    # Stdout logging of events
+    stdout: bool = False
+
+    @property
+    def sink_name(self) -> str:
+        """Compatibility accessor for the configured server sink name."""
+        return self.server_sink_name
+
+    @sink_name.setter
+    def sink_name(self, value: str) -> None:
+        self.server_sink_name = value
+
+    @property
+    def sink_config(self) -> JSONObject:
+        """Compatibility accessor for the configured server sink config."""
+        return self.server_sink_config
+
+    @sink_config.setter
+    def sink_config(self, value: JSONObject) -> None:
+        self.server_sink_config = value
+
+
+class LoggingSettings(BaseSettings):
+    """Server logging configuration settings."""
+
+    model_config = SettingsConfigDict(**_COMMON_SETTINGS_CONFIG, env_prefix="AGENT_CONTROL_LOG_")
+
+    configure_logging: bool = _env_alias_field(True, "AGENT_CONTROL_CONFIGURE_LOGGING")
+    access_log: bool = _env_alias_field(True, "AGENT_CONTROL_ACCESS_LOG")
+    level: str | None = None
+    json_logs: bool = _env_alias_field(False, "AGENT_CONTROL_LOG_JSON")
+
+
+class UISettings(BaseSettings):
+    """Static UI hosting configuration settings."""
+
+    model_config = SettingsConfigDict(**_COMMON_SETTINGS_CONFIG, env_prefix="AGENT_CONTROL_UI_")
+
+    dist_dir: str | None = None
+
+
+auth_settings = AuthSettings()
+db_config = AgentControlServerDatabaseConfig()
+settings = Settings()
+observability_settings = ObservabilitySettings()
+ui_settings = UISettings()

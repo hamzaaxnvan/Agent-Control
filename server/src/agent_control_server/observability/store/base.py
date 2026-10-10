@@ -92,3 +92,97 @@ def parse_time_range(time_range: TimeRange) -> timedelta:
 # Bucket size mapping for time-series data
 # Aims for 6-30 data points per time range for clean charts
 BUCKET_SIZE_MAP: dict[str, timedelta] = {
+    "1m": timedelta(seconds=10),   # 6 buckets
+    "5m": timedelta(seconds=30),   # 10 buckets
+    "15m": timedelta(minutes=1),   # 15 buckets
+    "1h": timedelta(minutes=5),    # 12 buckets
+    "24h": timedelta(hours=1),     # 24 buckets
+    "7d": timedelta(hours=6),      # 28 buckets
+    "30d": timedelta(days=1),      # 30 buckets
+    "180d": timedelta(days=7),     # ~26 buckets
+    "365d": timedelta(days=30),    # ~12 buckets
+}
+
+
+def get_bucket_size(time_range: TimeRange) -> timedelta:
+    """Get bucket size for a time range."""
+    return BUCKET_SIZE_MAP[time_range]
+
+
+class EventStore(ABC):
+    """Storage backend for observability events.
+
+    This ABC defines the interface for event storage. Implementations
+    store raw events and perform aggregation at query time (no pre-aggregation).
+
+    All methods are async to support both sync and async database drivers.
+    """
+
+    @abstractmethod
+    async def store(
+        self,
+        events: list[ControlExecutionEvent],
+        *,
+        namespace_key: str,
+    ) -> int:
+        """Store raw events.
+
+        Args:
+            events: List of control execution events to store
+            namespace_key: Namespace that owns the stored events
+
+        Returns:
+            Number of events successfully stored
+        """
+        pass
+
+    @abstractmethod
+    async def query_stats(
+        self,
+        agent_name: str,
+        time_range: timedelta,
+        *,
+        control_id: int | None = None,
+        include_timeseries: bool = False,
+        bucket_size: timedelta | None = None,
+        namespace_key: str,
+    ) -> StatsResult:
+        """Query stats (aggregated at query time from raw events).
+
+        Args:
+            agent_name: Identifier of the agent to query stats for
+            time_range: Time range to aggregate over (from now)
+            control_id: Optional control ID to filter by
+            include_timeseries: Whether to include time-series data
+            bucket_size: Bucket size for time-series (required if include_timeseries=True)
+            namespace_key: Namespace whose events should be queried
+
+        Returns:
+            StatsResult with per-control and total statistics
+        """
+        pass
+
+    @abstractmethod
+    async def query_events(
+        self,
+        query: EventQuery,
+        *,
+        namespace_key: str,
+    ) -> EventQueryResult:
+        """Query raw events with filters and pagination.
+
+        Args:
+            query: Query parameters (filters, pagination)
+            namespace_key: Namespace whose events should be queried
+
+        Returns:
+            EventQueryResult with matching events and pagination info
+        """
+        pass
+
+    async def close(self) -> None:
+        """Close any resources held by the store.
+
+        Override in implementations that need cleanup (e.g., connection pools).
+        """
+        pass
