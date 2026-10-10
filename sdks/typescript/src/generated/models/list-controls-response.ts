@@ -14,3 +14,36 @@ import {
   PaginationInfo,
   PaginationInfo$inboundSchema,
 } from "./pagination-info.js";
+
+/**
+ * Response for listing controls.
+ */
+export type ListControlsResponse = {
+  /**
+   * List of control summaries
+   */
+  controls: Array<ControlSummary>;
+  /**
+   * Pagination metadata for cursor-based pagination.
+   */
+  pagination: PaginationInfo;
+};
+
+/** @internal */
+export const ListControlsResponse$inboundSchema: z.ZodMiniType<
+  ListControlsResponse,
+  unknown
+> = z.object({
+  controls: z.array(ControlSummary$inboundSchema),
+  pagination: PaginationInfo$inboundSchema,
+});
+
+export function listControlsResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<ListControlsResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ListControlsResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ListControlsResponse' from JSON`,
+  );
+}

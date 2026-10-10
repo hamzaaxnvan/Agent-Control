@@ -54,3 +54,59 @@ export const EnumTemplateParameter$inboundSchema: z.ZodMiniType<
     type: types.literal("enum"),
     ui_hint: z.optional(z.nullable(types.string())),
   }),
+  z.transform((v) => {
+    return remap$(v, {
+      "allowed_values": "allowedValues",
+      "ui_hint": "uiHint",
+    });
+  }),
+);
+/** @internal */
+export type EnumTemplateParameter$Outbound = {
+  allowed_values: Array<string>;
+  default?: string | null | undefined;
+  description?: string | null | undefined;
+  label: string;
+  required: boolean;
+  type: "enum";
+  ui_hint?: string | null | undefined;
+};
+
+/** @internal */
+export const EnumTemplateParameter$outboundSchema: z.ZodMiniType<
+  EnumTemplateParameter$Outbound,
+  EnumTemplateParameter
+> = z.pipe(
+  z.object({
+    allowedValues: z.array(z.string()),
+    default: z.optional(z.nullable(z.string())),
+    description: z.optional(z.nullable(z.string())),
+    label: z.string(),
+    required: z._default(z.boolean(), true),
+    type: z.literal("enum"),
+    uiHint: z.optional(z.nullable(z.string())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      allowedValues: "allowed_values",
+      uiHint: "ui_hint",
+    });
+  }),
+);
+
+export function enumTemplateParameterToJSON(
+  enumTemplateParameter: EnumTemplateParameter,
+): string {
+  return JSON.stringify(
+    EnumTemplateParameter$outboundSchema.parse(enumTemplateParameter),
+  );
+}
+export function enumTemplateParameterFromJSON(
+  jsonString: string,
+): SafeParseResult<EnumTemplateParameter, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => EnumTemplateParameter$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'EnumTemplateParameter' from JSON`,
+  );
+}
