@@ -35,3 +35,40 @@ export type CreateControlRequest = {
 export type Data$Outbound =
   | ControlDefinitionInput$Outbound
   | TemplateControlInput$Outbound;
+
+/** @internal */
+export const Data$outboundSchema: z.ZodMiniType<Data$Outbound, Data> =
+  smartUnion([
+    ControlDefinitionInput$outboundSchema,
+    TemplateControlInput$outboundSchema,
+  ]);
+
+export function dataToJSON(data: Data): string {
+  return JSON.stringify(Data$outboundSchema.parse(data));
+}
+
+/** @internal */
+export type CreateControlRequest$Outbound = {
+  data: ControlDefinitionInput$Outbound | TemplateControlInput$Outbound;
+  name: string;
+};
+
+/** @internal */
+export const CreateControlRequest$outboundSchema: z.ZodMiniType<
+  CreateControlRequest$Outbound,
+  CreateControlRequest
+> = z.object({
+  data: smartUnion([
+    ControlDefinitionInput$outboundSchema,
+    TemplateControlInput$outboundSchema,
+  ]),
+  name: z.string(),
+});
+
+export function createControlRequestToJSON(
+  createControlRequest: CreateControlRequest,
+): string {
+  return JSON.stringify(
+    CreateControlRequest$outboundSchema.parse(createControlRequest),
+  );
+}
