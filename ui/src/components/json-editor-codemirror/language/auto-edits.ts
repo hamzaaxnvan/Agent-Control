@@ -127,3 +127,132 @@ function findEvaluatorConfigEdit(
     if (prevName === undefined || prevName === name) continue;
     const evaluator = evaluators?.find((item) => item.id === name);
     if (!evaluator) continue;
+    const configJson = JSON.stringify(
+      buildDefaultConfig(evaluator.configSchema),
+      null,
+      2
+    );
+    if (configNode) {
+      return {
+        offset: configNode.offset,
+        length: configNode.length,
+        newText: configJson,
+      };
+    }
+    const nameEnd = nameNode.offset + nameNode.length;
+    return {
+      offset: nameEnd,
+      length: 0,
+      newText: `,\n"config": ${configJson}`,
+    };
+  }
+  return null;
+}
+
+function findSteeringContextEdit(
+  text: string,
+  previousDecision: string | null
+): JsonEditorTextEdit | null {
+  const tree = parseTree(text);
+  if (!tree) return null;
+  const decisionNode = findNodeAtLocation(tree, ['action', 'decision']);
+  if (!decisionNode || typeof decisionNode.value !== 'string') return null;
+
+  const currentDecision = decisionNode.value;
+  if (currentDecision === previousDecision) return null;
+
+  if (currentDecision === 'steer') {
+    const steeringNode = findNodeAtLocation(tree, [
+      'action',
+      'steering_context',
+    ]);
+    if (!steeringNode) {
+      const decisionEnd = decisionNode.offset + decisionNode.length;
+      return {
+        offset: decisionEnd,
+        length: 0,
+        newText: `,\n"steering_context": {"message": "Please correct your response."}`,
+      };
+    }
+  } else if (previousDecision === 'steer') {
+    const actionNode = findNodeAtLocation(tree, ['action']);
+    if (actionNode?.type === 'object' && actionNode.children) {
+      for (const prop of actionNode.children) {
+        const key = prop.children?.[0];
+        if (key?.value === 'steering_context') {
+          let start = prop.offset;
+          while (start > 0 && /[\s,]/.test(text[start - 1] ?? '')) start -= 1;
+          return {
+            offset: start,
+            length: prop.offset + prop.length - start,
+            newText: '',
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function computeAutoEdit(
+  text: string,
+  previousEvaluatorNames: Map<string, string>,
+  previousDecision: string | null,
+  mode: JsonEditorMode,
+  evaluators: JsonEditorEvaluatorOption[] | undefined
+): {
+  edit: JsonEditorTextEdit | null;
+  editKind: 'evaluator-config' | 'steering-context' | null;
+  nextEvaluatorNames: Map<string, string>;
+  nextDecision: string | null;
+} {
+  const nextEvaluatorNames = extractEvaluatorNames(text);
+  let nextDecision: string | null = previousDecision;
+  try {
+    const tree = parseTree(text);
+    if (tree) {
+      const node = findNodeAtLocation(tree, ['action', 'decision']);
+      nextDecision = typeof node?.value === 'string' ? node.value : null;
+    }
+  } catch {
+    nextDecision = previousDecision;
+  }
+
+  if (mode !== 'control') {
+    return { edit: null, editKind: null, nextEvaluatorNames, nextDecision };
+  }
+
+  const evaluatorEdit = findEvaluatorConfigEdit(
+    text,
+    previousEvaluatorNames,
+    evaluators
+  );
+  if (evaluatorEdit) {
+    return {
+      edit: evaluatorEdit,
+      editKind: 'evaluator-config',
+      nextEvaluatorNames,
+      nextDecision,
+    };
+  }
+
+  const steeringEdit = findSteeringContextEdit(text, previousDecision);
+  if (steeringEdit) {
+    return {
+      edit: steeringEdit,
+      editKind: 'steering-context',
+      nextEvaluatorNames,
+      nextDecision,
+    };
+  }
+
+  return { edit: null, editKind: null, nextEvaluatorNames, nextDecision };
+}
+
+export function applyTextEdit(text: string, edit: JsonEditorTextEdit): string {
+  return (
+    text.slice(0, edit.offset) +
+    edit.newText +
+    text.slice(edit.offset + edit.length)
+  );
+}

@@ -12,3 +12,31 @@ export type GetAgentApiV1AgentsAgentNameGetRequest = {
 /** @internal */
 export type GetAgentApiV1AgentsAgentNameGetRequest$Outbound = {
   agent_name: string;
+};
+
+/** @internal */
+export const GetAgentApiV1AgentsAgentNameGetRequest$outboundSchema:
+  z.ZodMiniType<
+    GetAgentApiV1AgentsAgentNameGetRequest$Outbound,
+    GetAgentApiV1AgentsAgentNameGetRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+      });
+    }),
+  );
+
+export function getAgentApiV1AgentsAgentNameGetRequestToJSON(
+  getAgentApiV1AgentsAgentNameGetRequest:
+    GetAgentApiV1AgentsAgentNameGetRequest,
+): string {
+  return JSON.stringify(
+    GetAgentApiV1AgentsAgentNameGetRequest$outboundSchema.parse(
+      getAgentApiV1AgentsAgentNameGetRequest,
+    ),
+  );
+}
