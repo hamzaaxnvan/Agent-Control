@@ -53,3 +53,58 @@ export const StringTemplateParameter$inboundSchema: z.ZodMiniType<
     required: z._default(types.boolean(), true),
     type: types.literal("string"),
     ui_hint: z.optional(z.nullable(types.string())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "ui_hint": "uiHint",
+    });
+  }),
+);
+/** @internal */
+export type StringTemplateParameter$Outbound = {
+  default?: string | null | undefined;
+  description?: string | null | undefined;
+  label: string;
+  placeholder?: string | null | undefined;
+  required: boolean;
+  type: "string";
+  ui_hint?: string | null | undefined;
+};
+
+/** @internal */
+export const StringTemplateParameter$outboundSchema: z.ZodMiniType<
+  StringTemplateParameter$Outbound,
+  StringTemplateParameter
+> = z.pipe(
+  z.object({
+    default: z.optional(z.nullable(z.string())),
+    description: z.optional(z.nullable(z.string())),
+    label: z.string(),
+    placeholder: z.optional(z.nullable(z.string())),
+    required: z._default(z.boolean(), true),
+    type: z.literal("string"),
+    uiHint: z.optional(z.nullable(z.string())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      uiHint: "ui_hint",
+    });
+  }),
+);
+
+export function stringTemplateParameterToJSON(
+  stringTemplateParameter: StringTemplateParameter,
+): string {
+  return JSON.stringify(
+    StringTemplateParameter$outboundSchema.parse(stringTemplateParameter),
+  );
+}
+export function stringTemplateParameterFromJSON(
+  jsonString: string,
+): SafeParseResult<StringTemplateParameter, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => StringTemplateParameter$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'StringTemplateParameter' from JSON`,
+  );
+}
