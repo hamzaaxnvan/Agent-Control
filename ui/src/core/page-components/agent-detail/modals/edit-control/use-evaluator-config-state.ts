@@ -64,3 +64,69 @@ export function useEvaluatorConfigState({
   }, [jsonText]);
 
   const handleConfigViewModeChange = useCallback(
+    async (value: string) => {
+      const mode = value as ConfigViewMode;
+
+      if (mode === 'json') {
+        setJsonText(JSON.stringify(getConfigFromForm(), null, 2));
+        setJsonError(null);
+        setConfigViewMode(mode);
+        return;
+      }
+
+      if (mode === 'form') {
+        let finalConfig: Record<string, unknown>;
+        try {
+          finalConfig = JSON.parse(jsonText || '{}');
+        } catch {
+          setJsonError('Invalid JSON. Please fix before switching to form.');
+          setValidationError(null);
+          return;
+        }
+
+        try {
+          await onValidateConfig(finalConfig);
+          setJsonError(null);
+          setValidationError(null);
+        } catch (error) {
+          if (error && typeof error === 'object' && 'problemDetail' in error) {
+            setValidationError(
+              (error as { problemDetail: ProblemDetail }).problemDetail
+            );
+            setJsonError(null);
+          } else {
+            setJsonError('Validation failed.');
+            setValidationError(null);
+          }
+          return;
+        }
+
+        onConfigChange(finalConfig);
+        setConfigViewMode(mode);
+      }
+    },
+    [getConfigFromForm, onConfigChange, onValidateConfig, jsonText]
+  );
+
+  const isJsonInvalid = useMemo(() => {
+    if (configViewMode !== 'json') return false;
+    return jsonError !== null || validationError !== null;
+  }, [configViewMode, jsonError, validationError]);
+
+  return {
+    getConfigFromForm,
+    configViewMode,
+    jsonText,
+    jsonError,
+    validationError,
+    setJsonText,
+    setJsonError,
+    setValidationError,
+    setConfigViewMode,
+    handleConfigViewModeChange,
+    handleJsonChange,
+    getJsonConfig,
+    isJsonInvalid,
+    reset,
+  };
+}
