@@ -221,3 +221,227 @@ async def setup_publishing_controls():
                             r"|\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"      # Phone
                             r")"
                         ),
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        }
+        cid = await create_control_safe(client, "flow-draft-pii-block", draft_pii)
+        control_ids.append((cid, "flow-draft-pii-block"))
+
+        # ------------------------------------------------------------------
+        # DRAFT STAGE: LIST evaluator - block banned topics
+        # ------------------------------------------------------------------
+        banned_topics = {
+            "description": "Block drafts that contain banned or restricted topics",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["write_draft"],
+                "stages": ["post"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "output",
+                },
+                "evaluator": {
+                    "name": "list",
+                    "config": {
+                        "values": [
+                            "insider trading",
+                            "market manipulation",
+                            "ponzi scheme",
+                            "money laundering",
+                            "classified information",
+                        ],
+                        "logic": "any",
+                        "match_mode": "contains",
+                        "case_sensitive": False,
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        }
+        cid = await create_control_safe(client, "flow-draft-banned-topics", banned_topics)
+        control_ids.append((cid, "flow-draft-banned-topics"))
+
+        # ------------------------------------------------------------------
+        # COMPLIANCE STAGE: JSON evaluator - require disclaimer + legal_reviewed
+        # ------------------------------------------------------------------
+        legal_review = {
+            "description": "Require disclaimer and legal_reviewed=true in compliance output",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["legal_review"],
+                "stages": ["post"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "output",
+                },
+                "evaluator": {
+                    "name": "json",
+                    "config": {
+                        "required_fields": ["disclaimer", "legal_reviewed"],
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        }
+        cid = await create_control_safe(client, "flow-compliance-legal-review", legal_review)
+        control_ids.append((cid, "flow-compliance-legal-review"))
+
+        # ------------------------------------------------------------------
+        # EDITOR STAGE: REGEX evaluator - clean PII from edited content
+        # ------------------------------------------------------------------
+        editor_pii = {
+            "description": "Block edited content that still contains PII",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["edit_content"],
+                "stages": ["post"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "output",
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        "pattern": (
+                            r"(?:"
+                            r"\b\d{3}-\d{2}-\d{4}\b"
+                            r"|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                            r"|\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"
+                            r")"
+                        ),
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        }
+        cid = await create_control_safe(client, "flow-editor-pii-block", editor_pii)
+        control_ids.append((cid, "flow-editor-pii-block"))
+
+        # NOTE: Executive summary check for press releases is handled
+        # client-side in the flow code (compliance_review stage), because
+        # detecting the ABSENCE of text requires negative lookahead which
+        # the regex evaluator does not support.
+
+        # ------------------------------------------------------------------
+        # HUMAN REVIEW STAGE: STEER - pause for manager approval
+        # ------------------------------------------------------------------
+        human_review_steer = {
+            "description": "Steer flow to pause for manager approval on internal memos",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["request_human_review"],
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "input.content_type",
+                },
+                "evaluator": {
+                    "name": "list",
+                    "config": {
+                        "values": ["internal_memo"],
+                        "logic": "any",
+                        "match_mode": "exact",
+                        "case_sensitive": False,
+                    },
+                },
+            },
+            "action": {
+                "decision": "steer",
+                "steering_context": {
+                    "message": '{"required_actions": ["get_manager_approval"], "reason": "Internal memos require manager approval before distribution.", "retry_with": {"approved": true}}',
+                },
+            },
+        }
+        cid = await create_control_safe(client, "flow-human-review-steer", human_review_steer)
+        control_ids.append((cid, "flow-human-review-steer"))
+
+        # ------------------------------------------------------------------
+        # AUTO-PUBLISH STAGE: REGEX - final PII scan before publishing
+        # ------------------------------------------------------------------
+        publish_pii = {
+            "description": "Final PII scan before auto-publishing content",
+            "enabled": True,
+            "execution": "server",
+            "scope": {
+                "step_types": ["tool"],
+                "step_names": ["publish_content"],
+                "stages": ["pre"],
+            },
+            "condition": {
+                "selector": {
+                    "path": "input.content",
+                },
+                "evaluator": {
+                    "name": "regex",
+                    "config": {
+                        "pattern": (
+                            r"(?:"
+                            r"\b\d{3}-\d{2}-\d{4}\b"
+                            r"|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                            r"|\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"
+                            r")"
+                        ),
+                    },
+                },
+            },
+            "action": {"decision": "deny"},
+        }
+        cid = await create_control_safe(client, "flow-publish-pii-scan", publish_pii)
+        control_ids.append((cid, "flow-publish-pii-scan"))
+
+        # =====================================================================
+        # 3. Associate All Controls with Agent
+        # =====================================================================
+        print("\nAssociating controls with agent...")
+        for control_id, control_name in control_ids:
+            await add_control_to_agent_safe(client, AGENT_NAME, control_id, control_name)
+
+        # =====================================================================
+        # Summary
+        # =====================================================================
+        print("\n" + "=" * 60)
+        print("Setup complete!")
+        print("=" * 60)
+        print(f"\nAgent: {AGENT_NAME}")
+        print(f"Server: {SERVER_URL}")
+        print(f"Controls created: {len(control_ids)}")
+        print("\nControls by pipeline stage:")
+        print("  INTAKE:")
+        print("    - flow-intake-validation (JSON: require topic, audience, content_type)")
+        print("  RESEARCH:")
+        print("    - flow-research-banned-sources (LIST: block unreliable sources)")
+        print("    - flow-factcheck-unverified (REGEX: flag unverified claims)")
+        print("  DRAFT:")
+        print("    - flow-draft-pii-block (REGEX: block PII)")
+        print("    - flow-draft-banned-topics (LIST: block restricted topics)")
+        print("  COMPLIANCE (high_risk path):")
+        print("    - flow-compliance-legal-review (JSON: require disclaimer + legal_reviewed)")
+        print("    - flow-editor-pii-block (REGEX: block PII in edits)")
+        print("    - Executive summary check (client-side in flow code)")
+        print("  HUMAN REVIEW (escalation path):")
+        print("    - flow-human-review-steer (STEER: manager approval)")
+        print("  AUTO-PUBLISH (low_risk path):")
+        print("    - flow-publish-pii-scan (REGEX: final PII scan)")
+        print("\nRun the flow:  uv run --active python -m content_publishing_flow.main")
+
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("Content Publishing Flow - Control Setup")
+    print("=" * 60)
+    print()
+    asyncio.run(setup_publishing_controls())
