@@ -62,3 +62,68 @@ export type ControlSummary = {
    * Step types in scope
    */
   stepTypes?: Array<string> | null | undefined;
+  /**
+   * Control tags
+   */
+  tags?: Array<string> | undefined;
+  /**
+   * Whether the control was created from a template
+   */
+  templateBacked: boolean;
+  /**
+   * Whether a template-backed control has been rendered. True for rendered templates, False for unrendered templates, None for non-template controls.
+   */
+  templateRendered?: boolean | null | undefined;
+  /**
+   * Agent using this control
+   */
+  usedByAgent?: AgentRef | null | undefined;
+  /**
+   * Number of unique agents using this control
+   */
+  usedByAgentsCount: number;
+};
+
+/** @internal */
+export const ControlSummary$inboundSchema: z.ZodMiniType<
+  ControlSummary,
+  unknown
+> = z.pipe(
+  z.object({
+    action: z.optional(z.nullable(ControlAction$inboundSchema)),
+    attachments: z.optional(z.nullable(ControlAttachments$inboundSchema)),
+    cloned_from_control_id: z.optional(z.nullable(types.number())),
+    description: z.optional(z.nullable(types.string())),
+    enabled: z._default(types.boolean(), true),
+    execution: z.optional(z.nullable(types.string())),
+    id: types.number(),
+    name: types.string(),
+    stages: z.optional(z.nullable(z.array(types.string()))),
+    step_types: z.optional(z.nullable(z.array(types.string()))),
+    tags: types.optional(z.array(types.string())),
+    template_backed: z._default(types.boolean(), false),
+    template_rendered: z.optional(z.nullable(types.boolean())),
+    used_by_agent: z.optional(z.nullable(AgentRef$inboundSchema)),
+    used_by_agents_count: z._default(types.number(), 0),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "cloned_from_control_id": "clonedFromControlId",
+      "step_types": "stepTypes",
+      "template_backed": "templateBacked",
+      "template_rendered": "templateRendered",
+      "used_by_agent": "usedByAgent",
+      "used_by_agents_count": "usedByAgentsCount",
+    });
+  }),
+);
+
+export function controlSummaryFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlSummary, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlSummary$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlSummary' from JSON`,
+  );
+}
