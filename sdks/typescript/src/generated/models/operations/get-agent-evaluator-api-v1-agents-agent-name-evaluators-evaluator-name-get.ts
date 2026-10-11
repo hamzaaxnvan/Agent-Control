@@ -22,3 +22,28 @@ export type GetAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetReque
 export const GetAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest$outboundSchema:
   z.ZodMiniType<
     GetAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest$Outbound,
+    GetAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+      evaluatorName: z.string(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+        evaluatorName: "evaluator_name",
+      });
+    }),
+  );
+
+export function getAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequestToJSON(
+  getAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest:
+    GetAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest,
+): string {
+  return JSON.stringify(
+    GetAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest$outboundSchema
+      .parse(
+        getAgentEvaluatorApiV1AgentsAgentNameEvaluatorsEvaluatorNameGetRequest,
+      ),
+  );
+}
