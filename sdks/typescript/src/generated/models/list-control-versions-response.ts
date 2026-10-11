@@ -14,3 +14,36 @@ import {
   PaginationInfo,
   PaginationInfo$inboundSchema,
 } from "./pagination-info.js";
+
+/**
+ * Response for listing control versions.
+ */
+export type ListControlVersionsResponse = {
+  /**
+   * Pagination metadata for cursor-based pagination.
+   */
+  pagination: PaginationInfo;
+  /**
+   * Control versions ordered newest-first
+   */
+  versions: Array<ControlVersionSummary>;
+};
+
+/** @internal */
+export const ListControlVersionsResponse$inboundSchema: z.ZodMiniType<
+  ListControlVersionsResponse,
+  unknown
+> = z.object({
+  pagination: PaginationInfo$inboundSchema,
+  versions: z.array(ControlVersionSummary$inboundSchema),
+});
+
+export function listControlVersionsResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<ListControlVersionsResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ListControlVersionsResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ListControlVersionsResponse' from JSON`,
+  );
+}
