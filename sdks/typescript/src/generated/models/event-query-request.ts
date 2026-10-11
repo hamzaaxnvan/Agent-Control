@@ -79,3 +79,84 @@ export type EventQueryRequest = {
    * Pagination offset
    */
   offset?: number | undefined;
+  /**
+   * Filter by span ID (all events for a function)
+   */
+  spanId?: string | null | undefined;
+  /**
+   * Filter events after this time
+   */
+  startTime?: Date | null | undefined;
+  /**
+   * Filter by trace ID (all events for a request)
+   */
+  traceId?: string | null | undefined;
+};
+
+/** @internal */
+export const CheckStages$outboundSchema: z.ZodMiniEnum<typeof CheckStages> = z
+  .enum(CheckStages);
+
+/** @internal */
+export type EventQueryRequest$Outbound = {
+  actions?: Array<string> | null | undefined;
+  agent_name?: string | null | undefined;
+  applies_to?: Array<string> | null | undefined;
+  check_stages?: Array<string> | null | undefined;
+  control_execution_id?: string | null | undefined;
+  control_ids?: Array<number> | null | undefined;
+  end_time?: string | null | undefined;
+  limit: number;
+  matched?: boolean | null | undefined;
+  offset: number;
+  span_id?: string | null | undefined;
+  start_time?: string | null | undefined;
+  trace_id?: string | null | undefined;
+};
+
+/** @internal */
+export const EventQueryRequest$outboundSchema: z.ZodMiniType<
+  EventQueryRequest$Outbound,
+  EventQueryRequest
+> = z.pipe(
+  z.object({
+    actions: z.optional(z.nullable(z.array(ActionDecision$outboundSchema))),
+    agentName: z.optional(z.nullable(z.string())),
+    appliesTo: z.optional(z.nullable(z.array(z.string()))),
+    checkStages: z.optional(z.nullable(z.array(CheckStages$outboundSchema))),
+    controlExecutionId: z.optional(z.nullable(z.string())),
+    controlIds: z.optional(z.nullable(z.array(z.int()))),
+    endTime: z.optional(
+      z.nullable(z.pipe(z.date(), z.transform(v => v.toISOString()))),
+    ),
+    limit: z._default(z.int(), 100),
+    matched: z.optional(z.nullable(z.boolean())),
+    offset: z._default(z.int(), 0),
+    spanId: z.optional(z.nullable(z.string())),
+    startTime: z.optional(
+      z.nullable(z.pipe(z.date(), z.transform(v => v.toISOString()))),
+    ),
+    traceId: z.optional(z.nullable(z.string())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      agentName: "agent_name",
+      appliesTo: "applies_to",
+      checkStages: "check_stages",
+      controlExecutionId: "control_execution_id",
+      controlIds: "control_ids",
+      endTime: "end_time",
+      spanId: "span_id",
+      startTime: "start_time",
+      traceId: "trace_id",
+    });
+  }),
+);
+
+export function eventQueryRequestToJSON(
+  eventQueryRequest: EventQueryRequest,
+): string {
+  return JSON.stringify(
+    EventQueryRequest$outboundSchema.parse(eventQueryRequest),
+  );
+}
