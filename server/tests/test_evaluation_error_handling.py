@@ -186,3 +186,191 @@ def test_evaluation_response_is_sanitized_without_server_side_observability(
         },
         "action": {"decision": "deny"}
     }
+    agent_name, control_name = create_and_assign_policy(client, control_data)
+
+    mock_evaluator = MagicMock()
+    mock_evaluator.evaluate = AsyncMock(side_effect=RuntimeError("Simulated evaluator crash"))
+    mock_evaluator.get_timeout_seconds = MagicMock(return_value=30.0)
+
+    import agent_control_engine.core as core_module
+
+    monkeypatch.setattr(
+        core_module,
+        "get_evaluator_instance",
+        lambda _config: mock_evaluator,
+    )
+
+    payload = Step(type="llm", name="test-step", input="test content", output=None)
+    req = EvaluationRequest(
+        agent_name=agent_name,
+        step=payload,
+        stage="pre"
+    )
+    resp = client.post("/api/v1/evaluation", json=req.model_dump(mode="json"))
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["errors"] is not None
+    assert len(data["errors"]) == 1
+    assert data["errors"][0]["control_name"] == control_name
+    assert data["errors"][0]["result"]["error"] == SAFE_EVALUATOR_ERROR
+
+
+def test_sanitize_control_match_redacts_nested_condition_trace_errors() -> None:
+    # Given: a control match whose nested condition trace contains raw evaluator errors
+    match = ControlMatch(
+        control_id=1,
+        control_name="nested-trace",
+        action="deny",
+        result=EvaluatorResult(
+            matched=False,
+            confidence=0.0,
+            error="RuntimeError: nested boom",
+            message="Condition evaluation failed: RuntimeError: nested boom",
+            metadata={
+                "condition_trace": {
+                    "type": "and",
+                    "children": [
+                        {
+                            "type": "leaf",
+                            "error": "RuntimeError: nested boom",
+                            "message": "Evaluation failed: RuntimeError: nested boom",
+                        }
+                    ],
+                }
+            },
+        ),
+    )
+
+    # When: sanitizing the control match for API output
+    sanitized = _sanitize_control_match(match)
+    child_trace = sanitized.result.metadata["condition_trace"]["children"][0]
+
+    # Then: both the top-level result and nested trace are redacted
+    assert sanitized.result.error == SAFE_EVALUATOR_ERROR
+    assert sanitized.result.message == SAFE_EVALUATOR_ERROR
+    assert child_trace["error"] == SAFE_EVALUATOR_ERROR
+    assert child_trace["message"] == SAFE_EVALUATOR_ERROR
+
+
+def test_sanitize_control_match_redacts_nested_condition_trace_timeouts() -> None:
+    # Given: a control match whose nested condition trace contains timeout errors
+    match = ControlMatch(
+        control_id=1,
+        control_name="nested-timeout",
+        action="deny",
+        result=EvaluatorResult(
+            matched=False,
+            confidence=0.0,
+            error="TimeoutError: Evaluator exceeded 30s timeout",
+            message="Condition evaluation failed: TimeoutError: Evaluator exceeded 30s timeout",
+            metadata={
+                "condition_trace": {
+                    "type": "or",
+                    "children": [
+                        {
+                            "type": "leaf",
+                            "error": "TimeoutError: Evaluator exceeded 30s timeout",
+                            "message": (
+                                "Evaluation failed: TimeoutError: "
+                                "Evaluator exceeded 30s timeout"
+                            ),
+                        }
+                    ],
+                }
+            },
+        ),
+    )
+
+    # When: sanitizing the control match for API output
+    sanitized = _sanitize_control_match(match)
+    child_trace = sanitized.result.metadata["condition_trace"]["children"][0]
+
+    # Then: both the top-level result and nested trace use the safe timeout text
+    assert sanitized.result.error == SAFE_EVALUATOR_TIMEOUT_ERROR
+    assert sanitized.result.message == SAFE_EVALUATOR_TIMEOUT_ERROR
+    assert child_trace["error"] == SAFE_EVALUATOR_TIMEOUT_ERROR
+    assert child_trace["message"] == SAFE_EVALUATOR_TIMEOUT_ERROR
+
+
+def test_evaluation_engine_value_error_returns_422(client: TestClient, monkeypatch) -> None:
+    """Test that evaluation returns 422 when the engine raises a ValueError."""
+    # Given: a valid agent with a control assigned
+    control_data = {
+        "description": "Test control",
+        "enabled": True,
+        "execution": "server",
+        "scope": {"step_types": ["llm"], "stages": ["pre"]},
+        "selector": {"path": "input"},
+        "evaluator": {"name": "regex", "config": {"pattern": "test"}},
+        "action": {"decision": "deny"},
+    }
+    agent_name, _ = create_and_assign_policy(client, control_data)
+
+    # And: the engine raises a ValueError during processing
+    import agent_control_engine.core as core_module
+
+    async def raise_value_error(*_args, **_kwargs):
+        raise ValueError("bad config")
+
+    monkeypatch.setattr(core_module.ControlEngine, "process", raise_value_error)
+
+    # When: sending an evaluation request
+    payload = Step(type="llm", name="test-step", input="test content", output=None)
+    req = EvaluationRequest(agent_name=agent_name, step=payload, stage="pre")
+    resp = client.post("/api/v1/evaluation", json=req.model_dump(mode="json"))
+
+    # Then: a validation error is returned
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error_code"] == "EVALUATION_FAILED"
+    assert "bad config" not in body["detail"]
+    assert body["errors"][0]["message"] == "Invalid evaluation request or control configuration."
+
+
+def test_evaluation_releases_db_connection_before_engine_processing(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Evaluation should not hold a DB connection while evaluator work runs."""
+    agent_name, _ = create_and_assign_policy(client)
+    checked_out_counts: list[int] = []
+
+    import agent_control_engine.core as core_module
+
+    async def process_with_pool_assertion(*_args, **_kwargs):
+        pool = async_engine.sync_engine.pool
+        checked_out = pool.checkedout() if hasattr(pool, "checkedout") else 0
+        checked_out_counts.append(checked_out)
+        return EvaluationResponse(is_safe=True, confidence=1.0)
+
+    monkeypatch.setattr(core_module.ControlEngine, "process", process_with_pool_assertion)
+
+    payload = Step(type="llm", name="test-step", input="test content", output=None)
+    req = EvaluationRequest(agent_name=agent_name, step=payload, stage="pre")
+    resp = client.post("/api/v1/evaluation", json=req.model_dump(mode="json"))
+
+    assert resp.status_code == 200
+    assert checked_out_counts == [0]
+
+
+def test_evaluation_ignores_merge_headers_and_remains_pure(client: TestClient) -> None:
+    """/evaluation should return only semantic results regardless of merge headers."""
+    agent_name, _ = create_and_assign_policy(client)
+
+    payload = Step(type="llm", name="test-step", input="x", output=None)
+    req = EvaluationRequest(agent_name=agent_name, step=payload, stage="pre")
+    resp = client.post(
+        "/api/v1/evaluation",
+        json=req.model_dump(mode="json"),
+        headers={
+            "X-Agent-Control-Merge-Events": "true",
+            "X-Trace-Id": "a" * 32,
+            "X-Span-Id": "b" * 16,
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "events" not in body
+    assert body["is_safe"] is False
