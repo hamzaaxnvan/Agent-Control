@@ -15,3 +15,73 @@ export class System extends ClientSDK {
    * UI configuration
    *
    * @remarks
+   * Return configuration flags that drive UI behavior.
+   *
+   * If authentication is enabled, this also reports whether the current
+   * request has an active session (via header or cookie), allowing the UI
+   * to skip the login prompt on refresh when a valid cookie is present.
+   */
+  async getConfigApiConfig(
+    options?: RequestOptions,
+  ): Promise<models.ConfigResponse> {
+    return unwrapAsync(systemGetConfigApiConfig(
+      this,
+      options,
+    ));
+  }
+
+  /**
+   * Login with API key
+   *
+   * @remarks
+   * Validate an API key and issue a signed JWT session cookie.
+   *
+   * The raw API key is transmitted only in this single request and is never
+   * stored in the cookie.  Subsequent requests authenticate via the JWT.
+   */
+  async loginApi(
+    request: models.LoginRequest,
+    options?: RequestOptions,
+  ): Promise<models.LoginResponse> {
+    return unwrapAsync(systemLoginApi(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Logout (clear session cookie)
+   *
+   * @remarks
+   * Clear the session cookie.
+   */
+  async logoutApi(
+    options?: RequestOptions,
+  ): Promise<void> {
+    return unwrapAsync(systemLogoutApi(
+      this,
+      options,
+    ));
+  }
+
+  /**
+   * Health check
+   *
+   * @remarks
+   * Check if the server is running and responsive.
+   *
+   * This endpoint does not check database connectivity.
+   *
+   * Returns:
+   *     HealthResponse with status and version
+   */
+  async healthCheck(
+    options?: RequestOptions,
+  ): Promise<models.HealthResponse> {
+    return unwrapAsync(systemHealthCheck(
+      this,
+      options,
+    ));
+  }
+}
