@@ -37,3 +37,43 @@ migrate:
 	@echo "Running database migrations..."
 	$(ALEMBIC) upgrade head
 
+alembic-migrate:
+	$(ALEMBIC) revision --autogenerate -m "$(MSG)"
+
+alembic-upgrade:
+	$(ALEMBIC) upgrade $(UP)
+
+alembic-downgrade:
+	$(ALEMBIC) downgrade $(DOWN)
+
+alembic-current:
+	$(ALEMBIC) current
+
+alembic-history:
+	$(ALEMBIC) history
+
+alembic-heads:
+	$(ALEMBIC) heads
+
+alembic-show:
+	$(ALEMBIC) show $(SHOW)
+
+alembic-stamp:
+	$(ALEMBIC) stamp $(STAMP)
+
+start-dependencies:
+	AGENT_CONTROL_DB_HOST_PORT=$(AGENT_CONTROL_DB_HOST_PORT) docker compose -p $(AGENT_CONTROL_DOCKER_COMPOSE_PROJECT_NAME) -f ../docker-compose.dev.yml up -d
+	@echo "Waiting for PostgreSQL to be ready..."
+	@until docker compose -p $(AGENT_CONTROL_DOCKER_COMPOSE_PROJECT_NAME) -f ../docker-compose.dev.yml exec -T postgres pg_isready -U agent_control -d agent_control > /dev/null 2>&1; do \
+		sleep 1; \
+	done
+	@echo "PostgreSQL is ready!"
+
+test:
+	$(TEST_DB_ENV) uv run --package agent-control-server pytest --cov=src --cov-report=xml:../coverage-server.xml -q
+
+run: start-dependencies migrate run-server
+
+run-server:
+	uv run --package agent-control-server uvicorn agent_control_server.main:app --reload --host $(AGENT_CONTROL_HOST) --port $(AGENT_CONTROL_PORT)
+	

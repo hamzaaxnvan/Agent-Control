@@ -14,3 +14,36 @@ export type AddControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest 
 /** @internal */
 export type AddControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest$Outbound =
   {
+    policy_id: number;
+    control_id: number;
+  };
+
+/** @internal */
+export const AddControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest$outboundSchema:
+  z.ZodMiniType<
+    AddControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest$Outbound,
+    AddControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest
+  > = z.pipe(
+    z.object({
+      policyId: z.int(),
+      controlId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        policyId: "policy_id",
+        controlId: "control_id",
+      });
+    }),
+  );
+
+export function addControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequestToJSON(
+  addControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest:
+    AddControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest,
+): string {
+  return JSON.stringify(
+    AddControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest$outboundSchema
+      .parse(
+        addControlToPolicyApiV1PoliciesPolicyIdControlsControlIdPostRequest,
+      ),
+  );
+}
