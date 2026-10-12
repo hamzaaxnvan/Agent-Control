@@ -7,3 +7,12 @@ describe("AgentControlClient", () => {
     const client = new AgentControlClient();
 
     client.init({
+      agentName: "test-agent",
+      serverUrl: "http://localhost:8000",
+      apiKey: "test-key",
+    });
+
+    expect(client.initialized).toBe(true);
+    expect(client.config?.agentName).toBe("test-agent");
+  });
+});

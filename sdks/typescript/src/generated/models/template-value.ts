@@ -17,3 +17,23 @@ export const TemplateValue$inboundSchema: z.ZodMiniType<
   unknown
 > = smartUnion([types.string(), types.boolean(), z.array(types.string())]);
 /** @internal */
+export type TemplateValue$Outbound = string | boolean | Array<string>;
+
+/** @internal */
+export const TemplateValue$outboundSchema: z.ZodMiniType<
+  TemplateValue$Outbound,
+  TemplateValue
+> = smartUnion([z.string(), z.boolean(), z.array(z.string())]);
+
+export function templateValueToJSON(templateValue: TemplateValue): string {
+  return JSON.stringify(TemplateValue$outboundSchema.parse(templateValue));
+}
+export function templateValueFromJSON(
+  jsonString: string,
+): SafeParseResult<TemplateValue, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => TemplateValue$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'TemplateValue' from JSON`,
+  );
+}
