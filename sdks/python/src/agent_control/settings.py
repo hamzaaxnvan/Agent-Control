@@ -45,3 +45,147 @@ class SDKSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENT_CONTROL_",
         extra="ignore",
+    )
+
+    # Server connection
+    url: str = Field(
+        default="http://localhost:8000",
+        description="Base URL of the Agent Control server",
+    )
+    api_key: str = Field(
+        default="",
+        description="API key for server authentication",
+    )
+    api_key_header: str = Field(
+        default="X-API-Key",
+        description="HTTP header used to send the API key",
+    )
+
+    # Observability (event batching)
+    observability_enabled: bool = Field(
+        default=True,
+        description="Enable sending events to server",
+    )
+    observability_sink_name: str = Field(
+        default=DEFAULT_CONTROL_EVENT_SINK_NAME,
+        description="Control-event sink selection (default or registered/custom sink name)",
+    )
+    observability_sink_config: JSONObject = Field(
+        default_factory=dict,
+        description="JSON config payload passed to the selected control-event sink",
+    )
+    otel_enabled: bool = Field(
+        default=False,
+        description="Enable the built-in OpenTelemetry control-event sink",
+    )
+    otel_endpoint: str | None = Field(
+        default=None,
+        description="OTLP HTTP endpoint for OTEL control-event export",
+    )
+    otel_headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Headers to pass to the OTLP exporter",
+    )
+    otel_service_name: str = Field(
+        default="agent-control-sdk",
+        description="service.name resource for OTEL control-event spans",
+    )
+    batch_size: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum events per batch",
+    )
+    flush_interval: float = Field(
+        default=5.0,
+        gt=0,
+        description="Seconds between automatic flushes",
+    )
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        description="Maximum retry attempts for failed batch sends",
+    )
+    retry_delay: float = Field(
+        default=1.0,
+        gt=0,
+        description="Base delay between retries (seconds)",
+    )
+    shutdown_join_timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="Seconds to wait for worker thread shutdown",
+    )
+    shutdown_flush_timeout: float = Field(
+        default=5.0,
+        gt=0,
+        description="Seconds to wait for fallback shutdown flush",
+    )
+    shutdown_max_failed_flushes: int = Field(
+        default=1,
+        ge=1,
+        description="Maximum consecutive failed flushes before giving up",
+    )
+
+    # Logging configuration
+    log_enabled: bool = Field(
+        default=True,
+        description="Master switch for observability logging",
+    )
+    log_span_start: bool = Field(
+        default=True,
+        description="Log span start events",
+    )
+    log_span_end: bool = Field(
+        default=True,
+        description="Log span end events",
+    )
+    log_control_eval: bool = Field(
+        default=True,
+        description="Log per-control evaluation events",
+    )
+    log_span_results: bool = Field(
+        default=True,
+        description="Log span results (legacy compatibility)",
+    )
+
+
+# Global settings instance - loaded from environment at import time
+settings = SDKSettings()
+
+
+def load_settings_from_env() -> SDKSettings:
+    """Load a fresh settings snapshot directly from environment variables."""
+    return SDKSettings()
+
+
+def get_settings() -> SDKSettings:
+    """Get the current settings instance."""
+    return settings
+
+
+def configure_settings(**kwargs: Any) -> SDKSettings:
+    """
+    Override settings programmatically.
+
+    This creates a new settings instance with the provided overrides
+    and replaces the global instance.
+
+    Args:
+        **kwargs: Setting names and values to override
+
+    Returns:
+        The updated settings instance
+
+    Example:
+        configure_settings(
+            observability_enabled=True,
+            batch_size=50,
+            log_control_eval=False,
+        )
+    """
+    global settings
+    # Get current values as dict, apply overrides
+    current = settings.model_dump()
+    current.update(kwargs)
+    settings = SDKSettings(**current)
+    return settings
