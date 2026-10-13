@@ -19,3 +19,24 @@ export type ListPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest$Outbound =
 export const ListPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest$outboundSchema:
   z.ZodMiniType<
     ListPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest$Outbound,
+    ListPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest
+  > = z.pipe(
+    z.object({
+      policyId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        policyId: "policy_id",
+      });
+    }),
+  );
+
+export function listPolicyControlsApiV1PoliciesPolicyIdControlsGetRequestToJSON(
+  listPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest:
+    ListPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest,
+): string {
+  return JSON.stringify(
+    ListPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest$outboundSchema
+      .parse(listPolicyControlsApiV1PoliciesPolicyIdControlsGetRequest),
+  );
+}
