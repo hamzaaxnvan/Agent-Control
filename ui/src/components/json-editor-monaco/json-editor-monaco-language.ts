@@ -1128,3 +1128,1134 @@ function buildSchemaPropertySuggestions(
   offset: number
 ) {
   if (!schemaCursor.schema) {
+    return [];
+  }
+
+  const objectNode = tree ? findNodeAtLocation(tree, objectPath) : undefined;
+  // Use AST-based key detection, with text-based fallback for broken JSON
+  const existingKeys = objectNode
+    ? getObjectPropertyNames(objectNode)
+    : getExistingKeysFromText(text, offset);
+  if (currentPropertyName) {
+    existingKeys.delete(currentPropertyName);
+  }
+
+  return Object.entries(getSchemaProperties(schemaCursor.schema))
+    .filter(
+      ([propertyName]) =>
+        !existingKeys.has(propertyName) && !propertyName.startsWith('$')
+    )
+    .map(([propertyName, propertySchema], index) => ({
+      label: propertyName,
+      kind: monaco.languages.CompletionItemKind.Property,
+      detail: getSchemaDescription(propertySchema),
+      documentation: getSchemaDescription(propertySchema),
+      insertText: buildPropertyInsertText(
+        propertyName,
+        asSchema(propertySchema),
+        schemaCursor.rootSchema,
+        replaceExistingKey
+      ),
+      insertTextRules:
+        monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      range,
+      sortText: `!1${index.toString().padStart(3, '0')}`,
+    }));
+}
+
+function buildSchemaValueSuggestions(
+  monaco: MonacoModule,
+  range: import('monaco-editor').IRange,
+  schemaCursor: SchemaCursor,
+  isStringValueContext: boolean,
+  currentValue?: string
+) {
+  const schema = schemaCursor.schema;
+  if (!schema) {
+    return [];
+  }
+
+  const suggestions: import('monaco-editor').languages.CompletionItem[] = [];
+  const enumValues = getSchemaEnumValues(schema);
+
+  if (enumValues.length > 0) {
+    suggestions.push(
+      ...enumValues.map((value, index) => ({
+        label: String(value),
+        kind: monaco.languages.CompletionItemKind.Value,
+        detail: getSchemaTitle(schema) ?? getSchemaDescription(schema),
+        insertText: buildValueInsertText(value, isStringValueContext),
+        filterText: currentValue ?? undefined,
+        range,
+        sortText: `!2${index.toString().padStart(3, '0')}`,
+      }))
+    );
+    return suggestions;
+  }
+
+  const schemaType = getSchemaType(schema);
+  if (schemaType === 'boolean') {
+    suggestions.push(
+      ...['true', 'false'].map((value, index) => ({
+        label: value,
+        kind: monaco.languages.CompletionItemKind.Value,
+        detail: getSchemaTitle(schema) ?? getSchemaDescription(schema),
+        insertText: value,
+        range,
+        sortText: `!2${index.toString().padStart(3, '0')}`,
+      }))
+    );
+    return suggestions;
+  }
+
+  const preferredValues = [
+    getSchemaDefault(schema),
+    ...getSchemaExamples(schema),
+  ].filter((value, index, collection) => {
+    if (value === undefined || value === null) {
+      return false;
+    }
+
+    return collection.findIndex((candidate) => candidate === value) === index;
+  });
+
+  for (const [index, value] of preferredValues.entries()) {
+    suggestions.push({
+      label: typeof value === 'string' ? value : toJsonLiteral(value),
+      kind: monaco.languages.CompletionItemKind.Value,
+      detail: 'Schema example',
+      insertText: buildValueInsertText(value, isStringValueContext),
+      range,
+      sortText: `!3${index.toString().padStart(3, '0')}`,
+    });
+  }
+
+  if (schemaType === 'object' || schemaType === 'array') {
+    const snippetState: SnippetState = { nextTabStop: 1 };
+    suggestions.push({
+      label: schemaType === 'object' ? 'object' : 'array',
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      detail:
+        schemaType === 'object'
+          ? 'Insert an object matching the schema'
+          : 'Insert an array matching the schema',
+      documentation: getSchemaDescription(schema),
+      insertText: buildSchemaValueSnippet(
+        schema,
+        schemaCursor.rootSchema,
+        snippetState
+      ),
+      insertTextRules:
+        monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      range,
+      sortText: '!4schema',
+    });
+  }
+
+  return suggestions;
+}
+
+function getCompletionLabel(
+  item: import('monaco-editor').languages.CompletionItem
+): string {
+  return typeof item.label === 'string' ? item.label : item.label.label;
+}
+
+function dedupeSuggestions(
+  suggestions: import('monaco-editor').languages.CompletionItem[]
+) {
+  const seen = new Set<string>();
+
+  return suggestions.filter((item) => {
+    const key = `${getCompletionLabel(item)}::${String(item.insertText ?? '')}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildCompletionSuggestions(
+  monaco: MonacoModule,
+  model: import('monaco-editor').editor.ITextModel,
+  position: import('monaco-editor').Position,
+  context: JsonEditorAutocompleteContext
+): import('monaco-editor').languages.CompletionItem[] {
+  const text = model.getValue();
+  const offset = model.getOffsetAt(position);
+  const tree = parseTree(text);
+  const location = getLocation(text, offset);
+  const node =
+    tree && offset > 0 ? findNodeAtOffset(tree, offset - 1, true) : tree;
+  const valueRange = getReplaceRange(monaco, model, position, node);
+  const isStringValueContext =
+    node?.type === 'string' && !location.isAtPropertyKey;
+  const suggestions: import('monaco-editor').languages.CompletionItem[] = [];
+
+  // For template mode, compute the relative path inside definition_template.
+  // When the cursor is outside definition_template, we provide envelope-level
+  // completions (template_values keys, $param names) instead.
+  const isTemplate = context.mode === 'template';
+  const relativePath = isTemplate
+    ? stripDefinitionPrefix(location.path, context.definitionPrefix)
+    : null;
+  const insideDefinition = isTemplate ? relativePath !== null : true;
+
+  // Use the relative path for location checks in template mode, otherwise
+  // use the original path.
+  const effectivePath = isTemplate
+    ? (relativePath ?? location.path)
+    : location.path;
+
+  const activeEvaluator = resolveActiveEvaluator(context, tree, location.path);
+
+  // --- $param name completions (inside {"$param": ""}) ---
+  if (isTemplate && isParamRefValueLocation(effectivePath)) {
+    suggestions.push(
+      ...buildParamNameSuggestions(
+        monaco,
+        valueRange,
+        context.templateParameterNames,
+        isStringValueContext
+      )
+    );
+    return dedupeSuggestions(suggestions);
+  }
+
+  // --- template_values property key completions ---
+  if (isTemplate && isInsideTemplateValues(location.path)) {
+    const propertyKeyContext = getPropertyKeyContext(
+      location.path,
+      location.isAtPropertyKey
+    );
+    if (propertyKeyContext) {
+      const hasStringNode = node?.type === 'string';
+      const propertyRange =
+        (hasStringNode
+          ? getPropertyKeyReplaceRange(monaco, model, node)
+          : null) ?? getDefaultRange(monaco, model, position);
+      suggestions.push(
+        ...buildTemplateValueKeySuggestions(
+          monaco,
+          propertyRange,
+          context.templateParameterNames,
+          tree,
+          hasStringNode,
+          text,
+          offset
+        )
+      );
+    }
+    return dedupeSuggestions(suggestions);
+  }
+
+  // --- Inside definition_template (or non-template mode): control-level completions ---
+  if (insideDefinition) {
+    if (isEvaluatorNameLocation(effectivePath)) {
+      suggestions.push(
+        ...buildEvaluatorNameSuggestions(
+          monaco,
+          valueRange,
+          context.evaluators,
+          isStringValueContext
+        )
+      );
+    }
+
+    if (isSelectorPathLocation(effectivePath)) {
+      suggestions.push(
+        ...buildSelectorSuggestions(
+          monaco,
+          valueRange,
+          context.steps,
+          tree,
+          isStringValueContext,
+          context.definitionPrefix
+        )
+      );
+    }
+
+    const propertyKeyContext = getPropertyKeyContext(
+      effectivePath,
+      location.isAtPropertyKey
+    );
+
+    if (propertyKeyContext) {
+      // Only treat as replacing when cursor is inside a quoted string node.
+      // For bare text (typing without "), we need the leading " in the insert.
+      const hasStringNode = node?.type === 'string';
+      const replaceExistingKey = hasStringNode;
+
+      const propertyRange =
+        (hasStringNode
+          ? getPropertyKeyReplaceRange(monaco, model, node)
+          : null) ?? getDefaultRange(monaco, model, position);
+
+      // For template mode, the schema path uses the original (absolute) path
+      // since resolveSchemaAtJsonPath handles prefix stripping internally.
+      const schemaObjectPath = isTemplate
+        ? [
+            ...(context.definitionPrefix ?? []),
+            ...propertyKeyContext.objectPath,
+          ]
+        : propertyKeyContext.objectPath;
+      const schemaCursor = resolveSchemaAtJsonPath(
+        context,
+        activeEvaluator,
+        schemaObjectPath
+      );
+      const currentPropertyName =
+        replaceExistingKey && typeof node?.value === 'string'
+          ? node.value
+          : null;
+
+      suggestions.push(
+        ...buildSchemaPropertySuggestions(
+          monaco,
+          propertyRange,
+          schemaCursor,
+          tree,
+          isTemplate
+            ? [
+                ...(context.definitionPrefix ?? []),
+                ...propertyKeyContext.objectPath,
+              ]
+            : propertyKeyContext.objectPath,
+          replaceExistingKey,
+          currentPropertyName,
+          text,
+          offset
+        )
+      );
+    }
+
+    // Only show value suggestions at actual value positions — not on blank lines,
+    // closing brackets, or property key positions where they're confusing noise.
+    const isValuePosition =
+      !propertyKeyContext && !location.isAtPropertyKey && isStringValueContext;
+    if (isValuePosition) {
+      const valueSchemaCursor = resolveSchemaAtJsonPath(
+        context,
+        activeEvaluator,
+        location.path
+      );
+
+      suggestions.push(
+        ...buildSchemaValueSuggestions(
+          monaco,
+          valueRange,
+          valueSchemaCursor,
+          isStringValueContext,
+          typeof node?.value === 'string' ? node.value : undefined
+        )
+      );
+
+      // In template mode, also offer $param references at value positions
+      if (isTemplate) {
+        suggestions.push(
+          ...buildParamRefObjectSuggestions(
+            monaco,
+            valueRange,
+            context.templateParameterNames,
+            isStringValueContext
+          )
+        );
+      }
+    }
+  }
+
+  return dedupeSuggestions(suggestions);
+}
+
+export function fixJsonCommas(text: string): string {
+  // 1. Remove trailing commas before } or ] without touching string literals.
+  let fixed = removeTrailingCommasOutsideStrings(text);
+
+  // 2. Insert missing commas (detected by jsonc-parser)
+  const errors: ParseError[] = [];
+  parseTree(fixed, errors);
+
+  const commaErrors = errors
+    .filter((e) => e.error === 6 /* CommaExpected */)
+    .sort((a, b) => b.offset - a.offset);
+
+  for (const error of commaErrors) {
+    // Insert comma at end of previous value (before whitespace), not at
+    // the start of the next token where jsonc-parser reports the error.
+    let insertAt = error.offset;
+    while (insertAt > 0 && /\s/.test(fixed[insertAt - 1])) {
+      insertAt -= 1;
+    }
+    fixed = fixed.slice(0, insertAt) + ',' + fixed.slice(insertAt);
+  }
+  return fixed;
+}
+
+export function getJsonEditorCompletionItems(
+  monaco: MonacoModule,
+  model: import('monaco-editor').editor.ITextModel,
+  position: import('monaco-editor').Position,
+  context: JsonEditorAutocompleteContext
+) {
+  return buildCompletionSuggestions(monaco, model, position, context);
+}
+
+type EvaluatorNodeInfo = {
+  name: string;
+  nameNode: JsonNode;
+  configNode: JsonNode | undefined;
+  evaluatorNode: JsonNode;
+};
+
+function collectEvaluatorNames(
+  node: JsonNode | undefined,
+  result: Map<string, EvaluatorNodeInfo>
+) {
+  if (!node || node.type !== 'object' || !node.children) return;
+
+  const evaluatorNode = findNodeAtLocation(node, ['evaluator']);
+  if (evaluatorNode?.type === 'object') {
+    const nameNode = findNodeAtLocation(evaluatorNode, ['name']);
+    const configNode = findNodeAtLocation(evaluatorNode, ['config']);
+    if (nameNode && typeof nameNode.value === 'string') {
+      result.set(`${nameNode.offset}`, {
+        name: nameNode.value,
+        nameNode,
+        configNode,
+        evaluatorNode,
+      });
+    }
+  }
+
+  for (const key of ['and', 'or'] as const) {
+    const arrayNode = findNodeAtLocation(node, [key]);
+    if (arrayNode?.type === 'array' && arrayNode.children) {
+      for (const child of arrayNode.children) {
+        collectEvaluatorNames(child, result);
+      }
+    }
+  }
+
+  const notNode = findNodeAtLocation(node, ['not']);
+  if (notNode?.type === 'object') {
+    collectEvaluatorNames(notNode, result);
+  }
+}
+
+export function extractEvaluatorNames(
+  text: string,
+  definitionPrefix?: JsonPath
+): Map<string, string> {
+  const tree = parseTree(text);
+  if (!tree) return new Map();
+
+  const subtree = getDefinitionSubtree(tree, definitionPrefix);
+  const conditionNode = subtree
+    ? findNodeAtLocation(subtree, ['condition'])
+    : undefined;
+  const result = new Map<string, EvaluatorNodeInfo>();
+  collectEvaluatorNames(conditionNode, result);
+
+  const names = new Map<string, string>();
+  for (const [key, info] of result) {
+    names.set(key, info.name);
+  }
+  return names;
+}
+
+function getDefaultValueForSchema(propSchema: JsonSchema): unknown {
+  const defaultValue = getSchemaDefault(propSchema);
+  if (defaultValue !== undefined) return defaultValue;
+
+  const enumValues = getSchemaEnumValues(propSchema);
+  if (enumValues.length > 0) return enumValues[0];
+
+  switch (getSchemaType(propSchema)) {
+    case 'string':
+      return '';
+    case 'number':
+    case 'integer':
+      return 0;
+    case 'boolean':
+      return false;
+    case 'array':
+      return [];
+    case 'object':
+      return {};
+    default:
+      return null;
+  }
+}
+
+export function buildDefaultConfig(
+  configSchema: unknown
+): Record<string, unknown> {
+  const schema = asSchema(configSchema);
+  if (!schema) return {};
+
+  const normalized = normalizeSchema(schema, schema);
+  if (!normalized) return {};
+
+  const properties = getSchemaProperties(normalized);
+  const required = new Set(getSchemaRequiredProperties(normalized));
+  const config: Record<string, unknown> = {};
+
+  // Include ALL properties — required ones get type-appropriate defaults,
+  // optional ones with explicit defaults get those defaults.
+  for (const [propName, rawPropSchema] of Object.entries(properties)) {
+    const propSchema = normalizeSchema(rawPropSchema, schema);
+    if (!propSchema) continue;
+
+    const explicitDefault = getSchemaDefault(propSchema);
+    if (required.has(propName) || explicitDefault !== undefined) {
+      config[propName] = getDefaultValueForSchema(propSchema);
+    }
+  }
+
+  return config;
+}
+
+export function findEvaluatorConfigEdit(
+  text: string,
+  previousNames: Map<string, string>,
+  evaluators: JsonEditorEvaluatorOption[] | undefined,
+  definitionPrefix?: JsonPath
+): { offset: number; length: number; newText: string } | null {
+  const tree = parseTree(text);
+  if (!tree) return null;
+
+  const subtree = getDefinitionSubtree(tree, definitionPrefix);
+  const conditionNode = subtree
+    ? findNodeAtLocation(subtree, ['condition'])
+    : undefined;
+  const result = new Map<string, EvaluatorNodeInfo>();
+  collectEvaluatorNames(conditionNode, result);
+
+  for (const [key, { name, configNode, nameNode }] of result) {
+    const prevName = previousNames.get(key);
+    if (prevName === undefined || prevName === name) continue;
+
+    const evaluator = evaluators?.find((e) => e.id === name);
+    if (!evaluator) continue;
+
+    const defaultConfig = buildDefaultConfig(evaluator.configSchema);
+    const configJson = JSON.stringify(defaultConfig, null, 2);
+
+    if (configNode) {
+      // Replace existing config
+      return {
+        offset: configNode.offset,
+        length: configNode.length,
+        newText: configJson,
+      };
+    }
+
+    // No config property yet — insert after the name property.
+    // Find the end of the "name": "value" property in the source text.
+    const nameEnd = nameNode.offset + nameNode.length;
+    return {
+      offset: nameEnd,
+      length: 0,
+      newText: `,\n"config": ${configJson}`,
+    };
+  }
+
+  return null;
+}
+
+export function findSteeringContextEdit(
+  text: string,
+  previousDecision: string | null,
+  definitionPrefix?: JsonPath
+): { offset: number; length: number; newText: string } | null {
+  const tree = parseTree(text);
+  if (!tree) return null;
+
+  const subtree = getDefinitionSubtree(tree, definitionPrefix);
+  if (!subtree) return null;
+
+  const decisionNode = findNodeAtLocation(subtree, ['action', 'decision']);
+  if (!decisionNode || typeof decisionNode.value !== 'string') return null;
+
+  const currentDecision = decisionNode.value;
+  if (currentDecision === previousDecision) return null;
+
+  if (currentDecision === 'steer') {
+    // Add steering_context if missing
+    const steeringNode = findNodeAtLocation(subtree, [
+      'action',
+      'steering_context',
+    ]);
+    if (!steeringNode) {
+      const decisionEnd = decisionNode.offset + decisionNode.length;
+      return {
+        offset: decisionEnd,
+        length: 0,
+        newText: `,\n"steering_context": {"message": "Please correct your response."}`,
+      };
+    }
+  } else if (previousDecision === 'steer') {
+    // Remove steering_context when switching away from steer
+    const actionNode = findNodeAtLocation(subtree, ['action']);
+    if (actionNode?.type === 'object' && actionNode.children) {
+      for (const prop of actionNode.children) {
+        const key = prop.children?.[0];
+        if (key?.value === 'steering_context') {
+          // Find range including the preceding comma
+          let start = prop.offset;
+          while (start > 0 && /[\s,]/.test(text[start - 1])) {
+            start -= 1;
+          }
+          return {
+            offset: start,
+            length: prop.offset + prop.length - start,
+            newText: '',
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+const MAX_HINT_VALUES = 6;
+
+export function getEmptyValueHints(
+  monaco: MonacoModule,
+  model: import('monaco-editor').editor.ITextModel,
+  context: JsonEditorAutocompleteContext
+): Array<{ range: import('monaco-editor').IRange; hint: string }> {
+  const text = model.getValue();
+  const tree = parseTree(text);
+  if (!tree) return [];
+
+  const hints: Array<{ range: import('monaco-editor').IRange; hint: string }> =
+    [];
+
+  // Hints for empty string values
+  const emptyStringPattern = /:\s*""/g;
+  let match;
+
+  const isTemplate = context.mode === 'template';
+
+  while ((match = emptyStringPattern.exec(text)) !== null) {
+    const offset = match.index + match[0].length - 1;
+    const location = getLocation(text, offset);
+    if (location.isAtPropertyKey) continue;
+
+    const pos = model.getPositionAt(offset);
+    const range = new monaco.Range(
+      pos.lineNumber,
+      pos.column,
+      pos.lineNumber,
+      pos.column
+    );
+
+    // For template mode, use relative path for location checks
+    const effectivePath = isTemplate
+      ? (stripDefinitionPrefix(location.path, context.definitionPrefix) ??
+        location.path)
+      : location.path;
+
+    // $param value hint — show available parameter names
+    if (isTemplate && isParamRefValueLocation(effectivePath)) {
+      const paramNames = context.templateParameterNames;
+      if (paramNames?.length) {
+        const display = paramNames.slice(0, MAX_HINT_VALUES);
+        const hint =
+          display.join('  |  ') +
+          (paramNames.length > MAX_HINT_VALUES ? '  | ...' : '');
+        hints.push({ range, hint: `  ${hint}` });
+      }
+      continue;
+    }
+
+    const activeEvaluator = resolveActiveEvaluator(
+      context,
+      tree,
+      location.path
+    );
+
+    if (isEvaluatorNameLocation(effectivePath) && context.evaluators?.length) {
+      const names = context.evaluators.map((e) => e.id);
+      const display = names.slice(0, MAX_HINT_VALUES);
+      const hint =
+        display.join('  |  ') +
+        (names.length > MAX_HINT_VALUES ? '  | ...' : '');
+      hints.push({ range, hint: `  ${hint}` });
+      continue;
+    }
+
+    if (isSelectorPathLocation(effectivePath)) {
+      hints.push({
+        range,
+        hint: '  *  |  input  |  output  |  context  |  ...',
+      });
+      continue;
+    }
+
+    const schemaCursor = resolveSchemaAtJsonPath(
+      context,
+      activeEvaluator,
+      location.path
+    );
+    if (!schemaCursor.schema) continue;
+
+    const enumValues = getSchemaEnumValues(schemaCursor.schema);
+    if (enumValues.length > 0 && enumValues.length <= MAX_HINT_VALUES) {
+      hints.push({
+        range,
+        hint: `  ${enumValues.map(String).join('  |  ')}`,
+      });
+    }
+  }
+
+  return hints;
+}
+
+// Default Monaco JSON mode configuration with completionItems disabled.
+// We disable the built-in JSON completion provider to avoid duplicate suggestions
+export function setupJsonEditorLanguageSupport(
+  monaco: MonacoModule,
+  context: JsonEditorAutocompleteContext
+) {
+  const jsonDefaults = (
+    monaco.languages.json as unknown as {
+      jsonDefaults?: {
+        setDiagnosticsOptions: (options: {
+          validate: boolean;
+          allowComments: boolean;
+          schemas: Array<{
+            fileMatch: string[];
+            uri: string;
+            schema: JsonSchema;
+          }>;
+        }) => void;
+      };
+    }
+  ).jsonDefaults;
+
+  // Validate JSON syntax only and suppress Monaco's built-in completions.
+  // Passing a restrictive schema (type:object + additionalProperties:true)
+  // prevents the worker-based provider from suggesting "$schema" and other
+  // JSON meta-keywords. Our custom provider handles all domain completions.
+  jsonDefaults?.setDiagnosticsOptions({
+    validate: true,
+    allowComments: false,
+    schemas: [
+      {
+        uri: 'internal://control-definition/schema.json',
+        fileMatch: ['*'],
+        schema: { type: 'object', additionalProperties: true },
+      },
+    ],
+  });
+
+  const jsonMode = (
+    monaco.languages.json as unknown as {
+      jsonDefaults?: {
+        setModeConfiguration?: (config: {
+          completionItems?: { enable?: boolean };
+        }) => void;
+      };
+    }
+  ).jsonDefaults;
+  jsonMode?.setModeConfiguration?.({ completionItems: { enable: false } });
+
+  const hoverDisposable = monaco.languages.registerHoverProvider('json', {
+    provideHover(model, position) {
+      if (model.uri.toString() !== context.modelUri) return null;
+      if (!context.schema) return null;
+
+      const text = model.getValue();
+      const offset = model.getOffsetAt(position);
+      const tree = parseTree(text);
+      const location = getLocation(text, offset);
+      if (!location.path.length) return null;
+
+      // In template mode, show a hover for $param references
+      if (context.mode === 'template') {
+        const effectivePath =
+          stripDefinitionPrefix(location.path, context.definitionPrefix) ??
+          location.path;
+        if (isParamRefValueLocation(effectivePath)) {
+          const node = tree ? findNodeAtOffset(tree, offset, true) : null;
+          if (node?.type === 'string' && typeof node.value === 'string') {
+            const word = model.getWordAtPosition(position);
+            return {
+              range: word
+                ? new monaco.Range(
+                    position.lineNumber,
+                    word.startColumn,
+                    position.lineNumber,
+                    word.endColumn
+                  )
+                : undefined,
+              contents: [
+                {
+                  value: `**Template parameter:** \`${node.value}\`\n\nThis value will be substituted from template_values at render time.`,
+                },
+              ],
+            };
+          }
+        }
+      }
+
+      const activeEvaluator = resolveActiveEvaluator(
+        context,
+        tree,
+        location.path
+      );
+      const cursor = resolveSchemaAtJsonPath(
+        context,
+        activeEvaluator,
+        location.isAtPropertyKey ? location.path.slice(0, -1) : location.path
+      );
+
+      // For property keys, show the property's schema description
+      if (location.isAtPropertyKey) {
+        const propName = location.path[location.path.length - 1];
+        if (typeof propName !== 'string' || !cursor.schema) return null;
+        const propSchema = getSchemaAtProperty(
+          cursor.schema,
+          propName,
+          cursor.rootSchema
+        );
+        const desc = getSchemaDescription(propSchema);
+        const title = getSchemaTitle(propSchema);
+        if (!desc && !title) return null;
+
+        const word = model.getWordAtPosition(position);
+        const range = word
+          ? new monaco.Range(
+              position.lineNumber,
+              word.startColumn,
+              position.lineNumber,
+              word.endColumn
+            )
+          : undefined;
+
+        return {
+          range,
+          contents: [
+            {
+              value: `**${title ?? propName}**${desc ? '\n\n' + desc : ''}`,
+            },
+          ],
+        };
+      }
+
+      // For values, show the value's schema info
+      if (cursor.schema) {
+        const desc = getSchemaDescription(cursor.schema);
+        const title = getSchemaTitle(cursor.schema);
+        const enumVals = getSchemaEnumValues(cursor.schema);
+        if (!desc && !title && enumVals.length === 0) return null;
+
+        const parts: string[] = [];
+        if (title) parts.push(`**${title}**`);
+        if (desc) parts.push(desc);
+        if (enumVals.length > 0)
+          parts.push(`Values: \`${enumVals.join('` | `')}\``);
+
+        const word = model.getWordAtPosition(position);
+        const range = word
+          ? new monaco.Range(
+              position.lineNumber,
+              word.startColumn,
+              position.lineNumber,
+              word.endColumn
+            )
+          : undefined;
+
+        return {
+          range,
+          contents: [{ value: parts.join('\n\n') }],
+        };
+      }
+
+      return null;
+    },
+  });
+
+  const disposable = monaco.languages.registerCompletionItemProvider('json', {
+    triggerCharacters: COMPLETION_TRIGGER_CHARACTERS,
+    provideCompletionItems(model, position) {
+      if (model.uri.toString() !== context.modelUri) {
+        return { suggestions: [] };
+      }
+
+      return {
+        suggestions: getJsonEditorCompletionItems(
+          monaco,
+          model,
+          position,
+          context
+        ),
+      };
+    },
+  });
+
+  const codeActionDisposable = registerConditionCodeActions(monaco, context);
+
+  return () => {
+    hoverDisposable.dispose();
+    disposable.dispose();
+    codeActionDisposable.dispose();
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Condition Code Actions (lightbulb refactoring)
+// ---------------------------------------------------------------------------
+
+const LEAF_CONDITION_TEMPLATE = {
+  selector: { path: '*' },
+  evaluator: { name: '', config: {} },
+};
+
+function findConditionNodeAtOffset(
+  tree: JsonNode | undefined,
+  offset: number,
+  conditionPath: JsonPath = ['condition']
+): {
+  node: JsonNode;
+  isLeaf: boolean;
+  isArray: boolean;
+  arrayKey: string | null;
+} | null {
+  if (!tree) return null;
+
+  const conditionNode = findNodeAtLocation(tree, conditionPath);
+  if (!conditionNode) return null;
+
+  return findConditionAtOffset(conditionNode, offset);
+}
+
+function findConditionAtOffset(
+  node: JsonNode,
+  offset: number
+): {
+  node: JsonNode;
+  isLeaf: boolean;
+  isArray: boolean;
+  arrayKey: string | null;
+} | null {
+  if (offset < node.offset || offset > node.offset + node.length) return null;
+
+  if (node.type === 'object' && node.children) {
+    for (const prop of node.children) {
+      const key = prop.children?.[0]?.value;
+      const value = prop.children?.[1];
+      if (!value) continue;
+
+      if (key === 'and' || key === 'or') {
+        if (value.type === 'array' && value.children) {
+          // Check if offset is inside an array item
+          for (const item of value.children) {
+            const inner = findConditionAtOffset(item, offset);
+            if (inner) return inner;
+          }
+          // Offset is in the array but not inside a specific item
+          if (offset >= value.offset && offset <= value.offset + value.length) {
+            return {
+              node,
+              isLeaf: false,
+              isArray: true,
+              arrayKey: key as string,
+            };
+          }
+        }
+      } else if (key === 'not' && value.type === 'object') {
+        const inner = findConditionAtOffset(value, offset);
+        if (inner) return inner;
+      }
+    }
+
+    // We're on this object node itself
+    const hasSelector = !!findNodeAtLocation(node, ['selector']);
+    const hasEvaluator = !!findNodeAtLocation(node, ['evaluator']);
+    const hasAnd = !!findNodeAtLocation(node, ['and']);
+    const hasOr = !!findNodeAtLocation(node, ['or']);
+    const hasNot = !!findNodeAtLocation(node, ['not']);
+    const isLeaf = (hasSelector || hasEvaluator) && !hasAnd && !hasOr;
+
+    return {
+      node,
+      isLeaf,
+      isArray: false,
+      arrayKey: hasAnd ? 'and' : hasOr ? 'or' : hasNot ? 'not' : null,
+    };
+  }
+
+  return null;
+}
+
+function registerConditionCodeActions(
+  monaco: MonacoModule,
+  context: JsonEditorAutocompleteContext
+) {
+  return monaco.languages.registerCodeActionProvider('json', {
+    provideCodeActions(model, range) {
+      if (model.uri.toString() !== context.modelUri)
+        return { actions: [], dispose() {} };
+      if (context.mode !== 'control' && context.mode !== 'template')
+        return { actions: [], dispose() {} };
+
+      const text = model.getValue();
+      const tree = parseTree(text);
+      if (!tree) return { actions: [], dispose() {} };
+
+      const offset = model.getOffsetAt(range.getStartPosition());
+      const conditionPath = [...(context.definitionPrefix ?? []), 'condition'];
+      const condCtx = findConditionNodeAtOffset(tree, offset, conditionPath);
+      if (!condCtx) return { actions: [], dispose() {} };
+
+      const actions: import('monaco-editor').languages.CodeAction[] = [];
+      const { node, isLeaf, isArray, arrayKey } = condCtx;
+
+      const candidates: (
+        | import('monaco-editor').languages.CodeAction
+        | null
+      )[] = [];
+
+      if (isLeaf) {
+        candidates.push(
+          buildNodeTransformAction(
+            monaco,
+            model,
+            node,
+            'Wrap in AND (add another condition)',
+            (p) => ({ and: [p, LEAF_CONDITION_TEMPLATE] })
+          ),
+          buildNodeTransformAction(
+            monaco,
+            model,
+            node,
+            'Wrap in OR (add another condition)',
+            (p) => ({ or: [p, LEAF_CONDITION_TEMPLATE] })
+          ),
+          buildNodeTransformAction(monaco, model, node, 'Wrap in NOT', (p) => ({
+            not: p,
+          }))
+        );
+      }
+
+      if (isArray && (arrayKey === 'and' || arrayKey === 'or')) {
+        const otherKey = arrayKey === 'and' ? 'or' : 'and';
+        candidates.push(
+          buildNodeTransformAction(
+            monaco,
+            model,
+            node,
+            `Add condition to ${arrayKey.toUpperCase()}`,
+            (p) => {
+              const o = p as Record<string, unknown>;
+              const a = o[arrayKey];
+              if (!Array.isArray(a)) return undefined;
+              return { ...o, [arrayKey]: [...a, LEAF_CONDITION_TEMPLATE] };
+            }
+          ),
+          buildNodeTransformAction(
+            monaco,
+            model,
+            node,
+            `Convert ${arrayKey.toUpperCase()} to ${otherKey.toUpperCase()}`,
+            (p) => {
+              const o = p as Record<string, unknown>;
+              const a = o[arrayKey];
+              delete o[arrayKey];
+              return { ...o, [otherKey]: a };
+            }
+          )
+        );
+      }
+
+      if (arrayKey === 'not') {
+        candidates.push(
+          buildNodeTransformAction(
+            monaco,
+            model,
+            node,
+            'Remove NOT (unwrap)',
+            (p) => (p as Record<string, unknown>).not
+          )
+        );
+      }
+
+      for (const action of candidates) {
+        if (action) actions.push(action);
+      }
+
+      return { actions, dispose() {} };
+    },
+  });
+}
+
+function buildNodeTransformAction(
+  monaco: MonacoModule,
+  model: import('monaco-editor').editor.ITextModel,
+  node: JsonNode,
+  title: string,
+  transform: (parsed: unknown) => unknown
+): import('monaco-editor').languages.CodeAction | null {
+  // Parse the full document, apply the transform to the target node,
+  // then re-serialize the whole document. This produces a single edit
+  // that replaces the entire content with properly formatted JSON,
+  // making undo a clean single-step revert.
+  const fullText = model.getValue();
+  const nodeText = fullText.substring(node.offset, node.offset + node.length);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(nodeText);
+  } catch {
+    return null;
+  }
+
+  const result = transform(parsed);
+  if (result === undefined) return null;
+
+  // Rebuild full document with the transformed node
+  const newNodeText = JSON.stringify(result);
+  const rawDoc =
+    fullText.substring(0, node.offset) +
+    newNodeText +
+    fullText.substring(node.offset + node.length);
+
+  let newText: string;
+  try {
+    newText = JSON.stringify(JSON.parse(rawDoc), null, 2);
+  } catch {
+    // Fallback: just replace the node
+    newText =
+      fullText.substring(0, node.offset) +
+      JSON.stringify(result, null, 2) +
+      fullText.substring(node.offset + node.length);
+  }
+
+  const fullRange = model.getFullModelRange();
+
+  return {
+    title,
+    kind: 'refactor',
+    edit: {
+      edits: [
+        {
+          resource: model.uri,
+          textEdit: {
+            range: new monaco.Range(
+              fullRange.startLineNumber,
+              fullRange.startColumn,
+              fullRange.endLineNumber,
+              fullRange.endColumn
+            ),
+            text: newText,
+          },
+          versionId: model.getVersionId(),
+        },
+      ],
+    },
+  };
+}
