@@ -103,3 +103,109 @@ def test_get_log_level_name_treats_blank_env_as_unset(monkeypatch) -> None:
     assert resolved == "DEBUG"
 
 
+def test_get_uvicorn_log_level_name_falls_back_from_notset(monkeypatch) -> None:
+    # Given: a configured level that Python logging accepts but uvicorn does not
+    monkeypatch.setenv("AGENT_CONTROL_LOG_LEVEL", "NOTSET")
+
+    # When: resolving the uvicorn log level
+    resolved = get_uvicorn_log_level_name("DEBUG")
+
+    # Then: uvicorn gets a supported fallback level
+    assert resolved == "DEBUG"
+
+
+def test_configure_logging_resets_uvicorn_handlers() -> None:
+    # Given: a uvicorn logger with a custom handler
+    logger = logging.getLogger("uvicorn")
+    handler = logging.StreamHandler()
+    original_handlers = list(logger.handlers)
+    original_level = logger.level
+    original_propagate = logger.propagate
+    logger.addHandler(handler)
+
+    root = logging.getLogger()
+    root_handlers = list(root.handlers)
+    root_level = root.level
+
+    try:
+        # When: configuring logging
+        configure_logging(level="INFO", json=False)
+
+        # Then: uvicorn handlers are removed and propagate is enabled
+        assert handler not in logger.handlers
+        assert logger.propagate is True
+        assert logger.level == logging.INFO
+    finally:
+        # Restore logger state to avoid cross-test side effects
+        logger.handlers = original_handlers
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+        root.handlers = root_handlers
+        root.setLevel(root_level)
+
+
+def test_should_configure_logging_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_CONTROL_CONFIGURE_LOGGING", "false")
+
+    assert should_configure_logging() is False
+
+
+def test_access_log_enabled_defaults_to_true() -> None:
+    assert access_log_enabled() is True
+
+
+def test_access_log_enabled_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_CONTROL_ACCESS_LOG", "false")
+
+    assert access_log_enabled() is False
+
+
+def test_configure_logging_noops_when_host_owns_logging(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_CONTROL_CONFIGURE_LOGGING", "false")
+
+    root = logging.getLogger()
+    handler = logging.StreamHandler()
+    original_handlers = list(root.handlers)
+    original_level = root.level
+    root.handlers = [handler]
+    root.setLevel(logging.ERROR)
+
+    try:
+        configure_logging(level="INFO", json=False)
+
+        assert root.handlers == [handler]
+        assert root.level == logging.ERROR
+    finally:
+        root.handlers = original_handlers
+        root.setLevel(original_level)
+
+
+def test_configure_json_logging_includes_exception_and_stack(monkeypatch) -> None:
+    """JSON logs retain traceback and stack information when supplied."""
+    monkeypatch.setenv("AGENT_CONTROL_CONFIGURE_LOGGING", "true")
+    root = logging.getLogger()
+    original_handlers, original_level = list(root.handlers), root.level
+    uvicorn_loggers = [
+        logging.getLogger(name) for name in ("uvicorn", "uvicorn.error", "uvicorn.access")
+    ]
+    original_uvicorn = [
+        (logger, list(logger.handlers), logger.level, logger.propagate)
+        for logger in uvicorn_loggers
+    ]
+    stream = io.StringIO()
+    try:
+        configure_logging(level="ERROR", json=True)
+        root.handlers[0].setStream(stream)
+        try:
+            raise ValueError("test failure")
+        except ValueError:
+            logging.getLogger(__name__).error("operation failed", exc_info=True, stack_info=True)
+    finally:
+        root.handlers, root.level = original_handlers, original_level
+        for logger, handlers, level, propagate in original_uvicorn:
+            logger.handlers, logger.level, logger.propagate = handlers, level, propagate
+
+    record = json.loads(stream.getvalue())
+    assert record["msg"] == "operation failed"
+    assert "ValueError: test failure" in record["exc_info"]
+    assert "Stack (most recent call last):" in record["stack_info"]
