@@ -147,3 +147,153 @@ def run_scenario_5_writer_pii():
     header("SCENARIO 5: Writer Blocked -- PII in Report Output")
 
     # Content that contains PII (email and phone number)
+    pii_content = (
+        "The project lead is Alice Johnson. For questions, contact her at "
+        "alice.johnson@company.com or call 555-123-4567. "
+        "Her SSN is 123-45-6789.\n\n"
+        "Sources: HR database, project management system"
+    )
+    result = write_report.run(pii_content)
+    print(f"  Result: {result}")
+    assert "BLOCKED" in result, "Expected PII to be blocked!"
+    print("\n  [OK] PII correctly blocked by content-safety-policy")
+
+
+def run_full_crew():
+    """Run the full 3-agent CrewAI crew for the happy path."""
+    header("FULL CREW RUN: 3-Agent Sequential Pipeline")
+
+    if not os.getenv("OPENAI_API_KEY"):
+        print("\n  [SKIP] OPENAI_API_KEY not set -- skipping full crew run.")
+        print("  The direct tool scenarios above demonstrate all control behavior.")
+        return
+
+    from secure_research_crew.crew import SecureResearchCrew
+
+    print("\n  Running crew... (this uses LLM calls)\n")
+    result = SecureResearchCrew().crew().kickoff()
+    print("\n" + "-" * 70)
+    print("  CREW OUTPUT:")
+    print("-" * 70)
+    print(result)
+
+
+# ===========================================================================
+# Verification
+# ===========================================================================
+
+def verify_setup() -> bool:
+    """Check that the Agent Control server is running and controls are configured."""
+    import httpx
+
+    try:
+        print("[setup] Verifying Agent Control server...")
+        response = httpx.get(f"{SERVER_URL}/api/v1/controls?limit=100", timeout=5.0)
+        response.raise_for_status()
+
+        data = response.json()
+        control_names = [c["name"] for c in data.get("controls", [])]
+
+        required = [
+            "researcher-sql-safety",
+            "researcher-restricted-tables",
+            "analyst-required-fields",
+            "analyst-methodology-check",
+            "writer-pii-blocker",
+        ]
+        missing = [c for c in required if c not in control_names]
+
+        if missing:
+            print(f"[setup] Missing controls: {missing}")
+            print("[setup] Run setup_controls.py first.")
+            return False
+
+        print(f"[setup] Server OK -- {len(control_names)} controls found")
+        return True
+
+    except httpx.ConnectError:
+        print(f"[setup] Cannot connect to {SERVER_URL}")
+        print("[setup] Start the Agent Control server first (make server-run)")
+        return False
+    except Exception as e:
+        print(f"[setup] Error: {e}")
+        return False
+
+
+# ===========================================================================
+# Main
+# ===========================================================================
+
+def main():
+    print("=" * 70)
+    print("  Secure Research Crew -- Agent Control Multi-Agent Demo")
+    print("=" * 70)
+    print()
+    print("This demo runs 5 scenarios showing how different Agent Control")
+    print("policies protect each agent in a CrewAI crew:")
+    print()
+    print("  1. Happy path         -- all agents pass controls")
+    print("  2. SQL injection      -- researcher blocked by SQL evaluator")
+    print("  3. Restricted table   -- researcher blocked by LIST evaluator")
+    print("  4. Missing methodology-- analyst steered, then succeeds")
+    print("  5. PII in report      -- writer blocked by REGEX evaluator")
+    print()
+
+    if not verify_setup():
+        print("\nSetup verification failed. Exiting.")
+        return
+
+    # Run all direct-call scenarios (no LLM needed)
+    run_scenario_1_happy_path()
+    run_scenario_2_sql_injection()
+    run_scenario_3_restricted_table()
+    run_scenario_4_analyst_steered()
+    run_scenario_5_writer_pii()
+
+    # Summary
+    header("SUMMARY")
+    print("""
+  Scenario 1 (Happy Path):        All 3 agents passed controls
+  Scenario 2 (SQL Injection):     Researcher BLOCKED by sql evaluator
+  Scenario 3 (Restricted Table):  Researcher BLOCKED by list evaluator
+  Scenario 4 (Missing Method):    Analyst STEERED, then succeeded
+  Scenario 5 (PII in Report):     Writer BLOCKED by regex evaluator
+
+  Controls are enforced per-agent via policies:
+    - data-access-policy       -> query_database tool
+    - analysis-validation-policy -> validate_data tool
+    - content-safety-policy    -> write_report tool
+
+  Each policy targets specific step_names, so controls only fire
+  for the tools belonging to that agent role.
+""")
+
+    # Optionally run full crew (requires OPENAI_API_KEY)
+    print("-" * 70)
+    if not os.getenv("OPENAI_API_KEY"):
+        print("  Skipping full crew run (OPENAI_API_KEY not set).")
+    else:
+        answer = input("  Run full CrewAI crew with LLM? (y/N): ").strip().lower()
+        if answer == "y":
+            run_full_crew()
+        else:
+            print("  Skipping full crew run.")
+
+    print("\n" + "=" * 70)
+    print("  Demo complete!")
+    print("=" * 70)
+
+
+def run():
+    """Entry point for [project.scripts]."""
+    try:
+        main()
+    finally:
+        agent_control.shutdown()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        agent_control.shutdown()
