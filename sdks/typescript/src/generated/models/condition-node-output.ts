@@ -20,3 +20,49 @@ import {
  */
 export type ConditionNodeOutput = {
   /**
+   * Logical AND over child conditions.
+   */
+  and?: Array<ConditionNodeOutput> | null | undefined;
+  /**
+   * Leaf evaluator. Must be provided together with selector.
+   */
+  evaluator?: EvaluatorSpec | null | undefined;
+  /**
+   * Logical NOT over a single child condition.
+   */
+  not?: ConditionNodeOutput | null | undefined;
+  /**
+   * Logical OR over child conditions.
+   */
+  or?: Array<ConditionNodeOutput> | null | undefined;
+  /**
+   * Leaf selector. Must be provided together with evaluator.
+   */
+  selector?: ControlSelector | null | undefined;
+};
+
+/** @internal */
+export const ConditionNodeOutput$inboundSchema: z.ZodMiniType<
+  ConditionNodeOutput,
+  unknown
+> = z.object({
+  and: z.optional(
+    z.nullable(z.array(z.lazy(() => ConditionNodeOutput$inboundSchema))),
+  ),
+  evaluator: z.optional(z.nullable(EvaluatorSpec$inboundSchema)),
+  not: z.optional(z.nullable(z.lazy(() => ConditionNodeOutput$inboundSchema))),
+  or: z.optional(
+    z.nullable(z.array(z.lazy(() => ConditionNodeOutput$inboundSchema))),
+  ),
+  selector: z.optional(z.nullable(ControlSelector$inboundSchema)),
+});
+
+export function conditionNodeOutputFromJSON(
+  jsonString: string,
+): SafeParseResult<ConditionNodeOutput, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ConditionNodeOutput$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ConditionNodeOutput' from JSON`,
+  );
+}
