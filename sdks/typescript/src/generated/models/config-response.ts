@@ -24,3 +24,29 @@ export type ConfigResponse = {
 
 /** @internal */
 export const ConfigResponse$inboundSchema: z.ZodMiniType<
+  ConfigResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    auth_mode: AuthMode$inboundSchema,
+    has_active_session: z._default(types.boolean(), false),
+    requires_api_key: types.boolean(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "auth_mode": "authMode",
+      "has_active_session": "hasActiveSession",
+      "requires_api_key": "requiresApiKey",
+    });
+  }),
+);
+
+export function configResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<ConfigResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ConfigResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ConfigResponse' from JSON`,
+  );
+}
