@@ -107,3 +107,112 @@ function wrapFetcher(
         );
       }
 
+      return res;
+    } catch (err: unknown) {
+      if (err instanceof TemporaryError) {
+        throw err;
+      }
+
+      if (
+        options.retryConnectionErrors &&
+        (isTimeoutError(err) || isConnectionError(err))
+      ) {
+        throw err;
+      }
+
+      throw new PermanentError("Permanent error", { cause: err });
+    }
+  };
+}
+
+const codeRangeRE = new RegExp("^[0-9]xx$", "i");
+
+function isRetryableResponse(res: Response, statusCodes: string[]): boolean {
+  const actual = `${res.status}`;
+
+  return statusCodes.some((code) => {
+    if (!codeRangeRE.test(code)) {
+      return code === actual;
+    }
+
+    const expectFamily = code.charAt(0);
+    if (!expectFamily) {
+      throw new Error("Invalid status code range");
+    }
+
+    const actualFamily = actual.charAt(0);
+    if (!actualFamily) {
+      throw new Error(`Invalid response status code: ${actual}`);
+    }
+
+    return actualFamily === expectFamily;
+  });
+}
+
+async function retryBackoff(
+  fn: () => Promise<Response>,
+  strategy: BackoffStrategy,
+): Promise<Response> {
+  const { maxElapsedTime, initialInterval, exponent, maxInterval } = strategy;
+
+  const start = Date.now();
+  let x = 0;
+
+  while (true) {
+    try {
+      const res = await fn();
+      return res;
+    } catch (err: unknown) {
+      if (err instanceof PermanentError) {
+        throw err.cause;
+      }
+      const elapsed = Date.now() - start;
+      if (elapsed > maxElapsedTime) {
+        if (err instanceof TemporaryError) {
+          return err.response;
+        }
+
+        throw err;
+      }
+
+      let retryInterval = 0;
+      if (err instanceof TemporaryError) {
+        retryInterval = retryIntervalFromResponse(err.response);
+      }
+
+      if (retryInterval <= 0) {
+        retryInterval =
+          initialInterval * Math.pow(x, exponent) + Math.random() * 1000;
+      }
+
+      const d = Math.min(retryInterval, maxInterval);
+
+      await delay(d);
+      x++;
+    }
+  }
+}
+
+function retryIntervalFromResponse(res: Response): number {
+  const retryVal = res.headers.get("retry-after") || "";
+  if (!retryVal) {
+    return 0;
+  }
+
+  const parsedNumber = Number(retryVal);
+  if (Number.isInteger(parsedNumber)) {
+    return parsedNumber * 1000;
+  }
+
+  const parsedDate = Date.parse(retryVal);
+  if (Number.isInteger(parsedDate)) {
+    const deltaMS = parsedDate - Date.now();
+    return deltaMS > 0 ? Math.ceil(deltaMS) : 0;
+  }
+
+  return 0;
+}
+
+async function delay(delay: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
