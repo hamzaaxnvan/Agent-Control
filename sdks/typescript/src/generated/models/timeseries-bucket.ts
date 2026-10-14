@@ -48,3 +48,53 @@ export type TimeseriesBucket = {
    */
   executionCount: number;
   /**
+   * Matches in bucket
+   */
+  matchCount: number;
+  /**
+   * Non-matches in bucket
+   */
+  nonMatchCount: number;
+  /**
+   * Start time of the bucket (UTC)
+   */
+  timestamp: Date;
+};
+
+/** @internal */
+export const TimeseriesBucket$inboundSchema: z.ZodMiniType<
+  TimeseriesBucket,
+  unknown
+> = z.pipe(
+  z.object({
+    action_counts: types.optional(z.record(z.string(), types.number())),
+    avg_confidence: z.optional(z.nullable(types.number())),
+    avg_duration_ms: z.optional(z.nullable(types.number())),
+    error_count: types.number(),
+    execution_count: types.number(),
+    match_count: types.number(),
+    non_match_count: types.number(),
+    timestamp: types.date(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "action_counts": "actionCounts",
+      "avg_confidence": "avgConfidence",
+      "avg_duration_ms": "avgDurationMs",
+      "error_count": "errorCount",
+      "execution_count": "executionCount",
+      "match_count": "matchCount",
+      "non_match_count": "nonMatchCount",
+    });
+  }),
+);
+
+export function timeseriesBucketFromJSON(
+  jsonString: string,
+): SafeParseResult<TimeseriesBucket, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => TimeseriesBucket$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'TimeseriesBucket' from JSON`,
+  );
+}
