@@ -199,3 +199,204 @@ export function AddNewControlModal({
               name: selectedEvaluator.id,
               config: getDefaultConfigForEvaluator(selectedEvaluator.id),
             },
+          },
+          action: { decision: 'deny' as const },
+        },
+      };
+    }
+
+    return buildJsonDraftControl();
+  }, [selectedEvaluator]);
+
+  const columns: ColumnDef<EvaluatorInfo & { id: string }>[] = [
+    {
+      id: 'name',
+      header: 'Name',
+      accessorKey: 'name',
+      size: 150,
+      cell: ({ row }) => (
+        <Group gap="xs">
+          <Text size="sm" fw={500}>
+            {row.original.name}
+          </Text>
+        </Group>
+      ),
+    },
+    {
+      id: 'description',
+      header: 'Description',
+      accessorKey: 'description',
+      size: 400,
+      cell: ({ row }) => (
+        <Tooltip label={row.original.description} withArrow>
+          <Text size="sm" c="dimmed" lineClamp={1}>
+            {row.original.description}
+          </Text>
+        </Tooltip>
+      ),
+    },
+    {
+      id: 'actions',
+      header: '',
+      size: 100,
+      cell: ({ row }) => (
+        <Box pr="md">
+          <Group justify="flex-end">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="add-control-button"
+              onClick={() => handleAddClick(row.original)}
+            >
+              Use
+            </Button>
+          </Group>
+        </Box>
+      ),
+    },
+  ];
+
+  const filteredEvaluators = evaluators.filter((evaluator) =>
+    evaluator.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      size="xxl"
+      padding={0}
+      withCloseButton={false}
+      closeOnEscape={false}
+      styles={{
+        body: {
+          padding: 0,
+          width: '800px',
+        },
+      }}
+    >
+      <Box>
+        {/* Header */}
+        <Box p="md">
+          <Group justify="space-between" mb="xs">
+            <Title order={3} fw={600}>
+              Create Control
+            </Title>
+            <Button
+              size="sm"
+              onClick={onClose}
+              data-testid="close-control-store-modal-button"
+            >
+              <IconX size={16} />
+            </Button>
+          </Group>
+          <Text size="sm" c="dimmed">
+            Select an evaluator to create a new control or start from JSON
+          </Text>
+        </Box>
+        <Divider />
+
+        {/* Content */}
+        <Box
+          p="md"
+          style={{ height: '500px', display: 'flex', flexDirection: 'column' }}
+        >
+          <Stack gap="md" style={{ flex: 1, minHeight: 0 }}>
+            {/* Search and Docs Link */}
+            <Group justify="space-between">
+              <TextInput
+                placeholder="Search evaluators..."
+                leftSection={<IconSearch size={16} />}
+                flex={1}
+                maw={250}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              <Group gap="md" wrap="nowrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="from-json-button"
+                  onClick={handleFromJsonClick}
+                >
+                  Write your own
+                </Button>
+                <Text size="sm" c="dimmed">
+                  Learn here on how to add new type of evaluator.{' '}
+                  <Text
+                    component="a"
+                    href="https://github.com/agentcontrol/agent-control/blob/main/README.md"
+                    c="blue"
+                    size="sm"
+                    td="none"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Docs ↗
+                  </Text>
+                </Text>
+              </Group>
+            </Group>
+
+            {/* Table or Empty State */}
+            {isLoading ? (
+              <Paper p="xl" ta="center" withBorder radius="sm">
+                <Loader size="sm" />
+              </Paper>
+            ) : error ? (
+              <Paper p="xl" ta="center" withBorder radius="sm">
+                <Stack gap="xs" align="center">
+                  <IconAlertCircle
+                    size={48}
+                    color="var(--mantine-color-red-5)"
+                  />
+                  <Text c="red">Failed to load evaluators</Text>
+                </Stack>
+              </Paper>
+            ) : filteredEvaluators.length > 0 ? (
+              <Box style={{ flex: 1, minHeight: 0 }}>
+                <Table
+                  columns={columns}
+                  data={filteredEvaluators}
+                  highlightOnHover
+                  maxHeight="100%"
+                />
+              </Box>
+            ) : (
+              <Paper p="xl" withBorder radius="sm" ta="center">
+                <Text c="dimmed">No evaluators found</Text>
+              </Paper>
+            )}
+          </Stack>
+        </Box>
+      </Box>
+
+      {/* Edit Control Modal */}
+      <Modal
+        opened={editModalOpened}
+        onClose={handleEditModalClose}
+        title="Create Control"
+        size="xl"
+        keepMounted={false}
+        closeOnEscape={false}
+        styles={{
+          title: { fontSize: '18px', fontWeight: 600 },
+          content: { maxWidth: '1500px', width: '90vw' },
+        }}
+      >
+        <ErrorBoundary variant="modal">
+          {draftControl ? (
+            <EditControlContent
+              control={draftControl}
+              agentId={agentId}
+              mode="create"
+              initialEditorMode={selectedEvaluator ? 'form' : 'json'}
+              onClose={handleEditModalClose}
+              onSuccess={handleEditModalSuccess}
+            />
+          ) : null}
+        </ErrorBoundary>
+      </Modal>
+    </Modal>
+  );
+}
