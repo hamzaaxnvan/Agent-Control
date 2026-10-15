@@ -72,3 +72,78 @@ test.describe('SearchInput - Query Param Syncing', () => {
   });
 
   test('preserves search state on browser back/forward', async ({
+    mockedPage,
+  }) => {
+    await mockedPage.goto('/');
+
+    // Type search
+    const searchInput = mockedPage.getByPlaceholder('Search agents...');
+    await searchInput.fill('Customer');
+
+    // Wait for debounced URL update and API response
+    await mockedPage.waitForResponse(
+      (response) =>
+        response.url().includes('/api/v1/agents') &&
+        response.url().includes('name=Customer') &&
+        response.status() === 200
+    );
+
+    // Navigate away
+    await mockedPage.getByText('customer-support-bot').click();
+    await expect(mockedPage).toHaveURL(
+      getAgentRoute('customer-support-bot', { tab: 'monitor' })
+    );
+
+    // Go back
+    await mockedPage.goBack();
+
+    // Wait for page to load and URL to be correct
+    await expect(mockedPage).toHaveURL(/.*\?search=Customer/);
+
+    // Wait for table to be visible (page loaded)
+    await expect(mockedPage.getByRole('table')).toBeVisible();
+
+    // Re-get the search input after navigation (element might be recreated)
+    const searchInputAfterBack =
+      mockedPage.getByPlaceholder('Search agents...');
+    await expect(searchInputAfterBack).toHaveValue('Customer');
+
+    // Verify filtered results are still shown
+    await expect(mockedPage.getByText('customer-support-bot')).toBeVisible();
+  });
+});
+
+test.describe('SearchInput - Agent Detail Page', () => {
+  test('syncs search value to URL query param (q)', async ({ mockedPage }) => {
+    await mockedPage.goto(getAgentRoute('agent-1', { tab: 'controls' }));
+
+    const searchInput = mockedPage.getByPlaceholder('Search controls...');
+    await searchInput.fill('PII');
+
+    // Wait for debounced URL update
+    await mockedPage.waitForTimeout(350);
+
+    // Verify URL has the query param (uses 'q' key)
+    await expect(mockedPage).toHaveURL(
+      getAgentRoute('agent-1', { tab: 'controls', query: { q: 'PII' } })
+    );
+  });
+
+  test('reads search value from URL on page load', async ({ mockedPage }) => {
+    await mockedPage.goto(
+      getAgentRoute('agent-1', { tab: 'controls', query: { q: 'PII' } })
+    );
+
+    // Wait for page to load
+    await expect(mockedPage.getByRole('table')).toBeVisible();
+
+    // Verify search input has the value from URL (client-side filtering, so no API wait needed)
+    const searchInput = mockedPage.getByPlaceholder('Search controls...');
+    await expect(searchInput).toHaveValue('PII');
+
+    // Verify filtered results are shown (PII Detection should be visible in the controls table)
+    // Use a more specific selector to avoid the stats tab
+    const controlsTable = mockedPage.getByRole('table');
+    await expect(controlsTable.getByText('PII Detection')).toBeVisible();
+  });
+});
