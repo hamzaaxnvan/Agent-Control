@@ -38,3 +38,44 @@ export type Step = {
    */
   tools?: Array<{ [k: string]: any }> | null | undefined;
   /**
+   * Step type (e.g., 'tool', 'llm')
+   */
+  type: string;
+};
+
+/** @internal */
+export type Step$Outbound = {
+  children?: Array<Step$Outbound> | null | undefined;
+  context?: { [k: string]: any } | null | undefined;
+  ground_truth?: any | null | undefined;
+  input: any;
+  name: string;
+  output?: any | null | undefined;
+  tools?: Array<{ [k: string]: any }> | null | undefined;
+  type: string;
+};
+
+/** @internal */
+export const Step$outboundSchema: z.ZodMiniType<Step$Outbound, Step> = z.pipe(
+  z.object({
+    children: z.optional(
+      z.nullable(z.array(z.lazy(() => Step$outboundSchema))),
+    ),
+    context: z.optional(z.nullable(z.record(z.string(), z.any()))),
+    groundTruth: z.optional(z.nullable(z.any())),
+    input: z.any(),
+    name: z.string(),
+    output: z.optional(z.nullable(z.any())),
+    tools: z.optional(z.nullable(z.array(z.record(z.string(), z.any())))),
+    type: z.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      groundTruth: "ground_truth",
+    });
+  }),
+);
+
+export function stepToJSON(step: Step): string {
+  return JSON.stringify(Step$outboundSchema.parse(step));
+}
