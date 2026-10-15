@@ -298,3 +298,905 @@ const controlsWithTemplateResponse: AgentControlsResponse = {
 };
 
 const controlsWithUnrenderedTemplateResponse: AgentControlsResponse = {
+  controls: controlsWithUnrenderedTemplateList,
+};
+
+// Control summaries for GET /api/v1/controls (list all controls)
+const controlSummariesList: (ControlSummary & {
+  used_by_agent?: { agent_name: string } | null;
+})[] = [
+  {
+    id: 1,
+    name: 'PII Detection',
+    description: 'Detects and masks personally identifiable information',
+    enabled: true,
+    execution: 'server',
+    step_types: ['llm'],
+    stages: ['post'],
+    tags: ['pii', 'compliance'],
+    used_by_agent: { agent_name: 'customer-support-bot' },
+    used_by_agents_count: 1,
+  },
+  {
+    id: 2,
+    name: 'SQL Injection Guard',
+    description: 'Prevents SQL injection attacks',
+    enabled: true,
+    execution: 'server',
+    step_types: ['tool'],
+    stages: ['pre'],
+    tags: ['security'],
+    used_by_agent: { agent_name: 'data-analysis-agent' },
+    used_by_agents_count: 1,
+  },
+  {
+    id: 3,
+    name: 'Rate Limiter',
+    description: 'Limits API call frequency',
+    enabled: false,
+    execution: 'server',
+    step_types: ['llm'],
+    stages: ['pre'],
+    tags: [],
+    used_by_agent: null,
+    used_by_agents_count: 0,
+  },
+];
+
+const templateControlSummary: ControlSummary & {
+  used_by_agent?: { agent_name: string } | null;
+  template_backed?: boolean;
+} = {
+  id: 10,
+  name: 'Template Regex Guard',
+  description: 'Deny when input matches pattern',
+  enabled: true,
+  execution: 'server',
+  step_types: null,
+  stages: ['pre'],
+  tags: [],
+  template_backed: true,
+  used_by_agent: { agent_name: 'customer-support-bot' },
+  used_by_agents_count: 1,
+};
+
+const listControlsResponse: ListControlsResponse = {
+  controls: controlSummariesList,
+  pagination: {
+    total: controlSummariesList.length,
+    limit: 20,
+    has_more: false,
+    next_cursor: null,
+  },
+};
+
+const evaluatorsResponse: EvaluatorsResponse = {
+  regex: {
+    name: 'Regex',
+    version: '1.0.0',
+    description: 'Pattern matching using regular expressions',
+    requires_api_key: false,
+    timeout_ms: 5000,
+    config_schema: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Regular expression pattern' },
+      },
+      required: ['pattern'],
+    },
+  },
+  list: {
+    name: 'List',
+    version: '1.0.0',
+    description: 'Match against a list of allowed or blocked values',
+    requires_api_key: false,
+    timeout_ms: 5000,
+    config_schema: {
+      type: 'object',
+      properties: {
+        values: { type: 'array', items: { type: 'string' } },
+        logic: { type: 'string', enum: ['any', 'all'] },
+        match_on: { type: 'string', enum: ['match', 'no_match'] },
+      },
+      required: ['values'],
+    },
+  },
+  sql: {
+    name: 'SQL',
+    version: '1.0.0',
+    description: 'SQL injection detection and prevention',
+    requires_api_key: false,
+    timeout_ms: 5000,
+    config_schema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['safe', 'strict'] },
+      },
+    },
+  },
+  json: {
+    name: 'JSON',
+    version: '1.0.0',
+    description: 'JSON schema validation',
+    requires_api_key: false,
+    timeout_ms: 5000,
+    config_schema: {
+      type: 'object',
+      properties: {
+        schema: { type: 'object' },
+      },
+      required: ['schema'],
+    },
+  },
+  'galileo.luna': {
+    name: 'Galileo Luna',
+    version: '1.0.0',
+    description: 'Galileo Luna direct scorer evaluation',
+    requires_api_key: true,
+    timeout_ms: 10000,
+    config_schema: {
+      type: 'object',
+      properties: {
+        scorer_label: { type: 'string' },
+        scorer_id: { type: 'string' },
+        scorer_version_id: { type: 'string' },
+        threshold: {},
+        operator: {
+          type: 'string',
+          enum: ['gt', 'gte', 'lt', 'lte', 'eq', 'ne', 'contains', 'any'],
+        },
+        payload_field: { type: 'string', enum: ['input', 'output'] },
+        timeout_ms: { type: 'integer', minimum: 1000, maximum: 60000 },
+        config: { type: 'object' },
+      },
+    },
+  },
+  'defenseclaw.rule_pack': {
+    name: 'DefenseClaw Rule Pack',
+    version: '1.0.0',
+    description: 'DefenseClaw rule-pack evaluation',
+    requires_api_key: false,
+    timeout_ms: 10000,
+    config_schema: {
+      type: 'object',
+      properties: {
+        schema_version: { type: 'integer', const: 1, default: 1 },
+        rule_pack: {
+          type: 'object',
+          properties: {
+            version: { type: 'integer', const: 1, default: 1 },
+            category: {
+              type: 'string',
+              const: 'agent-control',
+              default: 'agent-control',
+            },
+            rules: {
+              type: 'array',
+              minItems: 1,
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', minLength: 1 },
+                  pattern: { type: 'string', minLength: 1 },
+                  title: { type: 'string', minLength: 1 },
+                  severity: {
+                    type: 'string',
+                    enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+                  },
+                  confidence: { type: 'number', minimum: 0, maximum: 1 },
+                  tags: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  'defenseclaw.opa_policy': {
+    name: 'DefenseClaw OPA Policy',
+    version: '1.0.0',
+    description: 'DefenseClaw OPA-policy evaluation',
+    requires_api_key: false,
+    timeout_ms: 10000,
+    config_schema: {
+      type: 'object',
+      properties: {
+        schema_version: { type: 'integer', const: 1, default: 1 },
+        policy: {
+          type: 'object',
+          properties: {
+            domain: { type: 'string', const: 'guardrail' },
+            block_at: {
+              type: 'string',
+              enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+            },
+            alert_at: {
+              type: 'string',
+              enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+            },
+            cisco_trust_level: { type: 'string', const: 'full' },
+          },
+        },
+      },
+    },
+  },
+};
+
+const controlSchemaResponse: GetControlSchemaResponse = {
+  schema: {
+    $defs: {
+      ControlSelector: {
+        type: 'object',
+        properties: {
+          path: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+            default: '*',
+            examples: ['output', 'context.user_id', '*'],
+          },
+        },
+      },
+      EvaluatorSpec: {
+        type: 'object',
+        required: ['name', 'config'],
+        properties: {
+          name: {
+            type: 'string',
+            examples: ['regex', 'list', 'customer-support-bot:risk-threshold'],
+          },
+          config: {
+            type: 'object',
+            additionalProperties: true,
+          },
+        },
+      },
+      ConditionNode: {
+        type: 'object',
+        properties: {
+          selector: {
+            anyOf: [{ $ref: '#/$defs/ControlSelector' }, { type: 'null' }],
+          },
+          evaluator: {
+            anyOf: [{ $ref: '#/$defs/EvaluatorSpec' }, { type: 'null' }],
+          },
+          and: {
+            anyOf: [
+              {
+                type: 'array',
+                items: { $ref: '#/$defs/ConditionNode' },
+              },
+              { type: 'null' },
+            ],
+          },
+          or: {
+            anyOf: [
+              {
+                type: 'array',
+                items: { $ref: '#/$defs/ConditionNode' },
+              },
+              { type: 'null' },
+            ],
+          },
+          not: {
+            anyOf: [{ $ref: '#/$defs/ConditionNode' }, { type: 'null' }],
+          },
+        },
+      },
+      ControlScope: {
+        type: 'object',
+        properties: {
+          step_types: {
+            anyOf: [
+              { type: 'array', items: { type: 'string' } },
+              { type: 'null' },
+            ],
+          },
+          step_names: {
+            anyOf: [
+              { type: 'array', items: { type: 'string' } },
+              { type: 'null' },
+            ],
+          },
+          step_name_regex: {
+            anyOf: [{ type: 'string' }, { type: 'null' }],
+          },
+          stages: {
+            anyOf: [
+              {
+                type: 'array',
+                items: { type: 'string', enum: ['pre', 'post'] },
+              },
+              { type: 'null' },
+            ],
+          },
+        },
+      },
+      SteeringContext: {
+        type: 'object',
+        required: ['message'],
+        properties: {
+          message: { type: 'string' },
+        },
+      },
+      ControlAction: {
+        type: 'object',
+        required: ['decision'],
+        properties: {
+          decision: {
+            type: 'string',
+            enum: ['allow', 'deny', 'steer', 'warn', 'log'],
+          },
+          steering_context: {
+            anyOf: [{ $ref: '#/$defs/SteeringContext' }, { type: 'null' }],
+          },
+        },
+      },
+    },
+    type: 'object',
+    required: ['execution', 'condition', 'action'],
+    properties: {
+      description: {
+        anyOf: [{ type: 'string' }, { type: 'null' }],
+      },
+      enabled: { type: 'boolean' },
+      execution: { type: 'string', enum: ['server', 'sdk'] },
+      scope: {
+        $ref: '#/$defs/ControlScope',
+      },
+      condition: {
+        $ref: '#/$defs/ConditionNode',
+      },
+      action: {
+        $ref: '#/$defs/ControlAction',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+    },
+  },
+};
+
+const statsResponse: StatsResponse = {
+  agent_name: 'customer-support-bot',
+  time_range: '1h',
+  totals: {
+    execution_count: 430,
+    match_count: 40,
+    non_match_count: 390,
+    error_count: 2,
+    action_counts: {
+      observe: 15,
+      deny: 25,
+      steer: 0,
+    },
+  },
+  controls: [
+    {
+      control_id: 1,
+      control_name: 'PII Detection',
+      execution_count: 150,
+      match_count: 25,
+      non_match_count: 125,
+      observe_count: 10,
+      deny_count: 15,
+      steer_count: 0,
+      error_count: 0,
+      avg_confidence: 0.92,
+      avg_duration_ms: 45,
+    },
+    {
+      control_id: 2,
+      control_name: 'SQL Injection Guard',
+      execution_count: 80,
+      match_count: 10,
+      non_match_count: 70,
+      observe_count: 0,
+      deny_count: 10,
+      steer_count: 0,
+      error_count: 2,
+      avg_confidence: 0.88,
+      avg_duration_ms: 32,
+    },
+    {
+      control_id: 3,
+      control_name: 'Rate Limiter',
+      execution_count: 200,
+      match_count: 5,
+      non_match_count: 195,
+      observe_count: 5,
+      deny_count: 0,
+      steer_count: 0,
+      error_count: 0,
+      avg_confidence: 0.95,
+      avg_duration_ms: 12,
+    },
+  ],
+};
+
+const emptyStatsResponse: StatsResponse = {
+  agent_name: 'customer-support-bot',
+  time_range: '1h',
+  totals: {
+    execution_count: 0,
+    match_count: 0,
+    non_match_count: 0,
+    error_count: 0,
+    action_counts: {},
+  },
+  controls: [],
+};
+
+/**
+ * Typed mock data for tests
+ */
+export const mockData = {
+  agents: agentsResponse,
+  agent: agentResponse,
+  agentWithSteps: agentWithStepsResponse,
+  controls: controlsResponse,
+  controlsWithTemplate: controlsWithTemplateResponse,
+  controlsWithUnrenderedTemplate: controlsWithUnrenderedTemplateResponse,
+  templateControl: templateBackedControl,
+  unrenderedTemplateControl,
+  listControls: listControlsResponse,
+  templateControlSummary: templateControlSummary,
+  evaluators: evaluatorsResponse,
+  controlSchema: controlSchemaResponse,
+  stats: statsResponse,
+  emptyStats: emptyStatsResponse,
+} as const;
+
+/**
+ * Response options for route mocking
+ */
+type MockResponseOptions<T> =
+  | { data: T; status?: number }
+  | { error: string; status: number }
+  | { handler: () => T | Promise<T> };
+
+/**
+ * Helper to fulfill a route with consistent formatting
+ */
+async function fulfillRoute<T>(
+  route: Parameters<Parameters<Page['route']>[1]>[0],
+  options: MockResponseOptions<T>,
+  defaultData: T
+) {
+  if ('error' in options) {
+    await route.fulfill({
+      status: options.status,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: options.error }),
+    });
+  } else if ('handler' in options) {
+    const data = await options.handler();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(data),
+    });
+  } else {
+    await route.fulfill({
+      status: options.status ?? 200,
+      contentType: 'application/json',
+      body: JSON.stringify(options.data ?? defaultData),
+    });
+  }
+}
+
+/** Server config response (auth) - used so AuthProvider does not require a real backend in tests */
+export const serverConfigResponse = {
+  requires_api_key: false,
+  auth_mode: 'none' as const,
+  has_active_session: false,
+};
+
+export type ServerConfigMock = {
+  requires_api_key: boolean;
+  auth_mode: 'none' | 'api-key';
+  has_active_session: boolean;
+};
+
+/**
+ * Individual route mock helpers - can be used standalone or with custom data
+ */
+export const mockRoutes = {
+  /** Mock GET /api/config (auth) - must be hit before app content renders */
+  config: async (
+    page: Page,
+    options: MockResponseOptions<ServerConfigMock> = {
+      data: serverConfigResponse,
+    }
+  ) => {
+    const data = {
+      ...serverConfigResponse,
+      ...('data' in options ? options.data : {}),
+    };
+    await page.route('**/api/config', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(data),
+      });
+    });
+  },
+
+  /** Mock POST /api/login (auth) - optional success/failure for API key flow tests */
+  login: async (
+    page: Page,
+    options: { authenticated: boolean; is_admin?: boolean } = {
+      authenticated: true,
+      is_admin: false,
+    }
+  ) => {
+    await page.route('**/api/login', async (route) => {
+      if (route.request().method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          authenticated: options.authenticated,
+          is_admin: options.is_admin ?? false,
+        }),
+      });
+    });
+  },
+
+  /** Mock GET /api/v1/agents */
+  agents: async (
+    page: Page,
+    options: MockResponseOptions<ListAgentsResponse> = { data: mockData.agents }
+  ) => {
+    await page.route('**/api/v1/agents?**', async (route, request) => {
+      // Helper to filter agents based on query params (server-side search)
+      const getFilteredResponse = (url: string): ListAgentsResponse => {
+        const urlObj = new URL(url);
+        const nameFilter = urlObj.searchParams.get('name');
+
+        let agents = mockData.agents.agents;
+
+        // Apply name filter (case-insensitive partial match, like the real API)
+        if (nameFilter) {
+          const lowerFilter = nameFilter.toLowerCase();
+          agents = agents.filter((a) =>
+            a.agent_name.toLowerCase().includes(lowerFilter)
+          );
+        }
+
+        return {
+          agents,
+          pagination: {
+            total: agents.length,
+            limit: 10,
+            has_more: false,
+            next_cursor: null,
+          },
+        };
+      };
+
+      const url = request.url();
+      const filteredData = getFilteredResponse(url);
+
+      await fulfillRoute(
+        route,
+        { ...options, data: filteredData },
+        filteredData
+      );
+    });
+  },
+
+  /** Mock GET /api/v1/agents/:id and /api/v1/agents/:id/controls */
+  agent: async (
+    page: Page,
+    options: {
+      agent?: MockResponseOptions<GetAgentResponse>;
+      controls?: MockResponseOptions<AgentControlsResponse>;
+    } = {}
+  ) => {
+    const controlsOpts = options.controls ?? { data: mockData.controls };
+    const agentOpts = options.agent ?? { data: mockData.agent };
+
+    // Register controls route first (more specific pattern)
+    await page.route('**/api/v1/agents/*/controls', async (route) => {
+      await fulfillRoute(route, controlsOpts, mockData.controls);
+    });
+
+    // Register agent route second
+    await page.route('**/api/v1/agents/*', async (route, request) => {
+      const url = request.url();
+      // Skip if it's a controls request (handled by separate route above)
+      if (url.includes('/controls')) {
+        await route.continue();
+        return;
+      }
+      await fulfillRoute(route, agentOpts, mockData.agent);
+    });
+  },
+
+  /** Mock GET /api/v1/evaluators */
+  evaluators: async (
+    page: Page,
+    options: MockResponseOptions<EvaluatorsResponse> = {
+      data: mockData.evaluators,
+    }
+  ) => {
+    await page.route('**/api/v1/evaluators', async (route) => {
+      await fulfillRoute(route, options, mockData.evaluators);
+    });
+  },
+
+  /** Mock GET /api/v1/controls/schema */
+  controlSchema: async (
+    page: Page,
+    options: MockResponseOptions<GetControlSchemaResponse> = {
+      data: mockData.controlSchema,
+    }
+  ) => {
+    await page.route('**/api/v1/controls/schema', async (route) => {
+      await fulfillRoute(route, options, mockData.controlSchema);
+    });
+  },
+
+  /** Mock GET /api/v1/controls (list all controls) and PUT /api/v1/controls (create) */
+  controlsList: async (
+    page: Page,
+    options: MockResponseOptions<ListControlsResponse> = {
+      data: mockData.listControls,
+    }
+  ) => {
+    // Helper to filter controls based on query params (server-side search)
+    const getFilteredResponse = (url: string): ListControlsResponse => {
+      const urlObj = new URL(url);
+      const nameFilter = urlObj.searchParams.get('name');
+
+      let controls = mockData.listControls.controls;
+
+      // Apply name filter (case-insensitive partial match, like the real API)
+      if (nameFilter) {
+        const lowerFilter = nameFilter.toLowerCase();
+        controls = controls.filter(
+          (c) =>
+            c.name.toLowerCase().includes(lowerFilter) ||
+            (c.description ?? '').toLowerCase().includes(lowerFilter)
+        );
+      }
+
+      return {
+        controls,
+        pagination: {
+          total: controls.length,
+          limit: 20,
+          has_more: false,
+          next_cursor: null,
+        },
+      };
+    };
+
+    // Handle both with and without query params
+    await page.route('**/api/v1/controls?**', async (route, request) => {
+      const method = request.method();
+      if (method === 'GET') {
+        const response = getFilteredResponse(request.url());
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(response),
+        });
+        return;
+      }
+      await route.continue();
+    });
+    // Handle base path for GET (list) and PUT (create)
+    await page.route('**/api/v1/controls', async (route, request) => {
+      const method = request.method();
+      if (method === 'GET') {
+        await fulfillRoute(route, options, mockData.listControls);
+        return;
+      }
+      if (method === 'PUT') {
+        const body = await request.postDataJSON();
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            control_id: 100,
+            name: body.name || 'New Control',
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+  },
+
+  /** @deprecated Use controlsList which now handles both GET and PUT */
+  controlCreate: async (_page: Page) => {
+    // No-op - handled by controlsList
+  },
+
+  /** Mock GET and PUT /api/v1/controls/:id/data */
+  controlGetData: async (page: Page) => {
+    await page.route('**/api/v1/controls/*/data', async (route, request) => {
+      const method = request.method();
+      if (method === 'GET') {
+        // Extract control ID from URL
+        const url = request.url();
+        const match = url.match(/\/controls\/(\d+)\/data/);
+        const controlId = match ? parseInt(match[1], 10) : 1;
+
+        // Find matching control from mock data
+        const control =
+          controlsList.find((c) => c.id === controlId) ?? controlsList[0];
+
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: control.control,
+          }),
+        });
+        return;
+      }
+      if (method === 'PUT') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+  },
+
+  /** Mock POST /api/v1/controls/validate */
+  controlValidate: async (
+    page: Page,
+    options: MockResponseOptions<{ success: boolean }> = {
+      data: { success: true },
+    }
+  ) => {
+    await page.route('**/api/v1/controls/validate', async (route) => {
+      await fulfillRoute(route, options, { success: true });
+    });
+  },
+
+  /** @deprecated Use controlGetData which now handles both GET and PUT */
+  controlUpdate: async (_page: Page) => {
+    // No-op - handled by controlGetData
+  },
+
+  /** Mock POST /api/v1/control-templates/render */
+  controlRenderTemplate: async (page: Page) => {
+    await page.route('**/api/v1/control-templates/render', async (route) => {
+      const body = await route.request().postDataJSON();
+      // Return the template + values back as a rendered control preview
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          control: {
+            ...templateBackedControl.control,
+            template: body.template,
+            template_values: body.template_values,
+          },
+        }),
+      });
+    });
+  },
+
+  /** Mock PATCH /api/v1/controls/:id */
+  controlPatch: async (page: Page) => {
+    await page.route('**/api/v1/controls/*', async (route, request) => {
+      if (request.method() !== 'PATCH') {
+        await route.fallback();
+        return;
+      }
+      const body = await request.postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          name: body.name ?? 'Template Regex Guard',
+          enabled: body.enabled ?? true,
+        }),
+      });
+    });
+  },
+
+  /** Mock POST /api/v1/agents/:name/controls/:id (attach control) */
+  agentAddControl: async (page: Page) => {
+    await page.route(
+      '**/api/v1/agents/*/controls/*',
+      async (route, request) => {
+        if (request.method() !== 'POST') {
+          await route.fallback();
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true }),
+        });
+      }
+    );
+  },
+
+  /** Mock GET /api/v1/observability/stats */
+  stats: async (
+    page: Page,
+    options: MockResponseOptions<StatsResponse> = { data: mockData.stats }
+  ) => {
+    await page.route('**/api/v1/observability/stats**', async (route) => {
+      await fulfillRoute(route, options, mockData.stats);
+    });
+  },
+};
+
+/**
+ * Helper to set up all API route mocking with defaults
+ */
+export async function mockApiRoutes(page: Page) {
+  await mockRoutes.config(page);
+  await mockRoutes.agents(page);
+  await mockRoutes.agent(page);
+  await mockRoutes.evaluators(page);
+  await mockRoutes.controlSchema(page);
+  await mockRoutes.controlsList(page);
+  await mockRoutes.controlGetData(page);
+  await mockRoutes.controlValidate(page);
+  await mockRoutes.controlCreate(page);
+  await mockRoutes.controlUpdate(page);
+  await mockRoutes.stats(page);
+}
+
+/**
+ * Set up all API route mocks with auth required (for login flow tests).
+ * Call mockRoutes.login(page, ...) in the test for success/failure.
+ */
+export async function mockApiRoutesWithAuthRequired(page: Page) {
+  await mockRoutes.config(page, {
+    data: {
+      ...serverConfigResponse,
+      requires_api_key: true,
+      auth_mode: 'api-key',
+      has_active_session: false,
+    },
+  });
+  await mockRoutes.agents(page);
+  await mockRoutes.agent(page);
+  await mockRoutes.evaluators(page);
+  await mockRoutes.controlSchema(page);
+  await mockRoutes.controlsList(page);
+  await mockRoutes.controlGetData(page);
+  await mockRoutes.controlValidate(page);
+  await mockRoutes.controlCreate(page);
+  await mockRoutes.controlUpdate(page);
+  await mockRoutes.stats(page);
+}
+
+export {
+  focusJsonEditorAt,
+  getJsonEditorSuggestions,
+  getJsonEditorValue,
+  setJsonEditorValue,
+} from './json-editor-bridge';
+
+/**
+ * Extended test with mocked API
+ */
+export const test = base.extend<{ mockedPage: Page }>({
+  /* eslint-disable react-hooks/rules-of-hooks */
+  mockedPage: async ({ page }, use) => {
+    await mockApiRoutes(page);
+    await use(page);
+  },
+  /* eslint-enable react-hooks/rules-of-hooks */
+});
+
+export { expect } from '@playwright/test';
