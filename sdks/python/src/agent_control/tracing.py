@@ -149,3 +149,155 @@ def get_current_trace_id() -> str | None:
     if trace_context:
         return trace_context["trace_id"]
 
+    # Try OpenTelemetry
+    otel_trace_id, _ = _get_otel_ids()
+    return otel_trace_id
+
+
+def get_current_span_id() -> str | None:
+    """
+    Get the current span ID from context.
+
+    Returns:
+        Span ID if set, None otherwise
+    """
+    # Check context variable
+    span_id = _span_id_var.get()
+    if span_id is not None:
+        return span_id
+
+    # Try external provider
+    trace_context = get_trace_context_from_provider()
+    if trace_context:
+        return trace_context["span_id"]
+
+    # Try OpenTelemetry
+    _, otel_span_id = _get_otel_ids()
+    return otel_span_id
+
+
+def set_trace_context(trace_id: str, span_id: str) -> tuple[Token[str | None], Token[str | None]]:
+    """
+    Set the trace context for the current async context.
+
+    Args:
+        trace_id: 128-bit hex trace ID
+        span_id: 64-bit hex span ID
+
+    Returns:
+        Tuple of reset tokens for restoring previous context
+    """
+    trace_token = _trace_id_var.set(trace_id)
+    span_token = _span_id_var.set(span_id)
+    return trace_token, span_token
+
+
+def reset_trace_context(trace_token: Token[str | None], span_token: Token[str | None]) -> None:
+    """
+    Reset the trace context to previous values.
+
+    Args:
+        trace_token: Token from set_trace_context
+        span_token: Token from set_trace_context
+    """
+    _trace_id_var.reset(trace_token)
+    _span_id_var.reset(span_token)
+
+
+@contextmanager
+def with_trace(
+    trace_id: str | None = None,
+    span_id: str | None = None,
+) -> Generator[tuple[str, str], None, None]:
+    """
+    Context manager for scoped tracing.
+
+    Sets trace and span IDs for the duration of the block.
+    If IDs are not provided, generates new ones.
+
+    Args:
+        trace_id: Optional trace ID to use (generates if not provided)
+        span_id: Optional span ID to use (generates if not provided)
+
+    Yields:
+        Tuple of (trace_id, span_id) being used
+
+    Example:
+        # Auto-generate IDs
+        with with_trace() as (trace_id, span_id):
+            result = await process_request()
+            print(f"Request traced as {trace_id}")
+
+        # Use existing trace, new span
+        with with_trace(trace_id=incoming_trace_id) as (tid, sid):
+            result = await nested_operation()
+    """
+    # Generate IDs if not provided
+    final_trace_id = trace_id or _generate_trace_id()
+    final_span_id = span_id or _generate_span_id()
+
+    # Set context
+    trace_token, span_token = set_trace_context(final_trace_id, final_span_id)
+
+    try:
+        yield final_trace_id, final_span_id
+    finally:
+        # Reset context
+        reset_trace_context(trace_token, span_token)
+
+
+def is_otel_available() -> bool:
+    """
+    Check if OpenTelemetry is available and can be used.
+
+    Returns:
+        True if OpenTelemetry is installed and importable
+    """
+    try:
+        import opentelemetry.trace  # type: ignore[import-not-found] # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def validate_trace_id(trace_id: str) -> bool:
+    """
+    Validate that a trace ID is OTEL-compatible.
+
+    Args:
+        trace_id: String to validate
+
+    Returns:
+        True if valid 128-bit hex string (32 chars)
+    """
+    if not isinstance(trace_id, str):
+        return False
+    if len(trace_id) != 32:
+        return False
+    try:
+        int(trace_id, 16)
+        return True
+    except ValueError:
+        return False
+
+
+def validate_span_id(span_id: str) -> bool:
+    """
+    Validate that a span ID is OTEL-compatible.
+
+    Args:
+        span_id: String to validate
+
+    Returns:
+        True if valid 64-bit hex string (16 chars)
+    """
+    if not isinstance(span_id, str):
+        return False
+    if len(span_id) != 16:
+        return False
+    try:
+        int(span_id, 16)
+        return True
+    except ValueError:
+        return False
