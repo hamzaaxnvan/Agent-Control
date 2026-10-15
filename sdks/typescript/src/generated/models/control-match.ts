@@ -47,3 +47,53 @@ export type ControlMatch = {
    *
    * @remarks
    *
+   * The `error` field indicates evaluator failures, NOT validation failures:
+   * - Set `error` for: evaluator crashes, timeouts, missing dependencies, external service errors
+   * - Do NOT set `error` for: invalid input, syntax errors, schema violations, constraint failures
+   *
+   * When `error` is set, `matched` must be False (fail-open on evaluator errors).
+   * When `error` is None, `matched` reflects the actual validation result.
+   *
+   * This distinction allows:
+   * - Clients to distinguish "data violated rules" from "evaluator is broken"
+   * - Observability systems to monitor evaluator health separately from validation outcomes
+   */
+  result: EvaluatorResult;
+  /**
+   * Steering context for steer actions if configured
+   */
+  steeringContext?: SteeringContext | null | undefined;
+};
+
+/** @internal */
+export const ControlMatch$inboundSchema: z.ZodMiniType<ControlMatch, unknown> =
+  z.pipe(
+    z.object({
+      action: ActionDecision$inboundSchema,
+      control_execution_id: types.optional(types.string()),
+      control_id: types.number(),
+      control_name: types.string(),
+      execution_duration_ms: z.optional(z.nullable(types.number())),
+      result: EvaluatorResult$inboundSchema,
+      steering_context: z.optional(z.nullable(SteeringContext$inboundSchema)),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        "control_execution_id": "controlExecutionId",
+        "control_id": "controlId",
+        "control_name": "controlName",
+        "execution_duration_ms": "executionDurationMs",
+        "steering_context": "steeringContext",
+      });
+    }),
+  );
+
+export function controlMatchFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlMatch, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlMatch$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlMatch' from JSON`,
+  );
+}
