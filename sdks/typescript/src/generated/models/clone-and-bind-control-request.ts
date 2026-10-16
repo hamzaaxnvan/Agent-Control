@@ -25,3 +25,31 @@ export type CloneAndBindControlRequest = {
 };
 
 /** @internal */
+export type CloneAndBindControlRequest$Outbound = {
+  name?: string | null | undefined;
+  target_binding: CloneAndBindTargetBinding$Outbound;
+};
+
+/** @internal */
+export const CloneAndBindControlRequest$outboundSchema: z.ZodMiniType<
+  CloneAndBindControlRequest$Outbound,
+  CloneAndBindControlRequest
+> = z.pipe(
+  z.object({
+    name: z.optional(z.nullable(z.string())),
+    targetBinding: CloneAndBindTargetBinding$outboundSchema,
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      targetBinding: "target_binding",
+    });
+  }),
+);
+
+export function cloneAndBindControlRequestToJSON(
+  cloneAndBindControlRequest: CloneAndBindControlRequest,
+): string {
+  return JSON.stringify(
+    CloneAndBindControlRequest$outboundSchema.parse(cloneAndBindControlRequest),
+  );
+}
