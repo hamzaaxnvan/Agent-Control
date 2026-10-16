@@ -19,3 +19,24 @@ export type PatchControlRequest = {
 };
 
 /** @internal */
+export type PatchControlRequest$Outbound = {
+  enabled?: boolean | null | undefined;
+  name?: string | null | undefined;
+};
+
+/** @internal */
+export const PatchControlRequest$outboundSchema: z.ZodMiniType<
+  PatchControlRequest$Outbound,
+  PatchControlRequest
+> = z.object({
+  enabled: z.optional(z.nullable(z.boolean())),
+  name: z.optional(z.nullable(z.string())),
+});
+
+export function patchControlRequestToJSON(
+  patchControlRequest: PatchControlRequest,
+): string {
+  return JSON.stringify(
+    PatchControlRequest$outboundSchema.parse(patchControlRequest),
+  );
+}

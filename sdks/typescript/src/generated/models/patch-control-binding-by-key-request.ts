@@ -11,3 +11,56 @@ import { remap as remap$ } from "../lib/primitives.js";
 export type PatchControlBindingByKeyRequest = {
   /**
    * ID of the bound control.
+   */
+  controlId: number;
+  /**
+   * New enabled value for the binding.
+   */
+  enabled: boolean;
+  /**
+   * Opaque external identifier within the target_type.
+   */
+  targetId: string;
+  /**
+   * Opaque attachment kind.
+   */
+  targetType: string;
+};
+
+/** @internal */
+export type PatchControlBindingByKeyRequest$Outbound = {
+  control_id: number;
+  enabled: boolean;
+  target_id: string;
+  target_type: string;
+};
+
+/** @internal */
+export const PatchControlBindingByKeyRequest$outboundSchema: z.ZodMiniType<
+  PatchControlBindingByKeyRequest$Outbound,
+  PatchControlBindingByKeyRequest
+> = z.pipe(
+  z.object({
+    controlId: z.int(),
+    enabled: z.boolean(),
+    targetId: z.string(),
+    targetType: z.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      controlId: "control_id",
+      targetId: "target_id",
+      targetType: "target_type",
+    });
+  }),
+);
+
+export function patchControlBindingByKeyRequestToJSON(
+  patchControlBindingByKeyRequest: PatchControlBindingByKeyRequest,
+): string {
+  return JSON.stringify(
+    PatchControlBindingByKeyRequest$outboundSchema.parse(
+      patchControlBindingByKeyRequest,
+    ),
+  );
+}
