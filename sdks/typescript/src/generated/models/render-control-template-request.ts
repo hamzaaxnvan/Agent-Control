@@ -30,3 +30,35 @@ export type RenderControlTemplateRequest = {
 };
 
 /** @internal */
+export type RenderControlTemplateRequest$Outbound = {
+  template: TemplateDefinitionInput$Outbound;
+  template_values?: { [k: string]: TemplateValue$Outbound } | undefined;
+};
+
+/** @internal */
+export const RenderControlTemplateRequest$outboundSchema: z.ZodMiniType<
+  RenderControlTemplateRequest$Outbound,
+  RenderControlTemplateRequest
+> = z.pipe(
+  z.object({
+    template: TemplateDefinitionInput$outboundSchema,
+    templateValues: z.optional(
+      z.record(z.string(), TemplateValue$outboundSchema),
+    ),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      templateValues: "template_values",
+    });
+  }),
+);
+
+export function renderControlTemplateRequestToJSON(
+  renderControlTemplateRequest: RenderControlTemplateRequest,
+): string {
+  return JSON.stringify(
+    RenderControlTemplateRequest$outboundSchema.parse(
+      renderControlTemplateRequest,
+    ),
+  );
+}
