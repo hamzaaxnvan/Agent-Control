@@ -177,3 +177,183 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <UnstyledButton component={Link} href="/">
                   <Group gap="xs">
                     <Box className={classes.logoIcon} component="span">
+                      <span className={classes.lightIcon}>
+                        <Image
+                          src="/ac-logo-light.svg"
+                          alt="Agent Control"
+                          width={32}
+                          height={32}
+                          unoptimized
+                        />
+                      </span>
+                      <span className={classes.darkIcon}>
+                        <Image
+                          src="/ac-logo-dark.svg"
+                          alt="Agent Control"
+                          width={32}
+                          height={32}
+                          unoptimized
+                        />
+                      </span>
+                    </Box>
+                    <Text size="md" fw={600} className={classes.logoText}>
+                      Agent Control
+                    </Text>
+                  </Group>
+                </UnstyledButton>
+                {/* <ActionIcon
+                  onClick={() => setDesktopOpened(!desktopOpened)}
+                  variant='subtle'
+                  color='gray'
+                  size='lg'
+                  visibleFrom='sm'
+                  disabled
+                >
+                  <ToggleMenu /> */}
+                {/* </ActionIcon> */}
+              </Group>
+            </Stack>
+
+            <Divider className={classes.divider} />
+
+            <Stack gap={4} p="md">
+              <NavItem
+                href="/"
+                icon={
+                  <IconHexagons
+                    color="var(--jds-color-muted-foreground)"
+                    size={18}
+                    stroke={2}
+                  />
+                }
+                label="My agents"
+                active={
+                  router.pathname === '/' || router.pathname === '/agents'
+                }
+                onClick={closeNavbar}
+              />
+
+              {/* Agent List - Temporarily hidden */}
+              {/* TODO: Decide on pagination strategy for sidebar agent list */}
+              {/* {desktopOpened && (
+                <Box
+                  className={classes.agentListContainer}
+                  style={{
+                    maxHeight: "300px",
+                    overflow: "auto",
+                  }}
+                >
+                  <Stack gap={2} ml='lg' mt={4} className={classes.agentList}>
+                    {agentsLoading ? (
+                      <Center py='xs'>
+                        <Loader size='xs' />
+                      </Center>
+                    ) : (
+                      <>
+                        {allAgents.map((agent) => (
+                          <AgentItem
+                            key={agent.agent_name}
+                            href={`/agents/${agent.agent_name}/controls`}
+                            label={agent.agent_name}
+                            active={router.query.id === agent.agent_name}
+                            onClick={closeNavbar}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </Stack>
+                </Box>
+              )} */}
+
+              {/* TODO: Re-enable when controls page is implemented */}
+              {/* <NavItem
+                href='/controls'
+                icon={<IconAutomaticGearbox size={18} stroke={2} />}
+                label='All controls'
+                onClick={closeNavbar}
+              /> */}
+            </Stack>
+          </Stack>
+
+          {/* Bottom Section */}
+          <BottomSection />
+        </Stack>
+      </AppShell.Navbar>
+
+      <AppShell.Main className={classes.main}>
+        <ErrorBoundary variant="content">{children}</ErrorBoundary>
+      </AppShell.Main>
+    </AppShell>
+  );
+}
+
+const BREADCRUMB_TRANSITION = { duration: 0.2, ease: 'easeOut' as const };
+
+function Header() {
+  const router = useRouter();
+  const isAgentPage = router.pathname === '/agents' && !!router.query.id;
+  const agentId = isAgentPage ? (router.query.id as string) : '';
+  const { data: agentData } = useAgent(agentId);
+  const agentDisplayName = agentData?.agent?.agent_name ?? agentId ?? null;
+
+  const getBreadcrumb = () => {
+    if (router.pathname !== '/' && router.pathname !== '/agents') {
+      return null;
+    }
+
+    if (!isAgentPage) {
+      return (
+        <Text size="sm" fw={500}>
+          My agents
+        </Text>
+      );
+    }
+
+    return (
+      <Group gap="xs" align="center" wrap="nowrap">
+        <Text
+          component={Link}
+          href="/"
+          size="sm"
+          fw={500}
+          c="dimmed"
+          style={{ textDecoration: 'none' }}
+          data-testid="breadcrumb-my-agents"
+        >
+          My agents
+        </Text>
+        <AnimatePresence mode="wait">
+          {!!agentDisplayName && (
+            <motion.span
+              key="agent-breadcrumb"
+              initial={{ opacity: 0, x: -6 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -6 }}
+              transition={BREADCRUMB_TRANSITION}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--mantine-spacing-xs)',
+              }}
+            >
+              <IconChevronRight
+                size={14}
+                color="var(--mantine-color-dimmed)"
+                style={{ flexShrink: 0 }}
+              />
+              <Text size="sm" fw={500} component="span">
+                {agentDisplayName}
+              </Text>
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </Group>
+    );
+  };
+
+  return (
+    <Group h="100%" px="md" ml={200}>
+      {getBreadcrumb()}
+    </Group>
+  );
+}
