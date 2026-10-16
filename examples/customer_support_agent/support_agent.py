@@ -155,3 +155,319 @@ class KnowledgeBase:
 
         for article in cls.ARTICLES:
             if (query_lower in article["title"].lower() or
+                query_lower in article["content"].lower() or
+                query_lower in article["category"]):
+                results.append(article)
+
+        # If no exact match, return a random article
+        if not results:
+            results = [random.choice(cls.ARTICLES)]
+
+        return results
+
+
+class TicketSystem:
+    """Simulates a ticket creation system."""
+
+    _ticket_counter = 1000
+
+    @classmethod
+    def create(cls, subject: str, description: str, priority: str = "medium") -> dict[str, Any]:
+        """Create a new support ticket."""
+        cls._ticket_counter += 1
+        return {
+            "ticket_id": f"TKT-{cls._ticket_counter}",
+            "subject": subject,
+            "description": description,
+            "priority": priority,
+            "status": "open",
+            "created_at": datetime.now().isoformat(),
+        }
+
+
+# =============================================================================
+# PROTECTED AGENT FUNCTIONS
+# =============================================================================
+# These functions are protected by the @control() decorator.
+# The server evaluates controls and blocks/allows based on agent associations.
+
+
+@control()
+async def respond_to_customer(message: str) -> str:
+    """
+    Main chat function - generates an LLM response to customer message.
+
+    The @control() decorator:
+    - Checks 'pre' controls before generating (input validation)
+    - Checks 'post' controls after generating (output validation)
+
+    If a control triggers with 'deny' action, ControlViolationError is raised.
+    """
+    # Generate response using mock LLM
+    response = MockLLM.generate(message)
+    return response
+
+
+async def _lookup_customer(query: str) -> dict[str, Any]:
+    """
+    Look up customer information - protected tool call.
+
+    The decorator protects this operation by validating:
+    - The query doesn't contain injection attempts
+    - The result doesn't leak unauthorized data
+    """
+    customer = CustomerDatabase.lookup(query)
+    if customer:
+        return {"found": True, "customer": customer}
+    return {"found": False, "message": f"No customer found for: {query}"}
+
+
+_lookup_customer.name = "lookup_customer"  # type: ignore[attr-defined]
+_lookup_customer.tool_name = "lookup_customer"  # type: ignore[attr-defined]
+lookup_customer = control()(_lookup_customer)
+
+
+async def _search_knowledge_base(query: str) -> dict[str, Any]:
+    """
+    Search the knowledge base - protected tool call.
+
+    Validates that:
+    - Search queries don't contain harmful content
+    - Results are appropriate to share
+    """
+    articles = KnowledgeBase.search(query)
+    return {
+        "query": query,
+        "results_count": len(articles),
+        "articles": articles,
+    }
+
+
+_search_knowledge_base.name = "search_knowledge_base"  # type: ignore[attr-defined]
+_search_knowledge_base.tool_name = "search_knowledge_base"  # type: ignore[attr-defined]
+search_knowledge_base = control()(_search_knowledge_base)
+
+
+async def _create_ticket(
+    subject: str, description: str, priority: str = "medium"
+) -> dict[str, Any]:
+    """
+    Create a support ticket - protected tool call.
+
+    Validates that:
+    - Ticket content is appropriate
+    - No sensitive data in public fields
+    """
+    ticket = TicketSystem.create(subject, description, priority)
+    return {"success": True, "ticket": ticket}
+
+
+_create_ticket.name = "create_ticket"  # type: ignore[attr-defined]
+_create_ticket.tool_name = "create_ticket"  # type: ignore[attr-defined]
+create_ticket = control()(_create_ticket)
+
+
+# =============================================================================
+# CUSTOMER SUPPORT AGENT CLASS
+# =============================================================================
+
+
+class CustomerSupportAgent:
+    """
+    High-level agent that orchestrates the protected functions.
+
+    This demonstrates the pattern of catching ControlViolationError
+    and providing graceful fallback responses.
+    """
+
+    def __init__(self):
+        initialize_agent_control()
+        self.conversation_history: list[dict[str, str]] = []
+
+    async def chat(self, user_message: str) -> str:
+        """
+        Process a user message and return a response.
+
+        Handles ControlViolationError gracefully by returning
+        a safe fallback message instead of exposing internal errors.
+        """
+        self.conversation_history.append({"role": "user", "content": user_message})
+
+        try:
+            # Main LLM response - protected by controls
+            response = await respond_to_customer(user_message)
+
+            self.conversation_history.append({"role": "assistant", "content": response})
+            return response
+
+        except ControlViolationError as e:
+            # Control triggered - return safe fallback
+            fallback = (
+                "I'm sorry, but I can't help with that request. "
+                "Is there something else I can assist you with?"
+            )
+            self.conversation_history.append({"role": "assistant", "content": fallback})
+            print(f"  [Control triggered: {e.control_name}]")
+            return fallback
+
+    async def lookup(self, query: str) -> str:
+        """Look up customer information with error handling."""
+        try:
+            result = await lookup_customer(query)
+            if result["found"]:
+                customer = result["customer"]
+                name, email, tier = customer['name'], customer['email'], customer['tier']
+                return f"Found customer: {name} ({email}) - {tier} tier"
+            return result["message"]
+
+        except ControlViolationError as e:
+            print(f"  [Control triggered: {e.control_name}]")
+            return "I'm unable to process that lookup request."
+
+    async def search(self, query: str) -> str:
+        """Search the knowledge base with error handling."""
+        try:
+            result = await search_knowledge_base(query)
+            if result["articles"]:
+                article = result["articles"][0]
+                return f"Found: {article['title']}\n{article['content']}"
+            return "No relevant articles found."
+
+        except ControlViolationError as e:
+            print(f"  [Control triggered: {e.control_name}]")
+            return "I'm unable to search for that query."
+
+    async def create_support_ticket(
+        self, subject: str, description: str, priority: str = "medium"
+    ) -> str:
+        """Create a support ticket with error handling."""
+        try:
+            result = await create_ticket(subject, description, priority)
+            if result["success"]:
+                ticket = result["ticket"]
+                return f"Ticket created: {ticket['ticket_id']} (Priority: {ticket['priority']})"
+            return "Failed to create ticket."
+
+        except ControlViolationError as e:
+            print(f"  [Control triggered: {e.control_name}]")
+            return "I'm unable to create a ticket with that content."
+
+    async def handle_comprehensive_support(
+        self, user_message: str, customer_id: str | None = None
+    ) -> str:
+        """
+        Handle a comprehensive support request - demonstrates multiple spans in one trace.
+
+        This method calls multiple @control() decorated functions in sequence,
+        creating multiple spans within a single trace for observability testing:
+        1. lookup_customer (if customer_id provided)
+        2. search_knowledge_base
+        3. respond_to_customer
+
+        Each @control() decorated function creates its own span, all grouped
+        under the same trace context using with_trace().
+        """
+        self.conversation_history.append({"role": "user", "content": user_message})
+
+        # Use with_trace() to ensure all spans share the same trace ID
+        # This creates a parent trace context that child spans inherit
+        with with_trace():
+            context_parts = []
+
+            # Span 1: Customer lookup (if customer_id provided)
+            if customer_id:
+                try:
+                    customer_result = await lookup_customer(customer_id)
+                    if customer_result["found"]:
+                        customer = customer_result["customer"]
+                        tier = customer['tier']
+                        orders = customer['orders']
+                        context_parts.append(
+                            f"Customer: {customer['name']} ({tier} tier, {orders} orders)"
+                        )
+                except ControlViolationError as e:
+                    print(f"  [Control triggered on lookup: {e.control_name}]")
+
+            # Span 2: Knowledge base search
+            try:
+                # Extract keywords from user message for search
+                search_query = user_message.split()[0] if user_message else "help"
+                kb_result = await search_knowledge_base(search_query)
+                if kb_result["articles"]:
+                    article = kb_result["articles"][0]
+                    context_parts.append(f"Relevant KB: {article['title']}")
+            except ControlViolationError as e:
+                print(f"  [Control triggered on KB search: {e.control_name}]")
+
+            # Span 3: Generate response
+            try:
+                # Build enhanced prompt with context
+                enhanced_message = user_message
+                if context_parts:
+                    enhanced_message = f"{user_message}\n[Context: {'; '.join(context_parts)}]"
+
+                response = await respond_to_customer(enhanced_message)
+                self.conversation_history.append({"role": "assistant", "content": response})
+                return response
+
+            except ControlViolationError as e:
+                fallback = (
+                    "I'm sorry, but I can't help with that request. "
+                    "Is there something else I can assist you with?"
+                )
+                self.conversation_history.append({"role": "assistant", "content": fallback})
+                print(f"  [Control triggered on response: {e.control_name}]")
+                return fallback
+
+
+# =============================================================================
+# DIRECT EXECUTION
+# =============================================================================
+
+async def run_smoke_tests() -> None:
+    """Run the direct-execution smoke tests."""
+    agent = CustomerSupportAgent()
+
+    print("\n--- Test: Normal chat (1 span) ---")
+    response = await agent.chat("Hello, I need help with a refund")
+    print(f"Agent: {response}")
+
+    print("\n--- Test: Customer lookup (1 span) ---")
+    response = await agent.lookup("C001")
+    print(f"Agent: {response}")
+
+    print("\n--- Test: Knowledge base search (1 span) ---")
+    response = await agent.search("refund")
+    print(f"Agent: {response}")
+
+    print("\n--- Test: Create ticket (1 span) ---")
+    response = await agent.create_support_ticket(
+        subject="Refund request",
+        description="I would like to return my order",
+        priority="medium"
+    )
+    print(f"Agent: {response}")
+
+    print("\n--- Test: Comprehensive support (2-3 spans in one trace) ---")
+    response = await agent.handle_comprehensive_support(
+        user_message="I need help with a refund for my recent order",
+        customer_id="C001"
+    )
+    print(f"Agent: {response}")
+
+    print("\n--- Test: Comprehensive support without customer (2 spans) ---")
+    response = await agent.handle_comprehensive_support(
+        user_message="How do I reset my password?"
+    )
+    print(f"Agent: {response}")
+
+
+if __name__ == "__main__":
+    # Quick test
+    async def main():
+        try:
+            await run_smoke_tests()
+        finally:
+            await agent_control.ashutdown()
+
+    asyncio.run(main())
