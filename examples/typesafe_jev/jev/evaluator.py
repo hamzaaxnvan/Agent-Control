@@ -195,3 +195,201 @@ class TypeSafeJevEvaluator(Evaluator[TypeSafeJevConfig]):
             value: That question's raw answer.
 
         Returns:
+            True when the answer satisfies the comparison, which is what makes
+            the question count as tripped.
+
+        Raises:
+            ValueError: A numeric comparison was configured but the answer or
+                the threshold is not a number.
+        """
+        operator = question.operator
+        threshold = question.threshold
+
+        if operator == "eq":
+            return bool(value == threshold)
+        if operator == "ne":
+            return bool(value != threshold)
+        if operator == "contains":
+            return _stringify(threshold) in _stringify(value)
+
+        value_number = coerce_number(value)
+        threshold_number = coerce_number(threshold)
+        if value_number is None:
+            raise ValueError(f"TypeSafe answer {value!r} is not numeric")
+        if threshold_number is None:
+            raise ValueError(f"TypeSafe threshold {threshold!r} is not numeric")
+        if operator == "gt":
+            return value_number > threshold_number
+        if operator == "gte":
+            return value_number >= threshold_number
+        if operator == "lt":
+            return value_number < threshold_number
+        if operator == "lte":
+            return value_number <= threshold_number
+        raise ValueError(f"Unsupported TypeSafe operator: {operator}")
+
+    def _decide(self, raw: RawAnswers) -> Decision:
+        """Combine the deciding questions into the one boolean a control needs.
+
+        Questions without a threshold are asked and recorded but take no part
+        here. Of the rest, ``any`` fires on the first that trips and ``all``
+        needs every one.
+
+        Args:
+            raw: Every question's answer, from _raw_answers.
+
+        Returns:
+            The decision, plus which questions decided and which of them tripped.
+        """
+        tripped: list[str] = []
+        deciding: list[str] = []
+
+        for question_id, question in self.config.questions.items():
+            if not question.decides:
+                continue
+            deciding.append(question_id)
+            if self._question_matches(question, raw[question_id]):
+                tripped.append(question_id)
+
+        combine = self.config.decide.combine
+        matched = bool(tripped) if combine == "any" else len(tripped) == len(deciding)
+
+        if matched:
+            detail = ", ".join(
+                f"{qid}={raw[qid]!r} {self.config.questions[qid].operator} "
+                f"{self.config.questions[qid].threshold!r}"
+                for qid in tripped
+            )
+            message = f"TypeSafe {combine}: {detail}: control triggered."
+        elif combine == "all" and tripped:
+            missing = [qid for qid in deciding if qid not in tripped]
+            message = (
+                f"TypeSafe all: {', '.join(missing)} did not trip: control not triggered."
+            )
+        else:
+            message = "TypeSafe: no question tripped: control not triggered."
+
+        return Decision(matched=matched, message=message, tripped=tripped, deciding=deciding)
+
+    def _base_metadata(self) -> dict[str, Any]:
+        return {
+            "evaluator": self.metadata.name,
+            "model": self.config.model,
+            "question_ids": sorted(self.config.questions),
+            "combine": self.config.decide.combine,
+            # What each question asked. With this, a reader can turn a raw
+            # answer into the outcome it produced without also holding the
+            # control's configuration.
+            "questions": {
+                question_id: {
+                    "type": question.type,
+                    "operator": question.operator,
+                    "threshold": question.threshold,
+                    "decides": question.decides,
+                }
+                for question_id, question in self.config.questions.items()
+            },
+        }
+
+    def _handle_error(self, message: str, detail: str) -> EvaluatorResult:
+        """Apply the configured error policy.
+
+        ``EvaluatorResult`` forbids ``error`` together with ``matched=True``, so
+        a fail-closed deny reports the detail in the message and metadata and
+        leaves ``error`` unset. A fail-closed deny therefore does not appear in
+        evaluator-health error rates.
+        """
+        fallback = self.config.on_error
+        matched = fallback == "deny"
+        metadata = self._base_metadata()
+        metadata["error"] = detail
+        metadata["fallback_action"] = fallback
+        return EvaluatorResult(
+            matched=matched,
+            confidence=0.0,
+            message=message,
+            metadata=metadata,
+            error=None if matched else detail,
+        )
+
+    def _confidence(self, response: dict[str, Any], raw: RawAnswers, decided_by: str) -> float:
+        """Return a 0-1 confidence for the question that drove the decision.
+
+        Score and choice answers carry the model's own ``confidence``. A noul
+        answer does not, so report how decisive the probability is: a noul of
+        0.99 or 0.01 is decisive, and 0.5 is a coin flip.
+        """
+        answers = response.get("answers") or {}
+        answer = answers.get(decided_by) or {}
+        reported = coerce_number(answer.get("confidence"))
+        if reported is not None:
+            return max(0.0, min(1.0, reported))
+        question = self.config.questions.get(decided_by)
+        if question is not None and question.type == "noul":
+            probability = coerce_number(raw.get(decided_by))
+            if probability is not None:
+                return max(0.0, min(1.0, abs(probability - 0.5) * 2.0))
+        return 1.0
+
+    async def evaluate(self, data: Any) -> EvaluatorResult:
+        """Ask every configured question in one request and decide from the answers.
+
+        Args:
+            data: Data selected by the control's selector.
+
+        Returns:
+            EvaluatorResult carrying the decision plus every raw answer, the
+            routing detail, and token usage in metadata.
+        """
+        state = self._prepare_state(data)
+        if not _stringify(state).strip():
+            return EvaluatorResult(
+                matched=False,
+                confidence=1.0,
+                message="No data to send to TypeSafe",
+                metadata=self._base_metadata(),
+            )
+
+        started = time.monotonic()
+        try:
+            response = await self._get_client().system_one(
+                state=state,
+                questions=self._build_questions(),
+                model=self.config.model,
+            )
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+
+            raw = self._raw_answers(response)
+            decision = self._decide(raw)
+            decided_by = (
+                decision.tripped[0]
+                if decision.tripped
+                else (decision.deciding or [""])[0]
+            )
+
+            metadata = self._base_metadata()
+            metadata.update(
+                {
+                    "tripped": decision.tripped,
+                    "deciding": decision.deciding,
+                    "answers": raw,
+                    "response_model": response.get("model"),
+                    "usage": response.get("usage"),
+                    "latency_ms": elapsed_ms,
+                }
+            )
+            return EvaluatorResult(
+                matched=decision.matched,
+                confidence=self._confidence(response, raw, decided_by),
+                message=decision.message,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            logger.error("TypeSafe Jev evaluation error: %s", exc, exc_info=True)
+            return self._handle_error(f"TypeSafe Jev evaluation error: {exc}", str(exc))
+
+    async def aclose(self) -> None:
+        """Close the shared HTTP connection pool."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
