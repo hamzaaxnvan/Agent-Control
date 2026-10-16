@@ -13,3 +13,34 @@ export type PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest = {
 
 /** @internal */
 export type PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest$Outbound =
+  {
+    binding_id: number;
+    body: models.PatchControlBindingRequest$Outbound;
+  };
+
+/** @internal */
+export const PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest$outboundSchema:
+  z.ZodMiniType<
+    PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest$Outbound,
+    PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest
+  > = z.pipe(
+    z.object({
+      bindingId: z.int(),
+      body: models.PatchControlBindingRequest$outboundSchema,
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        bindingId: "binding_id",
+      });
+    }),
+  );
+
+export function patchControlBindingApiV1ControlBindingsBindingIdPatchRequestToJSON(
+  patchControlBindingApiV1ControlBindingsBindingIdPatchRequest:
+    PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest,
+): string {
+  return JSON.stringify(
+    PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest$outboundSchema
+      .parse(patchControlBindingApiV1ControlBindingsBindingIdPatchRequest),
+  );
+}
