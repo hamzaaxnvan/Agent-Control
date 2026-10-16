@@ -6,3 +6,20 @@ cd "$REPO_ROOT"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "pre-push: 'uv' is required but not found. Install uv: https://docs.astral.sh/uv/" >&2
+  exit 1
+fi
+
+echo "pre-push: running make lint"
+make lint
+
+echo "pre-push: running make typecheck"
+make typecheck
+
+# Check extras if they exist and have changes
+if [ -d "evaluators/contrib/galileo" ]; then
+  echo "pre-push: checking evaluators/contrib/galileo"
+  cd evaluators/contrib/galileo
+  uv run --extra dev ruff check --config ../../../pyproject.toml src/
+  uv run --extra dev mypy --config-file ../../../pyproject.toml src/
+  cd "$REPO_ROOT"
+fi

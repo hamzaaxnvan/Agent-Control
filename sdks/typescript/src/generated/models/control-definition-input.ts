@@ -46,3 +46,99 @@ export type ControlDefinitionInputExecution = ClosedEnum<
 >;
 
 /**
+ * A control definition to evaluate agent interactions.
+ *
+ * @remarks
+ *
+ * This model contains only the logic and configuration.
+ * Identity fields (id, name) are managed by the database.
+ */
+export type ControlDefinitionInput = {
+  /**
+   * What to do when control matches.
+   */
+  action: ControlAction;
+  /**
+   * Recursive boolean condition tree for control evaluation.
+   */
+  condition: ConditionNodeInput;
+  /**
+   * Detailed description of the control
+   */
+  description?: string | null | undefined;
+  /**
+   * Whether this control is active
+   */
+  enabled?: boolean | undefined;
+  /**
+   * Where this control executes
+   */
+  execution: ControlDefinitionInputExecution;
+  /**
+   * Defines when a control applies to a Step.
+   */
+  scope?: ControlScope | undefined;
+  /**
+   * Tags for categorization
+   */
+  tags?: Array<string> | undefined;
+  /**
+   * Template metadata for template-backed controls
+   */
+  template?: TemplateDefinitionInput | null | undefined;
+  /**
+   * Resolved parameter values for template-backed controls
+   */
+  templateValues?: { [k: string]: TemplateValue } | null | undefined;
+};
+
+/** @internal */
+export const ControlDefinitionInputExecution$outboundSchema: z.ZodMiniEnum<
+  typeof ControlDefinitionInputExecution
+> = z.enum(ControlDefinitionInputExecution);
+
+/** @internal */
+export type ControlDefinitionInput$Outbound = {
+  action: ControlAction$Outbound;
+  condition: ConditionNodeInput$Outbound;
+  description?: string | null | undefined;
+  enabled: boolean;
+  execution: string;
+  scope?: ControlScope$Outbound | undefined;
+  tags?: Array<string> | undefined;
+  template?: TemplateDefinitionInput$Outbound | null | undefined;
+  template_values?: { [k: string]: TemplateValue$Outbound } | null | undefined;
+};
+
+/** @internal */
+export const ControlDefinitionInput$outboundSchema: z.ZodMiniType<
+  ControlDefinitionInput$Outbound,
+  ControlDefinitionInput
+> = z.pipe(
+  z.object({
+    action: ControlAction$outboundSchema,
+    condition: ConditionNodeInput$outboundSchema,
+    description: z.optional(z.nullable(z.string())),
+    enabled: z._default(z.boolean(), true),
+    execution: ControlDefinitionInputExecution$outboundSchema,
+    scope: z.optional(ControlScope$outboundSchema),
+    tags: z.optional(z.array(z.string())),
+    template: z.optional(z.nullable(TemplateDefinitionInput$outboundSchema)),
+    templateValues: z.optional(
+      z.nullable(z.record(z.string(), TemplateValue$outboundSchema)),
+    ),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      templateValues: "template_values",
+    });
+  }),
+);
+
+export function controlDefinitionInputToJSON(
+  controlDefinitionInput: ControlDefinitionInput,
+): string {
+  return JSON.stringify(
+    ControlDefinitionInput$outboundSchema.parse(controlDefinitionInput),
+  );
+}
