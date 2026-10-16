@@ -84,3 +84,177 @@ class SkippedOutOfBoxControl:
     name: str
     missing_evaluators: tuple[str, ...]
 
+
+@dataclass(frozen=True, slots=True)
+class OutOfBoxSeedResult:
+    """Summary of one bootstrap seed pass."""
+
+    created: tuple[str, ...] = ()
+    skipped_existing: tuple[str, ...] = ()
+    skipped_missing_evaluator: tuple[SkippedOutOfBoxControl, ...] = ()
+    skipped_conflict: tuple[str, ...] = ()
+
+    @property
+    def created_count(self) -> int:
+        """Number of controls inserted by this seed pass."""
+        return len(self.created)
+
+    @property
+    def skipped_count(self) -> int:
+        """Number of controls skipped by this seed pass."""
+        return (
+            len(self.skipped_existing)
+            + len(self.skipped_missing_evaluator)
+            + len(self.skipped_conflict)
+        )
+
+
+OUT_OF_BOX_CONTROL_TEMPLATES: tuple[OutOfBoxControlTemplate, ...] = ()
+
+
+def default_out_of_box_namespace_key() -> str:
+    """Return the standalone namespace used for server startup seeding."""
+    return DEFAULT_NAMESPACE_KEY
+
+
+def missing_required_evaluators(
+    required_evaluators: Collection[str],
+    available_evaluators: Collection[str],
+) -> tuple[str, ...]:
+    """Return required evaluator names absent from the current pod."""
+    missing = set(required_evaluators) - set(available_evaluators)
+    return tuple(sorted(missing))
+
+
+async def seed_out_of_box_controls(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    namespace_key: str,
+    available_evaluators: Collection[str],
+    templates: Sequence[OutOfBoxControlTemplate] = OUT_OF_BOX_CONTROL_TEMPLATES,
+) -> OutOfBoxSeedResult:
+    """Create missing out-of-box controls in a namespace.
+
+    Existing seeded controls are found by immutable source ID, so customer
+    renames and explicit deletion opt-outs survive restarts and upgrades.
+    Duplicate-name and duplicate-source integrity errors are treated as benign
+    races with another pod and are reported as ``skipped_conflict``.
+    """
+    if not templates:
+        return OutOfBoxSeedResult()
+
+    created: list[str] = []
+    skipped_existing: list[str] = []
+    skipped_missing_evaluator: list[SkippedOutOfBoxControl] = []
+    skipped_conflict: list[str] = []
+
+    available_evaluator_names = set(available_evaluators)
+    async with session_factory() as session:
+        for template in templates:
+            missing = missing_required_evaluators(
+                template.required_evaluators,
+                available_evaluator_names,
+            )
+            if missing:
+                skipped_missing_evaluator.append(
+                    SkippedOutOfBoxControl(
+                        name=template.name,
+                        missing_evaluators=missing,
+                    )
+                )
+                continue
+
+            outcome = await _seed_one_control(
+                session,
+                namespace_key=namespace_key,
+                template=template,
+            )
+            if outcome == "created":
+                created.append(template.name)
+            elif outcome == "conflict":
+                skipped_conflict.append(template.name)
+            else:
+                skipped_existing.append(template.name)
+
+    return OutOfBoxSeedResult(
+        created=tuple(created),
+        skipped_existing=tuple(skipped_existing),
+        skipped_missing_evaluator=tuple(skipped_missing_evaluator),
+        skipped_conflict=tuple(skipped_conflict),
+    )
+
+
+async def _seed_one_control(
+    session: AsyncSession,
+    *,
+    namespace_key: str,
+    template: OutOfBoxControlTemplate,
+) -> str:
+    control_service = ControlService(session)
+    if await control_service.seed_source_exists(
+        template.source_id,
+        namespace_key=namespace_key,
+    ):
+        return "existing"
+    if await control_service.active_control_name_exists(template.name, namespace_key=namespace_key):
+        return "existing"
+
+    control = control_service.create_control(
+        namespace_key=namespace_key,
+        name=template.name,
+        data=_serialize_control_data(template.control),
+        seed_source_id=template.source_id,
+    )
+    try:
+        await control_service.create_version(
+            control,
+            event_type="created",
+            note=_INITIAL_VERSION_NOTE,
+        )
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        if _is_control_seed_conflict(exc):
+            return "conflict"
+        raise
+    return "created"
+
+
+def _serialize_control_data(control_data: ControlDefinition) -> dict[str, object]:
+    data_json = control_data.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_none=True,
+        exclude_unset=True,
+    )
+    if "scope" in data_json and isinstance(data_json["scope"], dict):
+        data_json["scope"] = {
+            key: value for key, value in data_json["scope"].items() if value is not None
+        }
+    if "enabled" not in data_json:
+        data_json["enabled"] = control_data.enabled
+    return cast(dict[str, object], data_json)
+
+
+def _is_control_name_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+    if diag in _CONTROL_NAME_UNIQUE_CONSTRAINTS:
+        return True
+
+    error_text = " ".join(
+        part for part in (str(error.orig), str(error)) if part and part != "None"
+    )
+    return any(name in error_text for name in _CONTROL_NAME_UNIQUE_CONSTRAINTS)
+
+
+def _is_control_seed_conflict(error: IntegrityError) -> bool:
+    diag = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+    if diag == _CONTROL_SEED_UNIQUE_CONSTRAINT:
+        return True
+    if _is_control_name_conflict(error):
+        return True
+
+    error_text = " ".join(
+        part for part in (str(error.orig), str(error)) if part and part != "None"
+    )
+    return _CONTROL_SEED_UNIQUE_CONSTRAINT in error_text
