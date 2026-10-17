@@ -249,3 +249,254 @@ class JSONEvaluator(Evaluator[JSONEvaluatorConfig]):
             if self.config.field_constraints:
                 specified_paths.update(self.config.field_constraints.keys())
             if self.config.field_patterns:
+                specified_paths.update(self.config.field_patterns.keys())
+
+            extra_paths = actual_paths - specified_paths
+            if extra_paths:
+                errors.append(
+                    f"Extra fields not allowed: {', '.join(sorted(extra_paths)[:3])}"
+                )
+
+        if not errors:
+            return None  # Validation passed
+
+        return EvaluatorResult(
+            matched=True,
+            confidence=1.0,
+            message=f"Type validation failed: {'; '.join(errors[:3])}",
+            metadata={"error_count": len(errors), "errors": errors},
+        )
+
+    def _check_required(self, data: dict | list) -> EvaluatorResult | None:
+        """Validate required fields are present. Returns error result or None."""
+        if not self.config.required_fields:
+            return None
+
+        if not isinstance(data, dict):
+            return EvaluatorResult(
+                matched=True,
+                confidence=1.0,
+                message="Required field checking requires a JSON object, got array/primitive",
+            )
+
+        missing = []
+
+        for field_path in self.config.required_fields:
+            value, found = self._get_nested_value(data, field_path)
+
+            if not found:
+                missing.append(field_path)
+            elif not self.config.allow_null_required and value is None:
+                missing.append(f"{field_path} (null not allowed)")
+
+        if not missing:
+            return None  # Validation passed
+
+        return EvaluatorResult(
+            matched=True,
+            confidence=1.0,
+            message=f"Missing required fields: {', '.join(missing[:5])}",
+            metadata={"missing_count": len(missing), "missing_fields": missing},
+        )
+
+    def _check_constraints(self, data: dict | list) -> EvaluatorResult | None:
+        """Validate field constraints (ranges, enums, string length)."""
+        if not self.config.field_constraints:
+            return None
+
+        if not isinstance(data, dict):
+            return EvaluatorResult(
+                matched=True,
+                confidence=1.0,
+                message="Constraint checking requires a JSON object, got array/primitive",
+            )
+
+        errors = []
+
+        for field_path, constraints in self.config.field_constraints.items():
+            value, found = self._get_nested_value(data, field_path)
+
+            if not found:
+                errors.append(f"{field_path}: field not found")
+                continue
+
+            # Numeric range constraints
+            if "min" in constraints or "max" in constraints:
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    errors.append(f"{field_path}: expected numeric value for range check")
+                    continue
+
+                if "min" in constraints and value < constraints["min"]:
+                    errors.append(
+                        f"{field_path}: value {value} below minimum {constraints['min']}"
+                    )
+                    continue
+
+                if "max" in constraints and value > constraints["max"]:
+                    errors.append(
+                        f"{field_path}: value {value} above maximum {constraints['max']}"
+                    )
+                    continue
+
+            # Enum constraints
+            if "enum" in constraints:
+                if self.config.case_sensitive_enums:
+                    if value not in constraints["enum"]:
+                        allowed = ", ".join(str(v) for v in constraints["enum"][:5])
+                        errors.append(
+                            f"{field_path}: value '{value}' not in allowed values: {allowed}"
+                        )
+                        continue
+                else:
+                    if isinstance(value, str):
+                        value_lower = value.lower()
+                        enum_lower = [
+                            v.lower() if isinstance(v, str) else v
+                            for v in constraints["enum"]
+                        ]
+                        if value_lower not in enum_lower:
+                            allowed = ", ".join(str(v) for v in constraints["enum"][:5])
+                            errors.append(
+                                f"{field_path}: value '{value}' not in allowed values: "
+                                f"{allowed} (case-insensitive)"
+                            )
+                            continue
+                    else:
+                        if value not in constraints["enum"]:
+                            allowed = ", ".join(str(v) for v in constraints["enum"][:5])
+                            errors.append(
+                                f"{field_path}: value '{value}' not in allowed values: {allowed}"
+                            )
+                            continue
+
+            # String length constraints
+            if "min_length" in constraints or "max_length" in constraints:
+                if not isinstance(value, str):
+                    errors.append(f"{field_path}: expected string for length check")
+                    continue
+
+                str_len = len(value)
+                if "min_length" in constraints and str_len < constraints["min_length"]:
+                    errors.append(
+                        f"{field_path}: length {str_len} below minimum {constraints['min_length']}"
+                    )
+                    continue
+
+                if "max_length" in constraints and str_len > constraints["max_length"]:
+                    errors.append(
+                        f"{field_path}: length {str_len} above maximum {constraints['max_length']}"
+                    )
+                    continue
+
+        if not errors:
+            return None  # Validation passed
+
+        return EvaluatorResult(
+            matched=True,
+            confidence=1.0,
+            message=f"Constraint validation failed: {'; '.join(errors[:3])}",
+            metadata={"error_count": len(errors), "errors": errors},
+        )
+
+    def _check_patterns(self, data: dict | list) -> EvaluatorResult | None:
+        """Validate field values match patterns. Returns error result or None."""
+        if not self._compiled_patterns:
+            return None
+
+        if not isinstance(data, dict):
+            return EvaluatorResult(
+                matched=True,
+                confidence=1.0,
+                message="Pattern matching requires a JSON object, got array/primitive",
+            )
+
+        matches = []
+        failures = []
+
+        for field_path, compiled_pattern in self._compiled_patterns.items():
+            value, found = self._get_nested_value(data, field_path)
+
+            if not found:
+                failures.append(f"{field_path}: field not found")
+                continue
+
+            value_str = str(value) if value is not None else ""
+            if compiled_pattern.search(value_str):
+                matches.append(field_path)
+            else:
+                failures.append(f"{field_path}: pattern did not match")
+
+        # Determine match based on logic
+        if self.config.pattern_match_logic == "all":
+            success = len(failures) == 0
+            message = (
+                None
+                if success
+                else f"Pattern validation failed: {'; '.join(failures[:3])}"
+            )
+        else:  # any
+            success = len(matches) > 0
+            message = None if success else "No patterns matched"
+
+        if success:
+            return None  # Validation passed
+
+        return EvaluatorResult(
+            matched=True,
+            confidence=1.0,
+            message=message,
+            metadata={
+                "matches": matches,
+                "failures": failures,
+                "match_logic": self.config.pattern_match_logic,
+            },
+        )
+
+    # Helper methods
+
+    def _get_nested_value(self, data: dict, path: str) -> tuple[Any, bool]:
+        """Get nested value using dot notation. Returns (value, found)."""
+        parts = path.split(".")
+        current = data
+
+        for part in parts:
+            if not isinstance(current, dict):
+                return None, False
+            if part not in current:
+                return None, False
+            current = current[part]
+
+        return current, True
+
+    def _get_json_type(self, value: Any) -> str:
+        """Get JSON type name for a Python value."""
+        if value is None:
+            return "null"
+        if isinstance(value, bool):  # Must check before int
+            return "boolean"
+        if isinstance(value, int):
+            return "integer"
+        if isinstance(value, float):
+            return "number"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, list):
+            return "array"
+        if isinstance(value, dict):
+            return "object"
+        return "unknown"
+
+    def _get_all_paths(
+        self, data: dict, prefix: str = "", leaves_only: bool = False
+    ) -> set[str]:
+        """Recursively get all field paths in nested dict."""
+        paths = set()
+        for key, value in data.items():
+            path = f"{prefix}.{key}" if prefix else key
+            if isinstance(value, dict):
+                paths.update(self._get_all_paths(value, path, leaves_only))
+                if not leaves_only:
+                    paths.add(path)
+            else:
+                paths.add(path)
+        return paths
