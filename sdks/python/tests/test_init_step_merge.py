@@ -170,3 +170,175 @@ def test_init_logs_fallback_warning_for_unresolved_type_hints(
 
 def test_init_logs_agent_updated_when_registration_already_exists(
     caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Given a server response indicating this init call updated an existing agent.
+    agent_name = f"agent-{uuid4().hex[:12]}"
+    register_agent_mock = AsyncMock(return_value={"created": False, "controls": []})
+    health_check_mock = AsyncMock(return_value={"status": "healthy"})
+
+    # When init() runs registration.
+    with patch(
+        "agent_control.__init__.AgentControlClient.health_check",
+        new=health_check_mock,
+    ), patch(
+        "agent_control.__init__.agents.register_agent",
+        new=register_agent_mock,
+    ):
+        with caplog.at_level(logging.INFO):
+            agent_control.init(agent_name=agent_name, policy_refresh_interval_seconds=0)
+
+    # Then the SDK emits the "updated" log branch.
+    assert "Agent updated" in caplog.text
+    assert agent_name in caplog.text
+
+
+def test_init_registers_agent_without_merge_events_arg() -> None:
+    register_agent_mock = AsyncMock(return_value={"created": True, "controls": []})
+    health_check_mock = AsyncMock(return_value={"status": "healthy"})
+
+    with patch(
+        "agent_control.__init__.AgentControlClient.health_check",
+        new=health_check_mock,
+    ), patch(
+        "agent_control.__init__.agents.register_agent",
+        new=register_agent_mock,
+    ):
+        agent_control.init(
+            agent_name=f"agent-{uuid4().hex[:12]}",
+            policy_refresh_interval_seconds=0,
+        )
+
+    assert register_agent_mock.await_args is not None
+    assert "merge_events" not in register_agent_mock.await_args.kwargs
+
+
+def test_init_omits_merge_events_from_public_signature() -> None:
+    import inspect
+
+    signature = inspect.signature(agent_control.init)
+
+    assert "merge_events" not in signature.parameters
+
+
+def test_init_passes_api_key_header_to_client_and_state() -> None:
+    register_agent_mock = AsyncMock(return_value={"created": True, "controls": []})
+    health_check_mock = AsyncMock(return_value={"status": "healthy"})
+    client_init_kwargs: list[dict[str, Any]] = []
+    original_init = agent_control.AgentControlClient.__init__
+
+    def recording_init(
+        self: agent_control.AgentControlClient,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        client_init_kwargs.append(dict(kwargs))
+        original_init(self, *args, **kwargs)
+
+    with patch.object(
+        agent_control.AgentControlClient,
+        "__init__",
+        new=recording_init,
+    ), patch(
+        "agent_control.__init__.AgentControlClient.health_check",
+        new=health_check_mock,
+    ), patch(
+        "agent_control.__init__.agents.register_agent",
+        new=register_agent_mock,
+    ), patch.object(
+        agent_control,
+        "init_observability",
+        return_value=None,
+    ) as observability_mock:
+        agent_control.init(
+            agent_name=f"agent-{uuid4().hex[:12]}",
+            api_key="test-key",
+            api_key_header="Galileo-API-Key",
+            policy_refresh_interval_seconds=0,
+        )
+
+    assert agent_control.state.api_key_header == "Galileo-API-Key"
+    assert client_init_kwargs[0]["api_key_header"] == "Galileo-API-Key"
+    assert observability_mock.call_args.kwargs["api_key_header"] == "Galileo-API-Key"
+
+
+def test_init_stores_resolved_default_api_key_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_CONTROL_API_KEY_HEADER", raising=False)
+    register_agent_mock = AsyncMock(return_value={"created": True, "controls": []})
+    health_check_mock = AsyncMock(return_value={"status": "healthy"})
+    client_init_kwargs: list[dict[str, Any]] = []
+    original_init = agent_control.AgentControlClient.__init__
+
+    def recording_init(
+        self: agent_control.AgentControlClient,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        client_init_kwargs.append(dict(kwargs))
+        original_init(self, *args, **kwargs)
+
+    with patch.object(
+        agent_control.AgentControlClient,
+        "__init__",
+        new=recording_init,
+    ), patch(
+        "agent_control.__init__.AgentControlClient.health_check",
+        new=health_check_mock,
+    ), patch(
+        "agent_control.__init__.agents.register_agent",
+        new=register_agent_mock,
+    ), patch.object(
+        agent_control,
+        "init_observability",
+        return_value=None,
+    ):
+        agent_control.init(
+            agent_name=f"agent-{uuid4().hex[:12]}",
+            api_key="test-key",
+            policy_refresh_interval_seconds=0,
+        )
+
+    assert agent_control.state.api_key_header == "X-API-Key"
+    assert client_init_kwargs[0]["api_key_header"] == "X-API-Key"
+
+
+@pytest.mark.asyncio
+async def test_refresh_controls_calls_agent_controls_endpoint() -> None:
+    # Given: an initialized SDK agent session with network-facing calls mocked.
+    register_agent_mock = AsyncMock(return_value={"created": True, "controls": []})
+    list_agent_controls_mock = AsyncMock(return_value={"controls": [{"id": 1, "name": "c1"}]})
+    health_check_mock = AsyncMock(return_value={"status": "healthy"})
+
+    with patch(
+        "agent_control.__init__.AgentControlClient.health_check",
+        new=health_check_mock,
+    ), patch(
+        "agent_control.__init__.agents.register_agent",
+        new=register_agent_mock,
+    ), patch(
+        "agent_control.__init__.agents.list_agent_controls",
+        new=list_agent_controls_mock,
+    ):
+        agent_control.init(
+            agent_name=f"agent-{uuid4().hex[:12]}",
+            api_key_header="Galileo-API-Key",
+            policy_refresh_interval_seconds=0,
+        )
+
+        # When: controls are refreshed through refresh_controls_async().
+        register_agent_mock.reset_mock()
+        list_agent_controls_mock.reset_mock()
+        await agent_control.refresh_controls_async()
+
+    # Then: refresh calls list_agent_controls and does not re-register the agent.
+    list_agent_controls_mock.assert_awaited_once_with(
+        ANY,
+        agent_control.state.current_agent.agent_name,
+        rendered_state="rendered",
+        enabled_state="enabled",
+        target_type=None,
+        target_id=None,
+    )
+    assert agent_control.state.api_key_header == "Galileo-API-Key"
+    assert register_agent_mock.await_count == 0
