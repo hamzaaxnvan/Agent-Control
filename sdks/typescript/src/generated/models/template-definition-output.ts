@@ -28,3 +28,34 @@ export type TemplateDefinitionOutput = {
   /**
    * Typed parameter definitions keyed by parameter name
    */
+  parameters?: { [k: string]: TemplateParameterDefinition } | undefined;
+};
+
+/** @internal */
+export const TemplateDefinitionOutput$inboundSchema: z.ZodMiniType<
+  TemplateDefinitionOutput,
+  unknown
+> = z.pipe(
+  z.object({
+    definition_template: z.any(),
+    description: z.optional(z.nullable(types.string())),
+    parameters: types.optional(
+      z.record(z.string(), TemplateParameterDefinition$inboundSchema),
+    ),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "definition_template": "definitionTemplate",
+    });
+  }),
+);
+
+export function templateDefinitionOutputFromJSON(
+  jsonString: string,
+): SafeParseResult<TemplateDefinitionOutput, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => TemplateDefinitionOutput$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'TemplateDefinitionOutput' from JSON`,
+  );
+}
