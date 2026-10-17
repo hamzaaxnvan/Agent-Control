@@ -99,3 +99,207 @@ def test_db_config_reads_pool_settings_from_env(monkeypatch) -> None:
 
     # When: loading DB config from the environment
     config = AgentControlServerDatabaseConfig()
+
+    # Then: the explicit pool settings are used
+    assert config.pool_size == 7
+    assert config.max_overflow == 2
+    assert config.pool_timeout_seconds == 3.5
+    assert config.connect_timeout_seconds == 4
+    assert config.statement_timeout_seconds == 2.5
+
+
+def test_db_config_pool_defaults(monkeypatch) -> None:
+    # Given: no pool or timeout settings in the environment
+    for name in (
+        "POOL_SIZE",
+        "MAX_OVERFLOW",
+        "POOL_TIMEOUT_SECONDS",
+        "CONNECT_TIMEOUT_SECONDS",
+        "STATEMENT_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(f"AGENT_CONTROL_DB_{name}", raising=False)
+        monkeypatch.delenv(f"DB_{name}", raising=False)
+
+    # When: loading DB config from the environment
+    config = AgentControlServerDatabaseConfig()
+
+    # Then: the pool is bounded but keeps burst overflow and sane timeouts
+    assert config.pool_size == 5
+    assert config.max_overflow == 10
+    assert config.pool_timeout_seconds == 5.0
+    assert config.connect_timeout_seconds == 5
+    assert config.statement_timeout_seconds == 50.0
+
+
+def test_settings_parses_cors_origins_string() -> None:
+    # Given: a comma-separated CORS origins string
+    settings = Settings(cors_origins="https://a.example, https://b.example")
+
+    # When: parsing CORS origins
+    origins = settings.get_cors_origins()
+
+    # Then: the origins are split and trimmed
+    assert origins == ["https://a.example", "https://b.example"]
+
+
+def test_settings_reads_agent_control_prefixed_env_vars(monkeypatch) -> None:
+    # Given: canonical Agent Control server env vars are set
+    monkeypatch.setenv("AGENT_CONTROL_HOST", "127.0.0.1")
+    monkeypatch.setenv("AGENT_CONTROL_CORS_ORIGINS", "https://a.example, https://b.example")
+    monkeypatch.setenv("AGENT_CONTROL_ALLOW_METHODS", "GET, POST")
+    monkeypatch.setenv("AGENT_CONTROL_ALLOW_HEADERS", "Authorization, Content-Type")
+    monkeypatch.setenv("AGENT_CONTROL_OUT_OF_BOX_BOOTSTRAP_TIMEOUT_SECONDS", "3.5")
+
+    # When: loading settings from the environment
+    config = Settings()
+
+    # Then: the canonical env vars are parsed correctly
+    assert config.host == "127.0.0.1"
+    assert config.get_cors_origins() == ["https://a.example", "https://b.example"]
+    assert config.get_allow_methods() == ["GET", "POST"]
+    assert config.get_allow_headers() == ["Authorization", "Content-Type"]
+    assert config.out_of_box_bootstrap_timeout_seconds == 3.5
+
+
+def test_settings_reads_legacy_env_vars(monkeypatch) -> None:
+    # Given: only legacy server env vars are set
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    monkeypatch.setenv("PORT", "9000")
+    monkeypatch.setenv("DEBUG", "true")
+    monkeypatch.setenv("API_VERSION", "v2")
+    monkeypatch.setenv("API_PREFIX", "/legacy")
+    monkeypatch.setenv("PROMETHEUS_METRICS_PREFIX", "legacy_metrics")
+    monkeypatch.setenv("CORS_ORIGINS", "https://legacy.example")
+    monkeypatch.setenv("ALLOW_METHODS", "GET, POST")
+    monkeypatch.setenv("ALLOW_HEADERS", "Authorization, Content-Type")
+
+    # When: loading settings from the environment
+    config = Settings()
+
+    # Then: the legacy env vars remain compatible
+    assert config.host == "127.0.0.1"
+    assert config.port == 9000
+    assert config.debug is True
+    assert config.api_version == "v2"
+    assert config.api_prefix == "/legacy"
+    assert config.prometheus_metrics_prefix == "legacy_metrics"
+    assert config.get_cors_origins() == ["https://legacy.example"]
+    assert config.get_allow_methods() == ["GET", "POST"]
+    assert config.get_allow_headers() == ["Authorization", "Content-Type"]
+
+
+def test_settings_prefers_agent_control_env_vars_over_legacy(monkeypatch) -> None:
+    # Given: both canonical and legacy server env vars are set
+    monkeypatch.setenv("AGENT_CONTROL_PORT", "7000")
+    monkeypatch.setenv("PORT", "9000")
+    monkeypatch.setenv("AGENT_CONTROL_CORS_ORIGINS", "https://canonical.example")
+    monkeypatch.setenv("CORS_ORIGINS", "https://legacy.example")
+
+    # When: loading settings from the environment
+    config = Settings()
+
+    # Then: the canonical env vars win
+    assert config.port == 7000
+    assert config.get_cors_origins() == ["https://canonical.example"]
+
+
+def test_settings_ignore_blank_agent_control_port_and_use_legacy(monkeypatch) -> None:
+    # Given: the canonical port is blank but the legacy port is still set
+    monkeypatch.setenv("AGENT_CONTROL_PORT", "")
+    monkeypatch.setenv("PORT", "9000")
+
+    # When: loading settings from the environment
+    config = Settings()
+
+    # Then: the blank canonical env var is ignored
+    assert config.port == 9000
+
+
+def test_settings_returns_cors_origins_list_unchanged() -> None:
+    # Given: a CORS origins list
+    settings = Settings(cors_origins=["https://a.example", "https://b.example"])
+
+    # When: parsing CORS origins
+    origins = settings.get_cors_origins()
+
+    # Then: the list is returned as-is
+    assert origins == ["https://a.example", "https://b.example"]
+
+
+def test_observability_settings_support_prefixed_env_vars(monkeypatch) -> None:
+    # Given: canonical observability env vars are set
+    monkeypatch.setenv("AGENT_CONTROL_OBSERVABILITY_ENABLED", "false")
+    monkeypatch.setenv("AGENT_CONTROL_OBSERVABILITY_STDOUT", "true")
+    monkeypatch.setenv("AGENT_CONTROL_SERVER_OBSERVABILITY_SINK_NAME", "default")
+
+    # When: loading observability settings from the environment
+    config = ObservabilitySettings()
+
+    # Then: the Agent Control-prefixed env vars are used
+    assert config.enabled is False
+    assert config.stdout is True
+    assert config.sink_name == "default"
+
+
+def test_observability_settings_parse_sink_config(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_CONTROL_SERVER_OBSERVABILITY_SINK_NAME", "custom")
+    monkeypatch.setenv("AGENT_CONTROL_SERVER_OBSERVABILITY_SINK_CONFIG", '{"project":"demo"}')
+
+    config = ObservabilitySettings()
+
+    assert config.sink_name == "custom"
+    assert config.sink_config == {"project": "demo"}
+
+
+def test_observability_settings_ignore_shared_sink_selection_env_vars(monkeypatch) -> None:
+    # Given: only the shared SDK-facing sink selection env vars are set
+    monkeypatch.setenv("AGENT_CONTROL_OBSERVABILITY_SINK_NAME", "registered")
+    monkeypatch.setenv("AGENT_CONTROL_OBSERVABILITY_SINK_CONFIG", '{"project":"demo"}')
+
+    # When: loading server observability settings
+    config = ObservabilitySettings()
+
+    # Then: the server keeps its own default sink selection
+    assert config.sink_name == "default"
+    assert config.sink_config == {}
+
+
+def test_observability_settings_ignore_legacy_env_vars(monkeypatch) -> None:
+    # Given: only legacy observability env vars are set
+    monkeypatch.setenv("OBSERVABILITY_ENABLED", "false")
+    monkeypatch.setenv("OBSERVABILITY_STDOUT", "true")
+
+    # When: loading observability settings from the environment
+    config = ObservabilitySettings()
+
+    # Then: the legacy env vars are ignored
+    assert config.enabled is True
+    assert config.stdout is False
+
+
+def test_logging_settings_configure_logging_defaults_to_true() -> None:
+    config = LoggingSettings()
+
+    assert config.configure_logging is True
+
+
+def test_logging_settings_supports_host_owned_logging(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_CONTROL_CONFIGURE_LOGGING", "false")
+
+    config = LoggingSettings()
+
+    assert config.configure_logging is False
+
+
+def test_logging_settings_access_log_defaults_to_true() -> None:
+    config = LoggingSettings()
+
+    assert config.access_log is True
+
+
+def test_logging_settings_access_log_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_CONTROL_ACCESS_LOG", "false")
+
+    config = LoggingSettings()
+
+    assert config.access_log is False
