@@ -36,3 +36,80 @@ class TestRegexEvaluator:
     """Pattern matching against arbitrary data."""
 
     @pytest.mark.asyncio
+    async def test_match_returns_matched_true(self):
+        evaluator = RegexEvaluator.from_dict({"pattern": r"\d{3}-\d{4}"})
+
+        result = await evaluator.evaluate("call 555-1234 today")
+
+        assert result.matched is True
+        assert result.confidence == 1.0
+        assert "found" in result.message
+        assert result.metadata["pattern"] == r"\d{3}-\d{4}"
+
+    @pytest.mark.asyncio
+    async def test_no_match_returns_matched_false(self):
+        evaluator = RegexEvaluator.from_dict({"pattern": r"\d{3}-\d{4}"})
+
+        result = await evaluator.evaluate("no numbers here")
+
+        assert result.matched is False
+        assert "not found" in result.message
+
+    @pytest.mark.asyncio
+    async def test_none_data_returns_no_data_message(self):
+        evaluator = RegexEvaluator.from_dict({"pattern": r".*"})
+
+        result = await evaluator.evaluate(None)
+
+        assert result.matched is False
+        assert result.message == "No data to match"
+
+    @pytest.mark.asyncio
+    async def test_non_string_data_is_coerced(self):
+        """Non-string inputs are stringified before matching."""
+        evaluator = RegexEvaluator.from_dict({"pattern": r"^42$"})
+
+        result = await evaluator.evaluate(42)
+
+        assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_ignorecase_flag_short_form(self):
+        """The ``I`` short form is treated the same as ``IGNORECASE``."""
+        evaluator = RegexEvaluator.from_dict(
+            {"pattern": "SECRET", "flags": ["I"]},
+        )
+
+        result = await evaluator.evaluate("the secret value")
+
+        assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_ignorecase_flag_long_form(self):
+        evaluator = RegexEvaluator.from_dict(
+            {"pattern": "secret", "flags": ["IGNORECASE"]},
+        )
+
+        result = await evaluator.evaluate("THE SECRET VALUE")
+
+        assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_unknown_flag_is_ignored(self):
+        """RE2 supports a narrow flag set; unknown flag names must not raise."""
+        evaluator = RegexEvaluator.from_dict(
+            {"pattern": "x", "flags": ["MULTILINE"]},
+        )
+
+        result = await evaluator.evaluate("xyz")
+
+        # Should still work — unknown flag is silently dropped, not an error.
+        assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_case_sensitive_by_default(self):
+        evaluator = RegexEvaluator.from_dict({"pattern": "Secret"})
+
+        result = await evaluator.evaluate("the secret value")
+
+        assert result.matched is False
