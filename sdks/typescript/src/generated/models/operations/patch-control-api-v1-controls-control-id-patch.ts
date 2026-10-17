@@ -7,3 +7,40 @@ import { remap as remap$ } from "../../lib/primitives.js";
 import * as models from "../index.js";
 
 export type PatchControlApiV1ControlsControlIdPatchRequest = {
+  controlId: number;
+  body: models.PatchControlRequest;
+};
+
+/** @internal */
+export type PatchControlApiV1ControlsControlIdPatchRequest$Outbound = {
+  control_id: number;
+  body: models.PatchControlRequest$Outbound;
+};
+
+/** @internal */
+export const PatchControlApiV1ControlsControlIdPatchRequest$outboundSchema:
+  z.ZodMiniType<
+    PatchControlApiV1ControlsControlIdPatchRequest$Outbound,
+    PatchControlApiV1ControlsControlIdPatchRequest
+  > = z.pipe(
+    z.object({
+      controlId: z.int(),
+      body: models.PatchControlRequest$outboundSchema,
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        controlId: "control_id",
+      });
+    }),
+  );
+
+export function patchControlApiV1ControlsControlIdPatchRequestToJSON(
+  patchControlApiV1ControlsControlIdPatchRequest:
+    PatchControlApiV1ControlsControlIdPatchRequest,
+): string {
+  return JSON.stringify(
+    PatchControlApiV1ControlsControlIdPatchRequest$outboundSchema.parse(
+      patchControlApiV1ControlsControlIdPatchRequest,
+    ),
+  );
+}
