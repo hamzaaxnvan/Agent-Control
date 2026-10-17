@@ -8,3 +8,35 @@ import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
 import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
+/**
+ * Response from updating a control binding.
+ */
+export type PatchControlBindingResponse = {
+  /**
+   * Current enabled value.
+   */
+  enabled: boolean;
+  /**
+   * Whether the update succeeded.
+   */
+  success: boolean;
+};
+
+/** @internal */
+export const PatchControlBindingResponse$inboundSchema: z.ZodMiniType<
+  PatchControlBindingResponse,
+  unknown
+> = z.object({
+  enabled: types.boolean(),
+  success: types.boolean(),
+});
+
+export function patchControlBindingResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<PatchControlBindingResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => PatchControlBindingResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'PatchControlBindingResponse' from JSON`,
+  );
+}
