@@ -31,3 +31,37 @@ export type RuntimeTokenExchangeResponse = {
   targetType: string;
   /**
    * Short-lived runtime token (HS256 JWT).
+   */
+  token: string;
+};
+
+/** @internal */
+export const RuntimeTokenExchangeResponse$inboundSchema: z.ZodMiniType<
+  RuntimeTokenExchangeResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    expires_at: types.date(),
+    scopes: z.array(types.string()),
+    target_id: types.string(),
+    target_type: types.string(),
+    token: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "expires_at": "expiresAt",
+      "target_id": "targetId",
+      "target_type": "targetType",
+    });
+  }),
+);
+
+export function runtimeTokenExchangeResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<RuntimeTokenExchangeResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => RuntimeTokenExchangeResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'RuntimeTokenExchangeResponse' from JSON`,
+  );
+}
