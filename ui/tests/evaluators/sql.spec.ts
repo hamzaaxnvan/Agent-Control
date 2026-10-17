@@ -48,3 +48,54 @@ test.describe('SQL Evaluator', () => {
     await openEvaluatorForm(mockedPage, 'SQL');
 
     await expect(
+      mockedPage.getByText('Table/Schema Access', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Allowed tables', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Blocked tables', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Allowed schemas', { exact: true })
+    ).toBeVisible();
+    await expect(
+      mockedPage.getByText('Blocked schemas', { exact: true })
+    ).toBeVisible();
+  });
+
+  test('displays limit controls', async ({ mockedPage }) => {
+    await openEvaluatorForm(mockedPage, 'SQL');
+
+    await expect(
+      mockedPage.getByText('Limit Controls', { exact: true })
+    ).toBeVisible();
+    await expect(mockedPage.getByText('Require LIMIT clause')).toBeVisible();
+    await expect(
+      mockedPage.getByText('Max LIMIT value', { exact: true })
+    ).toBeVisible();
+  });
+
+  test('blocked and allowed operations are mutually exclusive', async ({
+    mockedPage,
+  }) => {
+    await openEvaluatorForm(mockedPage, 'SQL');
+
+    const blockedOpsInput = mockedPage.getByPlaceholder(
+      'DROP, DELETE, TRUNCATE'
+    );
+    const allowedOpsInput = mockedPage.getByPlaceholder(
+      'SELECT, INSERT, UPDATE'
+    );
+
+    // Both should be enabled initially
+    await expect(blockedOpsInput).toBeEnabled();
+    await expect(allowedOpsInput).toBeEnabled();
+
+    // Fill blocked operations
+    await blockedOpsInput.fill('DROP');
+
+    // Allowed operations should be disabled
+    await expect(allowedOpsInput).toBeDisabled();
+  });
+});
