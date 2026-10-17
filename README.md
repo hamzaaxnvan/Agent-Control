@@ -178,3 +178,184 @@ SDK sink remains the OSS path to the Agent Control server. To use registered
 or named custom sinks, set `observability_sink_name` explicitly.
 
 The SDK also includes a built-in OpenTelemetry sink. Install the OTEL extra,
+select the `otel` sink, and configure the OTLP exporter through Agent Control
+settings or environment variables:
+
+```bash
+uv pip install "agent-control-sdk[otel]"
+export AGENT_CONTROL_OBSERVABILITY_SINK_NAME=otel
+export AGENT_CONTROL_OTEL_ENABLED=true
+export AGENT_CONTROL_OTEL_ENDPOINT=http://localhost:4318/v1/traces
+export AGENT_CONTROL_OTEL_HEADERS='{"authorization":"Bearer demo-token"}'
+export AGENT_CONTROL_OTEL_SERVICE_NAME=awesome-bot
+```
+
+If the `otel` sink is selected without an OTLP endpoint/exporter configured,
+the OTEL path stays inert and the default OSS SDK-to-server behavior still
+remains unchanged unless `observability_sink_name` is explicitly switched away
+from `default`.
+
+Next, create a control in Step 4, then run the setup and agent scripts in
+order to see blocking in action.
+
+### 4. Add controls
+
+This example adds the control with a small SDK setup script. You can also
+create and attach controls through the UI or direct API calls.
+
+Minimal SDK example (assumes the server is running at `http://localhost:8000`
+and uses the same `agent_name` as Step 3):
+
+```python
+# setup.py - Run once to configure agent controls
+
+import asyncio
+from datetime import datetime, UTC
+from agent_control import AgentControlClient, controls, agents
+from agent_control_models import Agent
+
+async def setup():
+    async with AgentControlClient() as client:  # Defaults to localhost:8000
+        # 1. Register agent first
+        agent = Agent(
+            agent_name="awesome_bot_3000",
+            agent_description="My Chatbot",
+            agent_created_at=datetime.now(UTC).isoformat(),
+        )
+        await agents.register_agent(client, agent, steps=[])
+
+        # 2. Create control (blocks SSN patterns in output)
+        control = await controls.create_control(
+            client,
+            name="block-ssn",
+            data={
+                "enabled": True,
+                "execution": "server",
+                "scope": {"stages": ["post"]},
+                "condition": {
+                    "selector": {"path": "output"},
+                    "evaluator": {
+                        "name": "regex",
+                        "config": {"pattern": r"\b\d{3}-\d{2}-\d{4}\b"},
+                    },
+                },
+                "action": {"decision": "deny"},
+            },
+        )
+
+        # 3. Associate control directly with agent
+        await agents.add_agent_control(
+            client,
+            agent_name=agent.agent_name,
+            control_id=control["control_id"],
+        )
+
+        print("✅ Setup complete!")
+        print(f"   Control ID: {control['control_id']}")
+
+asyncio.run(setup())
+```
+
+Controls now store leaf `selector` and `evaluator` definitions under `condition`, which also enables composite `and`, `or`, and `not` trees.
+
+**Tip**: If you prefer a visual flow, use the UI instead - see the [UI Quickstart](https://docs.agentcontrol.dev/core/ui-quickstart).
+
+Run both scripts in order:
+
+```bash
+uv run setup.py
+uv run my_agent.py
+```
+
+Expected output:
+
+```text
+Blocked: block-ssn-demo
+```
+
+## Examples:
+
+Explore working examples for popular frameworks.
+
+- [Customer Support Agent](examples/customer_support_agent/) - PII protection, prompt injection defense, and tool controls
+- [Steer Action Demo](examples/steer_action_demo/) - observe, deny, and steer decisions in one workflow
+- [LangChain](examples/langchain/) - protect a SQL agent from dangerous queries
+- [CrewAI](examples/crewai/) - combine Agent Control with CrewAI guardrails
+- [AWS Strands](examples/strands_agents/) - protect Strands workflows and tool calls
+- [Google ADK Decorator](examples/google_adk_decorator/) - add controls with `@control()`
+
+## Podman Setup
+
+If Docker Desktop is not available, you can use [Podman](https://podman-desktop.io) as a drop-in replacement. No changes to repo files are needed — the setup below makes `docker` and `docker compose` transparently resolve to Podman.
+
+**One-time setup:**
+
+1. Install [Podman Desktop](https://podman-desktop.io) and create a machine from its UI (start it before continuing).
+
+2. Install `podman-compose`:
+
+```bash
+brew install podman-compose
+```
+
+3. Create a `docker` shim that routes `docker compose` to `podman-compose` and everything else to `podman`:
+
+```bash
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/docker << 'EOF'
+#!/bin/zsh
+if [[ "$1" == "compose" ]]; then
+  shift
+  exec podman-compose "$@"
+fi
+exec podman "$@"
+EOF
+chmod +x ~/.local/bin/docker
+```
+
+4. Add `~/.local/bin` early in your PATH (if not already):
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Verify:**
+
+```bash
+docker ps
+docker compose version
+```
+
+After this, all existing `docker`/`docker compose` commands and `make` targets work as-is.
+
+## How It Works
+
+![Agent Control Architecture](docs/images/Architecture.png)
+
+Agent Control evaluates agent inputs and outputs against controls you configure at runtime. That keeps guardrail logic out of prompt code and tool code, while still letting teams update protections centrally.
+
+Read more about [Controls](https://docs.agentcontrol.dev/concepts/controls) and Learn how controls, selectors, and evaluators work
+
+## Performance
+
+| Endpoint         | Scenario                      | RPS     | p50      | p99      |
+| ---------------- | ----------------------------- | ------- | -------- | -------- |
+| Agent init       | Agent with 3 tool steps       | 509     | 19 ms    | 54 ms    |
+| Evaluation       | 1 control, 500-char content   | 437     | 36 ms    | 61 ms    |
+| Evaluation       | 10 controls, 500-char content | 349     | 35 ms    | 66 ms    |
+| Evaluation       | 50 controls, 500-char content | 199     | 63 ms    | 91 ms    |
+| Controls refresh | 5-50 controls per agent       | 273-392 | 20-27 ms | 27-61 ms |
+
+- Agent init handles create and update as an upsert.
+- Local laptop benchmarks are directional, not production sizing guidance.
+
+_Benchmarked on Apple M5 (16 GB RAM), Docker Compose (`postgres:16` + `agent-control`)._
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, development workflow, and quality checks.
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE) for details.

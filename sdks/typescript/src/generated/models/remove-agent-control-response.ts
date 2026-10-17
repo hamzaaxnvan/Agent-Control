@@ -16,3 +16,41 @@ export type RemoveAgentControlResponse = {
   /**
    * True if the control remains active via policy association(s)
    */
+  controlStillActive: boolean;
+  /**
+   * True if a direct agent-control link was removed
+   */
+  removedDirectAssociation: boolean;
+  /**
+   * Whether the request succeeded
+   */
+  success: boolean;
+};
+
+/** @internal */
+export const RemoveAgentControlResponse$inboundSchema: z.ZodMiniType<
+  RemoveAgentControlResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    control_still_active: types.boolean(),
+    removed_direct_association: types.boolean(),
+    success: types.boolean(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "control_still_active": "controlStillActive",
+      "removed_direct_association": "removedDirectAssociation",
+    });
+  }),
+);
+
+export function removeAgentControlResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<RemoveAgentControlResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => RemoveAgentControlResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'RemoveAgentControlResponse' from JSON`,
+  );
+}
