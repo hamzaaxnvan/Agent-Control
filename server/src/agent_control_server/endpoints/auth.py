@@ -84,3 +84,176 @@ def _validate_exchange_target_field(
     value = body[field]
     if not isinstance(value, str):
         return ValidationErrorItem(
+            resource="Request",
+            field=field,
+            code="string_type",
+            message="Input should be a valid string",
+        )
+    if not value:
+        return ValidationErrorItem(
+            resource="Request",
+            field=field,
+            code="string_too_short",
+            message="String should have at least 1 character",
+        )
+    return None
+
+
+async def _exchange_context(request: Request) -> dict[str, Any]:
+    """Validate and surface target identifiers before authorization.
+
+    The endpoint model validates these fields again when binding the request.
+    This early check is intentional: an authorization provider must never
+    receive missing or invalid target context.
+
+    Reads the request body once. FastAPI caches the parsed body, so the
+    endpoint's own Pydantic body model still binds normally.
+    """
+    try:
+        body = await request.json()
+    except (TypeError, ValueError) as exc:
+        raise _exchange_body_validation_error() from exc
+
+    if not isinstance(body, dict):
+        raise _exchange_body_validation_error()
+
+    field_errors: list[ValidationErrorItem] = []
+    for field in ("target_type", "target_id"):
+        error = _validate_exchange_target_field(body, field)
+        if error is not None:
+            field_errors.append(error)
+
+    if field_errors:
+        raise APIValidationError(
+            error_code=ErrorCode.VALIDATION_ERROR,
+            detail="Invalid runtime token target context.",
+            hint="Check the errors array for invalid target fields.",
+            errors=field_errors,
+        )
+
+    return {"target_type": body["target_type"], "target_id": body["target_id"]}
+
+
+@router.post(
+    "/runtime-token-exchange",
+    response_model=RuntimeTokenExchangeResponse,
+    summary="Exchange a credential for a runtime token bound to a target",
+)
+async def runtime_token_exchange(
+    body: RuntimeTokenExchangeRequest,
+    principal: Principal = Depends(
+        require_operation(
+            Operation.RUNTIME_TOKEN_EXCHANGE,
+            context_builder=_exchange_context,
+        )
+    ),
+) -> RuntimeTokenExchangeResponse:
+    """Mint a short-lived runtime token for the requested target.
+
+    The caller's credential is authenticated and authorized before the
+    resolved principal supplies the actor identity, grant scopes, and
+    expiry. This endpoint then mints a local HS256 token whose lifetime
+    cannot outlive the grant.
+
+    Runtime auth must be enabled via
+    ``AGENT_CONTROL_RUNTIME_TOKEN_SECRET``; otherwise the endpoint
+    returns 503.
+    """
+    config = runtime_auth_config()
+    if config is None:
+        raise APIError(
+            status_code=503,
+            error_code=ErrorCode.AUTH_MISCONFIGURED,
+            reason=ErrorReason.SERVICE_UNAVAILABLE,
+            detail=(
+                "Runtime auth is not enabled on this server "
+                "(AGENT_CONTROL_RUNTIME_TOKEN_SECRET is not set)."
+            ),
+            hint="Configure the runtime token secret to enable this endpoint.",
+        )
+
+    # When the provider returns its own target binding (e.g., upstream
+    # validated the target), require it to match the request body.
+    if principal.target_type is not None and principal.target_type != body.target_type:
+        raise BadRequestError(
+            error_code=ErrorCode.AUTH_INSUFFICIENT_PRIVILEGES,
+            detail=("Authorized target_type does not match the requested target_type."),
+            hint="Ensure the credential is scoped to the requested target.",
+        )
+    if principal.target_id is not None and principal.target_id != body.target_id:
+        raise BadRequestError(
+            error_code=ErrorCode.AUTH_INSUFFICIENT_PRIVILEGES,
+            detail=("Authorized target_id does not match the requested target_id."),
+            hint="Ensure the credential is scoped to the requested target.",
+        )
+
+    actor_id = principal.caller_id or "anonymous"
+    # The exchange endpoint requires the authorizer to explicitly grant
+    # runtime.use. Local providers supply a normalized grant for
+    # ``RUNTIME_TOKEN_EXCHANGE``;
+    # upstream providers that return an explicit empty scopes array fail
+    # closed here rather than escalating to runtime.use.
+    if Operation.RUNTIME_USE.value not in principal.scopes:
+        raise BadRequestError(
+            error_code=ErrorCode.AUTH_INSUFFICIENT_PRIVILEGES,
+            detail=("Authorizer grant does not include runtime.use; cannot mint a runtime token."),
+            hint=("The credential is not authorized for runtime use on this target."),
+        )
+    scopes = principal.scopes
+
+    try:
+        token, claims = mint_runtime_token(
+            namespace_key=principal.namespace_key,
+            actor_id=actor_id,
+            target_type=body.target_type,
+            target_id=body.target_id,
+            scopes=scopes,
+            secret=config.secret,
+            ttl_seconds=config.ttl_seconds,
+            upstream_expires_at=principal.grant_expires_at,
+            extensions=principal.extensions,
+        )
+    except UpstreamGrantExpiredError as exc:
+        # Upstream returned a grant whose ``expires_at`` is already in
+        # the past - minting would hand the caller a token that's dead
+        # on arrival. Distinguished from the misconfigured case so the
+        # error code and status reflect "upstream returned bad data."
+        raise APIError(
+            status_code=502,
+            error_code=ErrorCode.AUTH_MISCONFIGURED,
+            reason=ErrorReason.INTERNAL_ERROR,
+            detail="Authorization service returned an already-expired grant.",
+            hint=(
+                "Retry the request to obtain a fresh grant; "
+                "if the failure persists, contact the operator."
+            ),
+        ) from exc
+    except RuntimeTokenError as exc:
+        raise APIError(
+            status_code=503,
+            error_code=ErrorCode.AUTH_MISCONFIGURED,
+            reason=ErrorReason.SERVICE_UNAVAILABLE,
+            detail=str(exc),
+            hint="Check the runtime token configuration.",
+        ) from exc
+
+    _logger.info(
+        "Runtime token exchanged",
+        extra={
+            "namespace_key": claims.namespace_key,
+            "actor_id_hash": _log_hash(claims.actor_id),
+            "target_type": claims.target_type,
+            "target_id": claims.target_id,
+            "scopes": list(claims.scopes),
+            "expires_at": claims.expires_at.isoformat(),
+            "jti": claims.jti,
+        },
+    )
+
+    return RuntimeTokenExchangeResponse(
+        token=token,
+        expires_at=claims.expires_at,
+        target_type=claims.target_type,
+        target_id=claims.target_id,
+        scopes=list(claims.scopes),
+    )
