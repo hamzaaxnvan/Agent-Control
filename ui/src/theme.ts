@@ -20,3 +20,25 @@ const formInputLabelStyles = {
 export const appTheme = createTheme({
   components: {
     TextInput: TextInput.extend({
+      styles: formInputLabelStyles,
+    }),
+    Textarea: Textarea.extend({
+      styles: formInputLabelStyles,
+    }),
+    Select: Select.extend({
+      styles: formInputLabelStyles,
+    }),
+    MultiSelect: MultiSelect.extend({
+      styles: formInputLabelStyles,
+    }),
+    Autocomplete: Autocomplete.extend({
+      styles: formInputLabelStyles,
+    }),
+    TagsInput: TagsInput.extend({
+      styles: formInputLabelStyles,
+    }),
+    NumberInput: NumberInput.extend({
+      styles: formInputLabelStyles,
+    }),
+  },
+});
