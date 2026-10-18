@@ -21,3 +21,51 @@ import {
  */
 export type GetControlDataResponseData =
   | ControlDefinitionOutput
+  | UnrenderedTemplateControl;
+
+export type GetControlDataResponse = {
+  /**
+   * Control data payload (rendered control or unrendered template)
+   */
+  data: ControlDefinitionOutput | UnrenderedTemplateControl;
+};
+
+/** @internal */
+export const GetControlDataResponseData$inboundSchema: z.ZodMiniType<
+  GetControlDataResponseData,
+  unknown
+> = smartUnion([
+  ControlDefinitionOutput$inboundSchema,
+  UnrenderedTemplateControl$inboundSchema,
+]);
+
+export function getControlDataResponseDataFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlDataResponseData, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlDataResponseData$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlDataResponseData' from JSON`,
+  );
+}
+
+/** @internal */
+export const GetControlDataResponse$inboundSchema: z.ZodMiniType<
+  GetControlDataResponse,
+  unknown
+> = z.object({
+  data: smartUnion([
+    ControlDefinitionOutput$inboundSchema,
+    UnrenderedTemplateControl$inboundSchema,
+  ]),
+});
+
+export function getControlDataResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlDataResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlDataResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlDataResponse' from JSON`,
+  );
+}
