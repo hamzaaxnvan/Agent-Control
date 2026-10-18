@@ -100,3 +100,207 @@ function mergeSchemas(
     for (const type of getSchemaTypes(schema)) {
       if (type !== 'null') types.add(type);
     }
+    for (const value of getSchemaEnumValues(schema)) {
+      if (!enumValues.some((candidate) => candidate === value)) {
+        enumValues.push(value);
+      }
+    }
+    if (isObject(schema.properties))
+      Object.assign(properties, schema.properties);
+    if (Array.isArray(schema.required)) {
+      for (const key of schema.required) {
+        if (typeof key === 'string') required.add(key);
+      }
+    }
+    if (schema.items !== undefined) items = schema.items;
+    if (schema.additionalProperties !== undefined) {
+      additionalProperties = schema.additionalProperties;
+    }
+  }
+
+  if (Object.keys(properties).length > 0) merged.properties = properties;
+  if (required.size > 0) merged.required = [...required];
+  if (enumValues.length > 0) merged.enum = enumValues;
+  if (types.size === 1) merged.type = [...types][0];
+  if (types.size > 1) merged.type = [...types];
+  if (items !== undefined) merged.items = items;
+  if (additionalProperties !== undefined)
+    merged.additionalProperties = additionalProperties;
+
+  return merged;
+}
+
+export function normalizeSchema(
+  schema: unknown,
+  rootSchema: JsonSchema | null
+): JsonSchema | null {
+  const asObj = asSchema(schema);
+  if (!asObj) return null;
+
+  let normalized = asObj;
+  if (typeof asObj.$ref === 'string') {
+    const resolved = resolveJsonPointer(rootSchema, asObj.$ref);
+    if (resolved) normalized = { ...resolved, ...stripCompositionKeys(asObj) };
+  }
+
+  const composedSchemas: JsonSchema[] = [];
+  for (const key of ['allOf', 'anyOf', 'oneOf'] as const) {
+    const value = normalized[key];
+    if (!Array.isArray(value)) continue;
+    for (const child of value) {
+      const childSchema = normalizeSchema(child, rootSchema);
+      if (childSchema) composedSchemas.push(childSchema);
+    }
+  }
+
+  return composedSchemas.length > 0
+    ? mergeSchemas(composedSchemas, stripCompositionKeys(normalized))
+    : normalized;
+}
+
+export function getSchemaAtProperty(
+  schema: JsonSchema | null,
+  property: string,
+  rootSchema: JsonSchema | null
+): JsonSchema | null {
+  if (!schema) return null;
+  const normalized = normalizeSchema(schema, rootSchema);
+  if (!normalized) return null;
+
+  const properties = getSchemaProperties(normalized);
+  if (property in properties) {
+    return normalizeSchema(properties[property], rootSchema);
+  }
+
+  if (
+    normalized.additionalProperties &&
+    isObject(normalized.additionalProperties)
+  ) {
+    return normalizeSchema(normalized.additionalProperties, rootSchema);
+  }
+
+  return null;
+}
+
+function isSchemaWithProperties(
+  schema: JsonSchema,
+  propertyNames: readonly string[]
+): boolean {
+  const properties = getSchemaProperties(schema);
+  return propertyNames.every((name) => name in properties);
+}
+
+function getSchemaExamples(schema: unknown): unknown[] {
+  return isObject(schema) && Array.isArray(schema.examples)
+    ? schema.examples
+    : [];
+}
+
+function jsonStringifyForInsert(value: unknown): string {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return JSON.stringify(value);
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+/**
+ * JSON text inserted when completing a property key. Mirrors Monaco
+ * `buildSchemaValueSnippet` so control scaffolding (selector, evaluator,
+ * action, scope) matches the original editor.
+ */
+export function getJsonInsertTextForSchemaPropertyValue(
+  rawSchema: unknown,
+  rootSchema: JsonSchema | null
+): string {
+  const normalized = normalizeSchema(rawSchema, rootSchema);
+  if (!normalized) {
+    return 'null';
+  }
+
+  const enumValues = getSchemaEnumValues(normalized);
+  if (enumValues.length > 0) {
+    return jsonStringifyForInsert(enumValues[0]);
+  }
+
+  const examples = getSchemaExamples(normalized);
+  const defaultValue = getSchemaDefault(normalized);
+  const preferredValue =
+    defaultValue !== undefined ? defaultValue : examples[0];
+  const schemaTitle = getSchemaTitle(normalized);
+
+  if (
+    schemaTitle === 'ControlSelector' ||
+    isSchemaWithProperties(normalized, ['path'])
+  ) {
+    return '{\n  "path": "*"\n}';
+  }
+
+  if (
+    schemaTitle === 'EvaluatorSpec' ||
+    isSchemaWithProperties(normalized, ['name', 'config'])
+  ) {
+    return '{\n  "name": "",\n  "config": {}\n}';
+  }
+
+  if (
+    schemaTitle === 'ControlAction' ||
+    isSchemaWithProperties(normalized, ['decision', 'steering_context'])
+  ) {
+    return '{\n  "decision": "deny"\n}';
+  }
+
+  if (
+    schemaTitle === 'ControlScope' ||
+    isSchemaWithProperties(normalized, ['step_types', 'stages'])
+  ) {
+    return '{\n  "step_types": ["llm"],\n  "stages": ["post"]\n}';
+  }
+
+  if (
+    schemaTitle === 'ConditionNode' ||
+    isSchemaWithProperties(normalized, [
+      'selector',
+      'evaluator',
+      'and',
+      'or',
+      'not',
+    ])
+  ) {
+    return '{}';
+  }
+
+  switch (getSchemaType(normalized)) {
+    case 'object': {
+      return '{}';
+    }
+    case 'array': {
+      return '[]';
+    }
+    case 'boolean': {
+      return String(
+        typeof preferredValue === 'boolean' ? preferredValue : true
+      );
+    }
+    case 'integer':
+    case 'number': {
+      return String(typeof preferredValue === 'number' ? preferredValue : 0);
+    }
+    case 'string': {
+      if (typeof preferredValue === 'string' && preferredValue.length > 0) {
+        return JSON.stringify(preferredValue);
+      }
+      return '""';
+    }
+    default: {
+      if (preferredValue !== undefined) {
+        return jsonStringifyForInsert(preferredValue);
+      }
+      return 'null';
+    }
+  }
+}
