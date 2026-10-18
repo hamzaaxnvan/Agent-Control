@@ -38,3 +38,44 @@ async function main(): Promise<void> {
       enabled: true,
       evaluator: {
         name: "regex",
+        config: {
+          pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b",
+        },
+      },
+      execution: "server",
+      scope: {
+        stages: ["post"],
+        stepTypes: ["llm"],
+      },
+      selector: {
+        path: "output",
+      },
+      tags: ["example", "typescript", "npm"],
+    };
+
+    await client.controls.updateData({
+      controlId: createdControlId,
+      body: { data: controlData },
+    });
+    console.log("Configured control data.");
+
+    const fetched = await client.controls.getData({
+      controlId: createdControlId,
+    });
+    console.log(
+      `Fetched control config: evaluator=${fetched.data.evaluator.name}, selector=${fetched.data.selector.path ?? "*"}`,
+    );
+  } finally {
+    if (createdControlId !== null) {
+      const deleted = await client.controls.delete({
+        controlId: createdControlId,
+      });
+      console.log(`Cleanup delete success: ${deleted.success}`);
+    }
+  }
+}
+
+main().catch((error: unknown) => {
+  console.error("TypeScript SDK example failed.", error);
+  process.exitCode = 1;
+});

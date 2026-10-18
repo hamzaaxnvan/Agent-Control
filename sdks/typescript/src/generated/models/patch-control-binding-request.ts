@@ -22,3 +22,15 @@ export type PatchControlBindingRequest$Outbound = {
 /** @internal */
 export const PatchControlBindingRequest$outboundSchema: z.ZodMiniType<
   PatchControlBindingRequest$Outbound,
+  PatchControlBindingRequest
+> = z.object({
+  enabled: z.boolean(),
+});
+
+export function patchControlBindingRequestToJSON(
+  patchControlBindingRequest: PatchControlBindingRequest,
+): string {
+  return JSON.stringify(
+    PatchControlBindingRequest$outboundSchema.parse(patchControlBindingRequest),
+  );
+}
