@@ -117,3 +117,363 @@ def configure_auth_from_env() -> None:
       pointed at ``AGENT_CONTROL_AUTH_UPSTREAM_URL``. By-ID binding routes use
       stored-target authorization when an identity URL can be derived from
       Orbit's management URL or ``AGENT_CONTROL_AUTH_UPSTREAM_IDENTITY_URL`` is
+      set. Other upstreams retain the prior namespace-wide authorization flow.
+
+    Runtime flow:
+
+    - ``AGENT_CONTROL_RUNTIME_AUTH_MODE=none``: :class:`NoAuthProvider`.
+    - ``AGENT_CONTROL_RUNTIME_AUTH_MODE=api_key``: :class:`HeaderAuthProvider`.
+    - ``AGENT_CONTROL_RUNTIME_AUTH_MODE=jwt`` (default when a runtime token
+      secret is configured): :class:`LocalJwtVerifyProvider`.
+    - unset mode without a runtime token secret: fall through to the default
+      authorizer.
+
+    Clears any previously-installed default and operation overrides
+    before installing fresh ones, so reconfiguration cannot leave
+    stale routes pointing at a no-longer-relevant provider (e.g., a
+    runtime override sticking around after the runtime secret is
+    removed). Tracks installed providers so :func:`teardown_auth` can
+    release any long-lived resources (e.g., the upstream HTTP client)
+    at shutdown.
+    """
+    global _runtime_auth_config
+    clear_authorizers()
+    _active_providers.clear()
+    runtime_mode = _resolve_runtime_mode()
+    _runtime_auth_config = (
+        _load_runtime_auth_config(require_secret=True) if runtime_mode == "jwt" else None
+    )
+
+    default = _build_default_provider()
+    set_authorizer(default)
+    _active_providers.append(default)
+
+    if runtime_mode == "default":
+        _logger.info(
+            "Runtime auth provider: default authorizer handles %s",
+            Operation.RUNTIME_USE.value,
+        )
+    else:
+        runtime_provider = _build_runtime_provider(runtime_mode, _runtime_auth_config)
+        set_authorizer(runtime_provider, operation=Operation.RUNTIME_USE)
+        _active_providers.append(runtime_provider)
+        if runtime_mode == "jwt":
+            _logger.info(
+                "Runtime auth provider: jwt override installed for %s",
+                Operation.RUNTIME_USE.value,
+            )
+        else:
+            _logger.info(
+                "Runtime auth provider: %s override installed for %s",
+                runtime_mode,
+                Operation.RUNTIME_USE.value,
+            )
+
+
+async def teardown_auth() -> None:
+    """Close long-lived resources and clear every installed authorizer.
+
+    Called from the FastAPI lifespan at shutdown. Authorizers that own
+    a persistent client (e.g., :class:`HttpUpstreamAuthProvider`) expose
+    an async ``aclose`` method that gets invoked here. The default and
+    operation-specific authorizers are then both removed from the
+    registry so no stale state can survive into a subsequent
+    :func:`configure_auth_from_env` call.
+    """
+    global _runtime_auth_config
+    for provider in _active_providers:
+        aclose = getattr(provider, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:  # noqa: BLE001  shutdown best-effort
+                _logger.exception("Error closing auth provider %s", provider)
+    _active_providers.clear()
+    _runtime_auth_config = None
+    clear_authorizers()
+
+
+def runtime_auth_config() -> RuntimeAuthConfig | None:
+    """Return the validated runtime-auth config, or ``None`` when disabled.
+
+    Loaded once by :func:`configure_auth_from_env`; the mint and verify
+    sides read this same object so they cannot drift apart.
+    """
+    return _runtime_auth_config
+
+
+def set_runtime_auth_config(config: RuntimeAuthConfig | None) -> None:
+    """Install a runtime-auth config without reading the environment.
+
+    Test helper that mirrors :func:`set_authorizer`: lets tests pin a
+    deterministic config (or clear it) without going through
+    :func:`configure_auth_from_env`. Production code should never call
+    this; use ``configure_auth_from_env`` instead so the secret-strength
+    and TTL validations run.
+    """
+    global _runtime_auth_config
+    _runtime_auth_config = config
+
+
+def _build_default_provider() -> RequestAuthorizer:
+    raw_mode = os.environ.get(_MODE_ENV)
+    mode = (
+        raw_mode
+        if raw_mode is not None
+        else ("api_key" if auth_settings.api_key_enabled else "none")
+    ).strip().lower()
+    if mode in {"none", "no_auth"}:
+        _logger.info("Default auth provider: none")
+        return NoAuthProvider()
+    if mode in {"api_key", "header"}:
+        _validate_local_api_key_mode()
+        _logger.info("Default auth provider: api_key (local credentials)")
+        return HeaderAuthProvider()
+    if mode == "http_upstream":
+        url = os.environ.get(_UPSTREAM_URL_ENV)
+        if not url:
+            raise RuntimeError(f"{_MODE_ENV}=http_upstream but {_UPSTREAM_URL_ENV} is not set.")
+        timeout = _load_float_env(_UPSTREAM_TIMEOUT_ENV, 5.0)
+        token = os.environ.get(_UPSTREAM_TOKEN_ENV)
+        token_header = os.environ.get(_UPSTREAM_TOKEN_HEADER_ENV, "X-Agent-Control-Service-Token")
+        extra_forward_headers = _parse_extra_forward_headers(
+            os.environ.get(_UPSTREAM_EXTRA_FORWARD_HEADERS_ENV)
+        )
+        ca_file = (os.environ.get(_UPSTREAM_CA_FILE_ENV) or "").strip() or None
+        keepalive_expiry_seconds = _load_float_env(_UPSTREAM_KEEPALIVE_EXPIRY_ENV, 1.0)
+        max_connections = _load_int_env(_UPSTREAM_MAX_CONNECTIONS_ENV, 100)
+        max_keepalive_connections = _load_int_env(_UPSTREAM_MAX_KEEPALIVE_CONNECTIONS_ENV, 20)
+        _validate_http_upstream_connection_config(
+            keepalive_expiry_seconds=keepalive_expiry_seconds,
+            max_connections=max_connections,
+            max_keepalive_connections=max_keepalive_connections,
+        )
+        _logger.info("Default auth provider: http_upstream url=%s", url)
+        # Only the known Orbit management route has a predictable identity route.
+        # Other upstreams keep their existing namespace-wide authorization flow.
+        explicit_identity_url = (os.environ.get(_UPSTREAM_IDENTITY_URL_ENV) or "").strip()
+        identity_url = explicit_identity_url or _derive_orbit_identity_url(url)
+        try:
+            upstream_config = HttpUpstreamConfig(
+                url=url,
+                identity_url=identity_url,
+                timeout_seconds=timeout,
+                service_token=token,
+                service_token_header=token_header,
+                extra_forward_headers=extra_forward_headers,
+                ca_file=ca_file,
+                keepalive_expiry_seconds=keepalive_expiry_seconds,
+                max_connections=max_connections,
+                max_keepalive_connections=max_keepalive_connections,
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "Invalid http_upstream auth configuration from "
+                f"{_UPSTREAM_TOKEN_HEADER_ENV} or "
+                f"{_UPSTREAM_EXTRA_FORWARD_HEADERS_ENV}: {exc}"
+            ) from exc
+        try:
+            return HttpUpstreamAuthProvider(upstream_config)
+        except (OSError, ssl.SSLError) as exc:
+            raise RuntimeError(
+                f"{_UPSTREAM_CA_FILE_ENV}={ca_file!r} not found or unreadable."
+            ) from exc
+    raise RuntimeError(
+        f"Unknown {_MODE_ENV}={mode!r}; expected 'none', 'api_key', 'header', "
+        "or 'http_upstream'."
+    )
+
+
+def _derive_orbit_identity_url(url: str) -> str | None:
+    """Resolve Orbit's existing identity route from its management route."""
+    parts = urlsplit(url)
+    if not parts.path.endswith(_ORBIT_MANAGEMENT_PATH):
+        return None
+    prefix = parts.path[: -len(_ORBIT_MANAGEMENT_PATH)]
+    return urlunsplit(
+        (parts.scheme, parts.netloc, prefix + _ORBIT_IDENTITY_PATH, parts.query, parts.fragment)
+    )
+
+
+def _validate_local_api_key_mode(mode_env: str = _MODE_ENV) -> None:
+    """Fail startup when local API-key mode has no local key validator."""
+    if not auth_settings.api_key_enabled:
+        raise RuntimeError(
+            f"{mode_env}=api_key requires AGENT_CONTROL_API_KEY_ENABLED=true. "
+            f"Use {mode_env}=none for deployments without credential enforcement."
+        )
+    if not auth_settings.get_api_keys() and not auth_settings.get_admin_api_keys():
+        raise RuntimeError(
+            f"{_MODE_ENV}=api_key requires AGENT_CONTROL_API_KEYS or "
+            "AGENT_CONTROL_ADMIN_API_KEYS to be configured."
+        )
+
+
+def _parse_extra_forward_headers(raw: str | None) -> tuple[str, ...]:
+    """Parse a comma-separated header list into a deduplicated tuple.
+
+    Empty / unset env var returns an empty tuple. Whitespace around each
+    name is stripped. Empty entries (e.g. ``"X-A,,X-B"``) are dropped.
+    Order is preserved; duplicates (case-insensitive) are dropped after
+    the first occurrence.
+    """
+    if not raw or not raw.strip():
+        return ()
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw_name in raw.split(","):
+        name = raw_name.strip()
+        if not name:
+            continue
+        lower = name.lower()
+        if lower in seen:
+            continue
+        seen.add(lower)
+        result.append(name)
+    return tuple(result)
+
+
+def _load_float_env(env_name: str, default: float) -> float:
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{env_name}={raw!r} is not a number.") from exc
+
+
+def _load_int_env(env_name: str, default: int) -> int:
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{env_name}={raw!r} is not an integer.") from exc
+
+
+def _validate_http_upstream_connection_config(
+    *,
+    keepalive_expiry_seconds: float,
+    max_connections: int,
+    max_keepalive_connections: int,
+) -> None:
+    if keepalive_expiry_seconds < 0:
+        raise RuntimeError(
+            f"{_UPSTREAM_KEEPALIVE_EXPIRY_ENV}={keepalive_expiry_seconds} "
+            "must be greater than or equal to 0."
+        )
+    if max_connections <= 0:
+        raise RuntimeError(
+            f"{_UPSTREAM_MAX_CONNECTIONS_ENV}={max_connections} must be greater than 0."
+        )
+    if max_keepalive_connections < 0:
+        raise RuntimeError(
+            f"{_UPSTREAM_MAX_KEEPALIVE_CONNECTIONS_ENV}={max_keepalive_connections} "
+            "must be greater than or equal to 0."
+        )
+    if max_keepalive_connections > max_connections:
+        raise RuntimeError(
+            f"{_UPSTREAM_MAX_KEEPALIVE_CONNECTIONS_ENV}={max_keepalive_connections} "
+            f"must be less than or equal to {_UPSTREAM_MAX_CONNECTIONS_ENV}={max_connections}."
+        )
+
+
+def _resolve_runtime_mode() -> str:
+    raw = os.environ.get(_RUNTIME_MODE_ENV)
+    if raw is None or not raw.strip():
+        return "jwt" if os.environ.get(_RUNTIME_TOKEN_SECRET_ENV) else "default"
+
+    mode = raw.strip().lower()
+    if mode in {"none", "no_auth"}:
+        return "none"
+    if mode in {"api_key", "header"}:
+        return "api_key"
+    if mode == "jwt":
+        return mode
+    raise RuntimeError(
+        f"Unknown {_RUNTIME_MODE_ENV}={mode!r}; expected 'none', 'api_key', "
+        "'header', or 'jwt'."
+    )
+
+
+def _build_runtime_provider(
+    mode: str,
+    config: RuntimeAuthConfig | None,
+) -> RequestAuthorizer:
+    if mode == "none":
+        return NoAuthProvider()
+    if mode == "api_key":
+        _validate_local_api_key_mode(_RUNTIME_MODE_ENV)
+        return HeaderAuthProvider()
+    if mode == "jwt":
+        if config is None:
+            raise RuntimeError(f"{_RUNTIME_MODE_ENV}=jwt but runtime auth config is missing.")
+        return LocalJwtVerifyProvider(
+            secret=config.secret,
+            header_name=_resolve_runtime_token_header(),
+        )
+    raise RuntimeError(
+        f"Unknown runtime auth mode {mode!r}; expected 'none', 'api_key', or 'jwt'."
+    )
+
+
+def _resolve_runtime_token_header() -> str:
+    """Header the runtime JWT verifier reads the token from (default ``Authorization``).
+
+    Behind a gateway that overwrites ``Authorization`` with its own identity
+    JWT, set a dedicated header so the two tokens don't collide. Blank falls
+    back to the default.
+    """
+    raw = os.environ.get(_RUNTIME_TOKEN_HEADER_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_RUNTIME_TOKEN_HEADER
+    # Reject a syntactically-invalid header name at startup (RaiseError here
+    # surfaces during config build, not as a per-request auth failure).
+    return validate_http_field_name(raw.strip())
+
+
+def _load_runtime_auth_config(*, require_secret: bool = False) -> RuntimeAuthConfig | None:
+    """Parse, validate, and return the runtime-auth config from env.
+
+    Returns ``None`` when no runtime secret is configured and
+    ``require_secret`` is false. Raises ``RuntimeError`` when the
+    secret is required, too short, or the TTL is invalid so
+    misconfiguration surfaces at startup, not on the first request-time
+    mint.
+    """
+    secret = os.environ.get(_RUNTIME_TOKEN_SECRET_ENV)
+    if not secret:
+        if require_secret:
+            raise RuntimeError(
+                f"{_RUNTIME_MODE_ENV}=jwt requires {_RUNTIME_TOKEN_SECRET_ENV} to be set."
+            )
+        return None
+    if len(secret.encode("utf-8")) < _RUNTIME_TOKEN_SECRET_MIN_BYTES:
+        raise RuntimeError(
+            f"{_RUNTIME_TOKEN_SECRET_ENV} must be at least "
+            f"{_RUNTIME_TOKEN_SECRET_MIN_BYTES} bytes; HS256 signing keys "
+            f"shorter than that are vulnerable to brute force."
+        )
+    return RuntimeAuthConfig(secret=secret, ttl_seconds=_load_runtime_ttl_seconds())
+
+
+def _load_runtime_ttl_seconds() -> int:
+    raw = os.environ.get(_RUNTIME_TOKEN_TTL_ENV)
+    if raw is None:
+        return _DEFAULT_RUNTIME_TOKEN_TTL_SECONDS
+    try:
+        ttl = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{_RUNTIME_TOKEN_TTL_ENV}={raw!r} is not an integer.") from exc
+    if ttl <= 0:
+        raise RuntimeError(f"{_RUNTIME_TOKEN_TTL_ENV}={ttl} must be positive.")
+    if ttl > _MAX_RUNTIME_TOKEN_TTL_SECONDS:
+        raise RuntimeError(
+            f"{_RUNTIME_TOKEN_TTL_ENV}={ttl} exceeds the maximum of "
+            f"{_MAX_RUNTIME_TOKEN_TTL_SECONDS} seconds. Long-lived runtime "
+            f"tokens defeat the short-credential design; configure a shorter "
+            f"TTL or rotate via re-exchange."
+        )
+    return ttl
