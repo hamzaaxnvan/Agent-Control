@@ -19,3 +19,24 @@ export const GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest$outboundSchema:
   z.ZodMiniType<
     GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest$Outbound,
     GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest
+  > = z.pipe(
+    z.object({
+      agentName: z.string(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        agentName: "agent_name",
+      });
+    }),
+  );
+
+export function getAgentPolicyApiV1AgentsAgentNamePolicyGetRequestToJSON(
+  getAgentPolicyApiV1AgentsAgentNamePolicyGetRequest:
+    GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest,
+): string {
+  return JSON.stringify(
+    GetAgentPolicyApiV1AgentsAgentNamePolicyGetRequest$outboundSchema.parse(
+      getAgentPolicyApiV1AgentsAgentNamePolicyGetRequest,
+    ),
+  );
+}
