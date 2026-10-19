@@ -27,3 +27,62 @@ export function useAddControlToAgent() {
     }: AddControlToAgentParams) => {
       let createdControlId: number | null = null;
 
+      try {
+        // Step 1: Create and validate the control atomically.
+        const {
+          data: createControlResult,
+          error: createControlError,
+          response: createControlResponse,
+        } = await api.controls.create({ name: controlName, data: definition });
+
+        if (createControlError || !createControlResult) {
+          throw parseApiError(
+            createControlError,
+            'Failed to create control',
+            createControlResponse?.status
+          );
+        }
+
+        createdControlId = createControlResult.control_id;
+
+        // Step 2: Associate control directly with the agent.
+        const { error: associateError, response: associateResponse } =
+          await api.agents.addControl(agentId, createdControlId);
+
+        if (associateError) {
+          throw parseApiError(
+            associateError,
+            'Failed to add control to agent',
+            associateResponse?.status
+          );
+        }
+
+        return { controlId: createdControlId };
+      } catch (error) {
+        // Best effort cleanup: avoid orphan controls if a later step fails.
+        if (createdControlId !== null) {
+          try {
+            await api.controls.delete(createdControlId, { force: true });
+          } catch {
+            // Preserve the original error from the primary flow.
+          }
+        }
+        throw error;
+      }
+    },
+    onSuccess: (_data, variables) => {
+      // Invalidate relevant queries to refetch data
+      queryClient.invalidateQueries({ queryKey: ['agent', variables.agentId] });
+      queryClient.invalidateQueries({
+        queryKey: ['agent', variables.agentId, 'controls'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['controls', 'infinite'],
+      });
+      // Invalidate agents list query to refresh active controls count
+      queryClient.invalidateQueries({
+        queryKey: ['agents', 'infinite'],
+      });
+    },
+  });
+}
