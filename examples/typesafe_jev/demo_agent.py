@@ -63,3 +63,133 @@ def simulated_model(message: str) -> str:
         record = customers.CUSTOMERS[0]
         return (
             f"The account holder is {record['name']}, {record['address']}, "
+            f"card {record['card']}."
+        )
+    return f"(model reply to: {message[:44]}...)"
+
+
+def tool(func: object) -> object:
+    """Mark a function as a tool step.
+
+    The SDK reads this attribute to decide whether a decorated function is a
+    tool call or an LLM turn. A tool step sends its keyword arguments as the
+    input, which is exactly what the bulk-export control screens.
+    """
+    func.tool_name = func.__name__  # type: ignore[attr-defined]
+    return func
+
+
+@control(step_name="chat")
+async def chat(message: str) -> str:
+    """Answer a chat message.
+
+    Controls screen the input before this runs and the reply after it returns.
+    """
+    return simulated_model(message)
+
+
+@control(step_name="lookup_customers")
+@tool
+async def lookup_customers(
+    *,
+    fields: list[str],
+    name: str | None = None,
+    region: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, object]]:
+    """Read customer records.
+
+    Controls screen the arguments before this runs, so a denied call never
+    reaches the data. This is the difference between guarding a request and
+    guarding an action.
+    """
+    return customers.lookup_customers(fields=fields, name=name, region=region, limit=limit)
+
+
+async def run_case(label: str, message: str) -> None:
+    """Run one case and report what the controls did with it.
+
+    Three outcomes are possible. A deny raises ControlViolationError and stops
+    the call. A steer raises ControlSteerError, which is a corrective signal
+    rather than a block: the application is expected to adjust and retry. An
+    observe records the match and changes nothing here.
+    """
+    print()
+    print("-" * 72)
+    print(f"{label}: {message}")
+    try:
+        reply = await chat(message)
+        print(f"  ALLOWED  {reply}")
+    except ControlViolationError as exc:
+        print(f"  DENIED   by control: {exc.control_name}")
+        if exc.message:
+            print(f"           {exc.message}")
+    except ControlSteerError as exc:
+        print(f"  STEERED  by control: {exc.control_name}")
+        print(f"           {exc.message}")
+        print(f"           guidance: {exc.steering_context}")
+
+
+async def run_lookup(label: str, arguments: dict[str, object]) -> None:
+    """Run one tool call and report what the controls did with it."""
+    print()
+    print("-" * 72)
+    print(f"{label}: lookup_customers({arguments})")
+    try:
+        rows = await lookup_customers(**arguments)  # type: ignore[arg-type]
+        print(f"  ALLOWED  {len(rows)} row(s) returned")
+    except ControlViolationError as exc:
+        print(f"  DENIED   by control: {exc.control_name}")
+        if exc.message:
+            print(f"           {exc.message}")
+        print("           the lookup never ran")
+
+
+async def run_demo() -> None:
+    """Initialize the agent and run the scripted cases."""
+    print("=" * 72)
+    print("TypeSafe Jev evaluator demo")
+    print("=" * 72)
+    print(f"  server {SERVER_URL}")
+    print(f"  agent  {AGENT_NAME}")
+    print()
+    print("Controls are configured on the server. This file never mentions TypeSafe.")
+
+    agent_control.init(
+        agent_name=AGENT_NAME,
+        agent_description="Demo agent screened by TypeSafe Jev controls",
+        server_url=SERVER_URL,
+        steps=[
+            {"type": "llm", "name": "chat", "description": "A chat turn."},
+            {
+                "type": "tool",
+                "name": "lookup_customers",
+                "description": "Read customer records from the bank's customer database.",
+            },
+        ],
+        observability_enabled=True,
+        policy_refresh_interval_seconds=0,
+    )
+
+    for label, message in CASES:
+        await run_case(label, message)
+
+    print()
+    print("=" * 72)
+    print("Tool calls, screened before the lookup runs")
+    print("=" * 72)
+    for label, arguments in LOOKUP_CASES:
+        await run_lookup(label, arguments)
+
+    print()
+    print("-" * 72)
+    print("Edit thresholds in the Agent Control UI, then rerun. No code change needed.")
+
+
+def main() -> None:
+    """Run the demo."""
+    asyncio.run(run_demo())
+
+
+if __name__ == "__main__":
+    main()
