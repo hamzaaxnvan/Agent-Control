@@ -13,3 +13,33 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  * Compatibility response for singular policy retrieval endpoint.
  */
 export type GetPolicyResponse = {
+  /**
+   * Associated policy ID
+   */
+  policyId: number;
+};
+
+/** @internal */
+export const GetPolicyResponse$inboundSchema: z.ZodMiniType<
+  GetPolicyResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    policy_id: types.number(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "policy_id": "policyId",
+    });
+  }),
+);
+
+export function getPolicyResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetPolicyResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetPolicyResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetPolicyResponse' from JSON`,
+  );
+}
