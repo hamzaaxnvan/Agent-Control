@@ -53,3 +53,58 @@ export const RegexTemplateParameter$inboundSchema: z.ZodMiniType<
     required: z._default(types.boolean(), true),
     type: types.literal("regex_re2"),
     ui_hint: z.optional(z.nullable(types.string())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "ui_hint": "uiHint",
+    });
+  }),
+);
+/** @internal */
+export type RegexTemplateParameter$Outbound = {
+  default?: string | null | undefined;
+  description?: string | null | undefined;
+  label: string;
+  placeholder?: string | null | undefined;
+  required: boolean;
+  type: "regex_re2";
+  ui_hint?: string | null | undefined;
+};
+
+/** @internal */
+export const RegexTemplateParameter$outboundSchema: z.ZodMiniType<
+  RegexTemplateParameter$Outbound,
+  RegexTemplateParameter
+> = z.pipe(
+  z.object({
+    default: z.optional(z.nullable(z.string())),
+    description: z.optional(z.nullable(z.string())),
+    label: z.string(),
+    placeholder: z.optional(z.nullable(z.string())),
+    required: z._default(z.boolean(), true),
+    type: z.literal("regex_re2"),
+    uiHint: z.optional(z.nullable(z.string())),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      uiHint: "ui_hint",
+    });
+  }),
+);
+
+export function regexTemplateParameterToJSON(
+  regexTemplateParameter: RegexTemplateParameter,
+): string {
+  return JSON.stringify(
+    RegexTemplateParameter$outboundSchema.parse(regexTemplateParameter),
+  );
+}
+export function regexTemplateParameterFromJSON(
+  jsonString: string,
+): SafeParseResult<RegexTemplateParameter, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => RegexTemplateParameter$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'RegexTemplateParameter' from JSON`,
+  );
+}
