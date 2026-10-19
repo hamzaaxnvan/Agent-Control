@@ -68,3 +68,74 @@ def _mark_tool(step_name: str):
 
 
 @control(step_name="get_current_time")
+@_mark_tool("get_current_time")
+async def _guarded_get_current_time(city: str) -> dict[str, str]:
+    """Get the current time in a city."""
+    record = _city_record(city)
+    return {
+        "city": record["display_name"],
+        "value": record["local_time"],
+        "note": _note_for_city(city),
+    }
+
+
+@control(step_name="get_weather")
+@_mark_tool("get_weather")
+async def _guarded_get_weather(city: str) -> dict[str, str]:
+    """Get the weather in a city."""
+    record = _city_record(city)
+    return {
+        "city": record["display_name"],
+        "value": record["weather"],
+        "note": _note_for_city(city),
+    }
+
+
+agent_control.init(
+    agent_name=AGENT_NAME,
+    agent_description="Google ADK example using Agent Control decorators",
+    server_url=SERVER_URL,
+)
+
+
+async def get_current_time(city: str) -> dict[str, str]:
+    """Expose the protected time tool to ADK."""
+    try:
+        return await _guarded_get_current_time(city=city)
+    except ControlViolationError as exc:
+        return {"status": "blocked", "message": exc.message}
+    except ControlSteerError as exc:
+        return {"status": "blocked", "message": exc.steering_context}
+    except RuntimeError as exc:
+        return {
+            "status": "blocked",
+            "message": f"Agent Control could not evaluate the request safely: {exc}",
+        }
+
+
+async def get_weather(city: str) -> dict[str, str]:
+    """Expose the protected weather tool to ADK."""
+    try:
+        return await _guarded_get_weather(city=city)
+    except ControlViolationError as exc:
+        return {"status": "blocked", "message": exc.message}
+    except ControlSteerError as exc:
+        return {"status": "blocked", "message": exc.steering_context}
+    except RuntimeError as exc:
+        return {
+            "status": "blocked",
+            "message": f"Agent Control could not evaluate the request safely: {exc}",
+        }
+
+
+root_agent = LlmAgent(
+    name="root_agent",
+    model=MODEL_NAME,
+    description="City guide agent protected by Agent Control decorators.",
+    instruction=(
+        "You are a city guide assistant. Use the available tools for city time or weather. "
+        "If a tool returns status=blocked, apologize and explain the message without retrying. "
+        "Do not invent internal contacts or unsupported city data."
+    ),
+    tools=[get_current_time, get_weather],
+)
