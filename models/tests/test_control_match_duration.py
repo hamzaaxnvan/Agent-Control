@@ -27,3 +27,32 @@ def test_control_match_preserves_optional_execution_duration(duration_ms: float 
 
 
 def test_control_match_accepts_legacy_response_without_duration() -> None:
+    # Given: an older server response with no duration field.
+    payload = {
+        "control_id": 1,
+        "control_name": "Example control",
+        "action": "deny",
+        "result": {"matched": False, "confidence": 0.0},
+    }
+
+    # When: parsing the response model.
+    match = ControlMatch.model_validate(payload)
+
+    # Then: no duration is fabricated for the older response.
+    assert match.execution_duration_ms is None
+
+
+def test_control_match_rejects_negative_execution_duration() -> None:
+    # Given: a response containing an invalid elapsed time.
+    payload = {
+        "control_id": 1,
+        "control_name": "Example control",
+        "action": "deny",
+        "result": {"matched": False, "confidence": 0.0},
+        "execution_duration_ms": -1,
+    }
+
+    # When: parsing the response model.
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        ControlMatch.model_validate(payload)
+    # Then: the response follows the same nonnegative duration contract as events.

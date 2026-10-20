@@ -47,3 +47,53 @@ def write_report(content: str) -> str:
 
     Args:
         content: The report body text, including a Sources section.
+    """
+    # Split content and sources if the LLM included them together
+    sources = ""
+    for marker in ["Sources:", "References:", "Citations:"]:
+        if marker in content:
+            parts = content.split(marker, 1)
+            content = parts[0].strip()
+            sources = parts[1].strip()
+            break
+
+    print(f"\n  [Writer] Generating report ({len(content)} chars)...")
+
+    max_attempts = 3
+    current_content = content
+    current_sources = sources
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = asyncio.run(
+                _controlled_write_report(content=current_content, sources=current_sources)
+            )
+
+            # Client-side citation check: steer if no sources section
+            if not current_sources:
+                print(f"  [Writer] STEERED (attempt {attempt}): Report lacks source citations.")
+                current_sources = "Internal database queries (employees, projects, quarterly_metrics tables)"
+                print("  [Writer] Added default citation sources.")
+                # Re-run with sources added
+                result = asyncio.run(
+                    _controlled_write_report(content=current_content, sources=current_sources)
+                )
+
+            print(f"  [Writer] Report generated successfully (attempt {attempt}).")
+            return result
+
+        except ControlViolationError as e:
+            msg = f"BLOCKED by content-safety-policy: {e.message}"
+            print(f"  [Writer] {msg}")
+            return msg
+
+        except ControlSteerError as e:
+            print(f"  [Writer] STEERED (attempt {attempt}): {e.message}")
+            try:
+                guidance = json.loads(e.steering_context)
+            except (json.JSONDecodeError, TypeError):
+                guidance = {"reason": e.steering_context}
+            print(f"  [Writer] Steering reason: {guidance.get('reason', e.steering_context)}")
+            continue
+
+    return "ERROR: Failed to generate report after max attempts."
