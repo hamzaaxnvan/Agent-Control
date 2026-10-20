@@ -25,3 +25,57 @@ import {
 export type ControlAction = {
   decision: ActionDecision;
   /**
+   * Steering context object for steer actions. Strongly recommended when decision='steer' to provide correction suggestions. If not provided, the evaluator result message will be used as fallback.
+   */
+  steeringContext?: SteeringContext | null | undefined;
+};
+
+/** @internal */
+export const ControlAction$inboundSchema: z.ZodMiniType<
+  ControlAction,
+  unknown
+> = z.pipe(
+  z.object({
+    decision: ActionDecision$inboundSchema,
+    steering_context: z.optional(z.nullable(SteeringContext$inboundSchema)),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "steering_context": "steeringContext",
+    });
+  }),
+);
+/** @internal */
+export type ControlAction$Outbound = {
+  decision: string;
+  steering_context?: SteeringContext$Outbound | null | undefined;
+};
+
+/** @internal */
+export const ControlAction$outboundSchema: z.ZodMiniType<
+  ControlAction$Outbound,
+  ControlAction
+> = z.pipe(
+  z.object({
+    decision: ActionDecision$outboundSchema,
+    steeringContext: z.optional(z.nullable(SteeringContext$outboundSchema)),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      steeringContext: "steering_context",
+    });
+  }),
+);
+
+export function controlActionToJSON(controlAction: ControlAction): string {
+  return JSON.stringify(ControlAction$outboundSchema.parse(controlAction));
+}
+export function controlActionFromJSON(
+  jsonString: string,
+): SafeParseResult<ControlAction, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => ControlAction$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'ControlAction' from JSON`,
+  );
+}
