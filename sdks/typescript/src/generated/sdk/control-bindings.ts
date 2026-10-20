@@ -35,3 +35,151 @@ export class ControlBindings extends ClientSDK {
     return unwrapAsync(controlBindingsList(
       this,
       request,
+      options,
+    ));
+  }
+
+  /**
+   * Create a control binding
+   *
+   * @remarks
+   * Attach a control to an opaque external target.
+   *
+   * Each binding row is scoped to the namespace associated with the
+   * authenticated request.
+   */
+  async create(
+    request: models.CreateControlBindingRequest,
+    options?: RequestOptions,
+  ): Promise<models.CreateControlBindingResponse> {
+    return unwrapAsync(controlBindingsCreate(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Update a control binding by natural key
+   *
+   * @remarks
+   * Update an existing binding using ``(target_type, target_id, control_id)``.
+   *
+   * This route is target-scoped because the request body includes the target
+   * identifiers before authorization runs. Unlike ``PUT /by-key``, it never
+   * creates a missing binding.
+   */
+  async updateByKey(
+    request: models.PatchControlBindingByKeyRequest,
+    options?: RequestOptions,
+  ): Promise<models.PatchControlBindingResponse> {
+    return unwrapAsync(controlBindingsUpdateByKey(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Attach a control to a target by natural key (idempotent)
+   *
+   * @remarks
+   * Idempotent attach using ``(target_type, target_id, control_id)`` as the
+   * natural key. Updates ``enabled`` on an existing match; creates a new row
+   * otherwise.
+   */
+  async upsertByKey(
+    request: models.UpsertControlBindingRequest,
+    options?: RequestOptions,
+  ): Promise<models.UpsertControlBindingResponse> {
+    return unwrapAsync(controlBindingsUpsertByKey(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Detach a control from a target by natural key (idempotent)
+   *
+   * @remarks
+   * Idempotent detach by natural key. Returns ``deleted=False`` when no
+   * matching binding exists.
+   */
+  async deleteByKey(
+    request: models.DeleteControlBindingByKeyRequest,
+    options?: RequestOptions,
+  ): Promise<models.DeleteControlBindingByKeyResponse> {
+    return unwrapAsync(controlBindingsDeleteByKey(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Delete a control binding
+   *
+   * @remarks
+   * Delete a control binding by surrogate ID.
+   *
+   * Target-aware authorizers use the binding's stored target identifiers.
+   * Other authorizers retain namespace-wide authorization. The deletion
+   * remains scoped to the authorized namespace.
+   */
+  async delete(
+    request:
+      operations.DeleteControlBindingApiV1ControlBindingsBindingIdDeleteRequest,
+    options?: RequestOptions,
+  ): Promise<models.DeleteControlBindingResponse> {
+    return unwrapAsync(controlBindingsDelete(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Get a control binding
+   *
+   * @remarks
+   * Read a single control binding by surrogate ID.
+   *
+   * Target-aware authorizers use the binding's stored target identifiers.
+   * Other authorizers retain namespace-wide authorization. The row is loaded
+   * using the authorized namespace before any binding data is returned.
+   */
+  async get(
+    request:
+      operations.GetControlBindingApiV1ControlBindingsBindingIdGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.GetControlBindingResponse> {
+    return unwrapAsync(controlBindingsGet(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Update a control binding
+   *
+   * @remarks
+   * Update the ``enabled`` flag on a control binding.
+   *
+   * Target-aware authorizers use the binding's stored target identifiers.
+   * Other authorizers retain namespace-wide authorization. The mutation
+   * remains scoped to the authorized namespace.
+   */
+  async update(
+    request:
+      operations.PatchControlBindingApiV1ControlBindingsBindingIdPatchRequest,
+    options?: RequestOptions,
+  ): Promise<models.PatchControlBindingResponse> {
+    return unwrapAsync(controlBindingsUpdate(
+      this,
+      request,
+      options,
+    ));
+  }
+}
