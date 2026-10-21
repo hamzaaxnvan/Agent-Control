@@ -47,3 +47,52 @@ export type TemplateParameterDefinition =
   | StringListTemplateParameter
   | discriminatedUnionTypes.Unknown<"type">;
 
+/** @internal */
+export const TemplateParameterDefinition$inboundSchema: z.ZodMiniType<
+  TemplateParameterDefinition,
+  unknown
+> = discriminatedUnion("type", {
+  boolean: BooleanTemplateParameter$inboundSchema,
+  enum: EnumTemplateParameter$inboundSchema,
+  regex_re2: RegexTemplateParameter$inboundSchema,
+  string: StringTemplateParameter$inboundSchema,
+  string_list: StringListTemplateParameter$inboundSchema,
+});
+/** @internal */
+export type TemplateParameterDefinition$Outbound =
+  | BooleanTemplateParameter$Outbound
+  | EnumTemplateParameter$Outbound
+  | RegexTemplateParameter$Outbound
+  | StringTemplateParameter$Outbound
+  | StringListTemplateParameter$Outbound;
+
+/** @internal */
+export const TemplateParameterDefinition$outboundSchema: z.ZodMiniType<
+  TemplateParameterDefinition$Outbound,
+  TemplateParameterDefinition
+> = z.union([
+  BooleanTemplateParameter$outboundSchema,
+  EnumTemplateParameter$outboundSchema,
+  RegexTemplateParameter$outboundSchema,
+  StringTemplateParameter$outboundSchema,
+  StringListTemplateParameter$outboundSchema,
+]);
+
+export function templateParameterDefinitionToJSON(
+  templateParameterDefinition: TemplateParameterDefinition,
+): string {
+  return JSON.stringify(
+    TemplateParameterDefinition$outboundSchema.parse(
+      templateParameterDefinition,
+    ),
+  );
+}
+export function templateParameterDefinitionFromJSON(
+  jsonString: string,
+): SafeParseResult<TemplateParameterDefinition, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => TemplateParameterDefinition$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'TemplateParameterDefinition' from JSON`,
+  );
+}
