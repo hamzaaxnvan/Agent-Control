@@ -117,3 +117,123 @@ async def test_agent(
     Returns the agent data and cleans up after test completes.
     """
     # Create agent instance
+    from datetime import UTC, datetime
+
+    from agent_control_models import Agent
+
+    agent = Agent(
+        agent_name=test_agent_name,
+        agent_description="Integration test agent",
+        agent_created_at=datetime.now(UTC).isoformat(),
+        agent_updated_at=None,
+        agent_version="1.0.0",
+        agent_metadata={"test": True}
+    )
+
+    # Register agent
+    response = await agent_control.agents.register_agent(
+        client,
+        agent,
+        steps=[
+            {
+                "type": "tool",
+                "name": "test_search",
+                "input_schema": {"query": {"type": "string"}},
+                "output_schema": {"results": {"type": "array"}}
+            }
+        ]
+    )
+
+    yield {
+        "agent": agent,
+        "agent_name": test_agent_name,
+        "agent_name": test_agent_name,
+        "response": response
+    }
+
+    # Cleanup is handled by the server (agents persist)
+
+
+@pytest_asyncio.fixture
+async def test_policy(
+    client: agent_control.AgentControlClient,
+    unique_name: str
+) -> AsyncGenerator[dict[str, Any], None]:
+    """
+    Create a test policy.
+
+    Returns the policy data. Note: Cleanup should be done manually
+    as we don't have a delete endpoint yet.
+    """
+    result = await agent_control.policies.create_policy(
+        client,
+        f"test-policy-{unique_name}"
+    )
+
+    yield result
+
+
+@pytest_asyncio.fixture
+async def test_control(
+    client: agent_control.AgentControlClient,
+    unique_name: str
+) -> AsyncGenerator[dict[str, Any], None]:
+    """
+    Create a test control.
+
+    Returns the control data. Note: Cleanup should be done manually
+    as we don't have a delete endpoint yet.
+    """
+    result = await agent_control.controls.create_control(
+        client,
+        f"test-control-{unique_name}",
+        {
+            "description": "SDK integration test control",
+            "enabled": True,
+            "execution": "server",
+            "scope": {"step_types": ["llm"], "stages": ["pre"]},
+            "condition": {
+                "selector": {"path": "input"},
+                "evaluator": {
+                    "name": "regex",
+                    "config": {"pattern": "test", "flags": []},
+                },
+            },
+            "action": {"decision": "deny"},
+            "tags": ["sdk-test"],
+        },
+    )
+
+    yield result
+
+
+@pytest.fixture
+def sample_steps() -> list[dict[str, Any]]:
+    """Provide sample step definitions for testing."""
+    return [
+        {
+            "type": "tool",
+            "name": "search_database",
+            "input_schema": {
+                "query": {"type": "string", "required": True},
+                "limit": {"type": "integer", "default": 10}
+            },
+            "output_schema": {
+                "results": {"type": "array"},
+                "count": {"type": "integer"}
+            }
+        },
+        {
+            "type": "tool",
+            "name": "send_email",
+            "input_schema": {
+                "to": {"type": "string", "required": True},
+                "subject": {"type": "string"},
+                "body": {"type": "string"}
+            },
+            "output_schema": {
+                "success": {"type": "boolean"},
+                "message_id": {"type": "string"}
+            }
+        }
+    ]
