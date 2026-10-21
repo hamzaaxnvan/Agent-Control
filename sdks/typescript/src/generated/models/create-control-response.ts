@@ -19,3 +19,24 @@ export type CreateControlResponse = {
 /** @internal */
 export const CreateControlResponse$inboundSchema: z.ZodMiniType<
   CreateControlResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    control_id: types.number(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "control_id": "controlId",
+    });
+  }),
+);
+
+export function createControlResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<CreateControlResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => CreateControlResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'CreateControlResponse' from JSON`,
+  );
+}
