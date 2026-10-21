@@ -102,3 +102,108 @@ class Evaluator(ABC, Generic[ConfigT]):  # noqa: UP046 - need Python 3.10 compat
         from agent_control_models import EvaluatorResult
 
         class MyConfig(EvaluatorConfig):
+            threshold: float = 0.5
+
+        @register_evaluator
+        class MyEvaluator(Evaluator[MyConfig]):
+            metadata = EvaluatorMetadata(
+                name="my-evaluator",
+                version="1.0.0",
+                description="My custom evaluator",
+            )
+            config_model = MyConfig
+
+            async def evaluate(self, data: Any) -> EvaluatorResult:
+                return EvaluatorResult(
+                    matched=len(str(data)) > self.config.threshold,
+                    confidence=1.0,
+                    message="Evaluation complete"
+                )
+        ```
+
+    """
+
+    metadata: ClassVar[EvaluatorMetadata]
+    config_model: ClassVar[type[EvaluatorConfig]]
+
+    def __init__(self, config: ConfigT) -> None:
+        """Initialize evaluator with validated config.
+
+        Args:
+            config: Validated configuration (instance of config_model)
+        """
+        self.config: ConfigT = config
+
+    @classmethod
+    def from_dict(cls, config_dict: dict[str, Any]) -> Self:
+        """Create evaluator instance from raw config dict.
+
+        Validates config against config_model before creating instance.
+
+        Args:
+            config_dict: Raw configuration dictionary
+
+        Returns:
+            Evaluator instance with validated config
+        """
+        validated = cls.config_model(**config_dict)
+        return cls(validated)  # type: ignore[arg-type]
+
+    @abstractmethod
+    async def evaluate(self, data: Any) -> EvaluatorResult:
+        """Evaluate data and return result.
+
+        Args:
+            data: Data extracted by selector from the payload
+
+        Returns:
+            EvaluatorResult with matched status, confidence, and message
+        """
+        pass
+
+    async def evaluate_with_context(self, data: Any, step: Step) -> EvaluatorResult:
+        """Evaluate selected data with access to the complete runtime step.
+
+        The default implementation preserves compatibility with evaluators that
+        implement only :meth:`evaluate`. Evaluators must treat ``step`` as
+        immutable request-scoped context because evaluator instances are cached
+        and may be invoked concurrently.
+
+        Args:
+            data: Data extracted by the configured selector.
+            step: Complete runtime step for the current request.
+
+        Returns:
+            EvaluatorResult produced by this evaluator.
+        """
+        return await self.evaluate(data)
+
+    async def evaluate_with_extensions(
+        self,
+        data: Any,
+        step: Step,
+        extensions: JSONObject | None,
+    ) -> EvaluatorResult:
+        """Evaluate with opaque trusted request extensions.
+
+        Existing evaluators retain their behavior because the default
+        implementation delegates to :meth:`evaluate_with_context`.
+        """
+        return await self.evaluate_with_context(data, step)
+
+    def get_timeout_seconds(self) -> float:
+        """Get timeout in seconds from config or metadata default."""
+        timeout_ms: int = getattr(self.config, "timeout_ms", self.metadata.timeout_ms)
+        return float(timeout_ms) / 1000.0
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if evaluator dependencies are satisfied.
+
+        Override this method for evaluators with optional dependencies.
+        Return False to skip registration during discovery.
+
+        Returns:
+            True if evaluator can be used, False otherwise
+        """
+        return True

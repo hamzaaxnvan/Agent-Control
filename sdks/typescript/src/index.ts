@@ -9,3 +9,15 @@ export type {
   AgentsApi,
   ControlsApi,
   EvaluationApi,
+  EvaluatorsApi,
+  ObservabilityApi,
+  PoliciesApi,
+  StepSchema,
+  SystemApi,
+} from "./client";
+export type { JsonObject, JsonPrimitive, JsonValue } from "./types";
+export * from "./types";
+
+const agentControl = new AgentControlClient();
+
+export default agentControl;
