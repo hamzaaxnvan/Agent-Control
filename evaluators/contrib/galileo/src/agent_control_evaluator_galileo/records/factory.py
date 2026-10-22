@@ -97,3 +97,102 @@ def record_from_step(
     hierarchy_fields = {"children", "spans", "traces"}.intersection(context)
     if hierarchy_fields:
         fields = ", ".join(sorted(hierarchy_fields))
+        raise RecordFactoryError(
+            f"Step.context cannot define Galileo hierarchy fields ({fields}); "
+            "use Step.children instead."
+        )
+    children = step.children or []
+    allowed_child_types = {
+        "trace": _SPAN_TYPES,
+        "session": {"trace"},
+        "tool": _SPAN_TYPES,
+        "retriever": _SPAN_TYPES,
+        "llm": set(),
+    }[record_type]
+    child_records: list[GalileoRecord] = []
+    for child in children:
+        if not isinstance(child, Step):
+            raise RecordFactoryError("Step.children must contain Agent Control Step objects.")
+        child_type = child.type.strip().lower()
+        if child_type not in allowed_child_types:
+            raise RecordFactoryError(
+                f"Galileo {record_type} step cannot contain {child_type!r} child steps."
+            )
+        child_records.append(record_from_step(child))
+    input_value = (
+        step.input if selected_input is _MISSING or selected_input is None else selected_input
+    )
+    output_value = (
+        step.output if selected_output is _MISSING or selected_output is None else selected_output
+    )
+    if record_type in {"trace", "session"}:
+        selected_value = selected_data
+        if selected_data is _MISSING:
+            selected_value = selected_input if selected_input is not _MISSING else _MISSING
+        if selected_value is not _MISSING and selected_value is not None and not isinstance(
+            selected_value, Mapping
+        ):
+            raise RecordFactoryError(
+                f"Galileo {record_type} records require structured selector values; "
+                "an untyped scalar selector value is not sufficient."
+            )
+    common: dict[str, Any] = {
+        "name": step.name,
+        "user_metadata": GalileoRecordNormalizer.metadata(context.get("metadata")),
+    }
+    if step.ground_truth is not None:
+        common["dataset_output"] = GalileoRecordNormalizer.json_text(step.ground_truth)
+    if record_type == "llm":
+        kwargs = {
+            **common,
+            "input": GalileoRecordNormalizer.llm_input(input_value),
+            "output": GalileoRecordNormalizer.llm_output(output_value),
+        }
+        if step.tools is not None:
+            kwargs["tools"] = GalileoRecordNormalizer.llm_tools(step.tools)
+        return LlmSpan(**kwargs)
+    if record_type == "tool":
+        return ToolSpan(
+            **common,
+            input=GalileoRecordNormalizer.tool_input(input_value),
+            output=GalileoRecordNormalizer.tool_output(output_value),
+            spans=_span_children(child_records, parent_type=record_type),
+        )
+    if record_type == "retriever":
+        return RetrieverSpan(
+            **common,
+            input=GalileoRecordNormalizer.retriever_input(input_value),
+            output=GalileoRecordNormalizer.retriever_output(output_value),
+            spans=_span_children(child_records, parent_type=record_type),
+        )
+    if record_type == "trace":
+        return Trace(
+            **common,
+            input=GalileoRecordNormalizer.trace_input(input_value),
+            output=GalileoRecordNormalizer.trace_output(output_value),
+            spans=_span_children(child_records, parent_type=record_type),
+        )
+    traces = [child for child in child_records if isinstance(child, Trace)]
+    if len(traces) != len(child_records):
+        raise RecordFactoryError("Galileo session children must be trace steps.")
+    return Session(
+        **common,
+        input=GalileoRecordNormalizer.session_input(input_value),
+        output=GalileoRecordNormalizer.session_output(output_value),
+        traces=traces,
+    )
+
+
+def build_record(selected_data: Any, step: Step, *, payload_field: str = "input") -> GalileoRecord:
+    """Build a Galileo record using the evaluator's selected data."""
+    return record_from_step(step, selected_data=selected_data, payload_field=payload_field)
+
+
+def build_galileo_record(
+    selected_data: Any,
+    step: Step,
+    *,
+    payload_field: str = "input",
+) -> GalileoRecord:
+    """Alias for :func:`build_record` for explicit public use."""
+    return build_record(selected_data, step, payload_field=payload_field)
