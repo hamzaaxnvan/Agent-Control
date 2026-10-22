@@ -119,3 +119,246 @@ export class Controls extends ClientSDK {
    * Return the canonical JSON schema for ControlDefinition.
    */
   async getSchema(
+    options?: RequestOptions,
+  ): Promise<models.GetControlSchemaResponse> {
+    return unwrapAsync(controlsGetSchema(
+      this,
+      options,
+    ));
+  }
+
+  /**
+   * Validate control configuration
+   *
+   * @remarks
+   * Validate control configuration data without saving it.
+   *
+   * Args:
+   *     request: Control configuration data to validate
+   *     db: Database session (injected)
+   *
+   * Returns:
+   *     ValidateControlDataResponse with success=True if valid
+   */
+  async validateData(
+    request: models.ValidateControlDataRequest,
+    options?: RequestOptions,
+  ): Promise<models.ValidateControlDataResponse> {
+    return unwrapAsync(controlsValidateData(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Delete a control
+   *
+   * @remarks
+   * Delete a control by ID.
+   *
+   * By default, deletion fails if the control is associated with any policy or agent.
+   * Use force=true to automatically dissociate and delete.
+   *
+   * Args:
+   *     control_id: ID of the control to delete
+   *     force: If true, remove associations before deleting
+   *     db: Database session (injected)
+   *
+   * Returns:
+   *     DeleteControlResponse with success flag and dissociation details
+   *
+   * Raises:
+   *     HTTPException 404: Control not found
+   *     HTTPException 409: Control is in use (and force=false)
+   *     HTTPException 500: Database error during deletion
+   */
+  async delete(
+    request: operations.DeleteControlApiV1ControlsControlIdDeleteRequest,
+    options?: RequestOptions,
+  ): Promise<models.DeleteControlResponse> {
+    return unwrapAsync(controlsDelete(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Get control details
+   *
+   * @remarks
+   * Retrieve a control by ID including its name and configuration data.
+   *
+   * Args:
+   *     control_id: ID of the control
+   *     db: Database session (injected)
+   *
+   * Returns:
+   *     GetControlResponse with control id, name, and data
+   *
+   * Raises:
+   *     HTTPException 404: Control not found
+   */
+  async get(
+    request: operations.GetControlApiV1ControlsControlIdGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.GetControlResponse> {
+    return unwrapAsync(controlsGet(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Update control metadata
+   *
+   * @remarks
+   * Update control metadata (name and/or enabled status).
+   *
+   * This endpoint allows partial updates:
+   * - To rename: provide 'name' field
+   * - To enable/disable: provide 'enabled' field (updates the control's data)
+   *
+   * Args:
+   *     control_id: ID of the control to update
+   *     request: Fields to update (name, enabled)
+   *     db: Database session (injected)
+   *
+   * Returns:
+   *     PatchControlResponse with current control state
+   *
+   * Raises:
+   *     HTTPException 404: Control not found
+   *     HTTPException 409: New name conflicts with existing control
+   *     HTTPException 422: Cannot update metadata for corrupted control data
+   *     HTTPException 500: Database error during update
+   */
+  async updateMetadata(
+    request: operations.PatchControlApiV1ControlsControlIdPatchRequest,
+    options?: RequestOptions,
+  ): Promise<models.PatchControlResponse> {
+    return unwrapAsync(controlsUpdateMetadata(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Clone a control and bind the clone to a target
+   *
+   * @remarks
+   * Clone an active control and attach the clone to an opaque target.
+   */
+  async cloneAndBindControl(
+    request:
+      operations.CloneAndBindControlApiV1ControlsControlIdCloneAndBindPostRequest,
+    options?: RequestOptions,
+  ): Promise<models.CloneAndBindControlResponse> {
+    return unwrapAsync(controlsCloneAndBindControl(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Get control configuration data
+   *
+   * @remarks
+   * Retrieve the configuration data for a control.
+   *
+   * Control data is a JSONB field that must follow the ControlDefinition schema.
+   *
+   * Args:
+   *     control_id: ID of the control
+   *     db: Database session (injected)
+   *
+   * Returns:
+   *     GetControlDataResponse with validated ControlDefinition
+   *
+   * Raises:
+   *     HTTPException 404: Control not found
+   *     HTTPException 422: Control data is corrupted
+   */
+  async getData(
+    request: operations.GetControlDataApiV1ControlsControlIdDataGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.GetControlDataResponse> {
+    return unwrapAsync(controlsGetData(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Update control configuration data
+   *
+   * @remarks
+   * Update the configuration data for a control.
+   *
+   * This replaces the entire data payload. The data is validated against
+   * the ControlDefinition schema.
+   *
+   * Args:
+   *     control_id: ID of the control
+   *     request: New control data (replaces existing)
+   *     db: Database session (injected)
+   *
+   * Returns:
+   *     SetControlDataResponse with success flag
+   *
+   * Raises:
+   *     HTTPException 404: Control not found
+   *     HTTPException 500: Database error during update
+   */
+  async updateData(
+    request: operations.SetControlDataApiV1ControlsControlIdDataPutRequest,
+    options?: RequestOptions,
+  ): Promise<models.SetControlDataResponse> {
+    return unwrapAsync(controlsUpdateData(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * List control version history
+   *
+   * @remarks
+   * List control versions ordered newest-first using cursor-based pagination.
+   */
+  async listVersions(
+    request:
+      operations.ListControlVersionsApiV1ControlsControlIdVersionsGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.ListControlVersionsResponse> {
+    return unwrapAsync(controlsListVersions(
+      this,
+      request,
+      options,
+    ));
+  }
+
+  /**
+   * Get a specific control version
+   *
+   * @remarks
+   * Return a specific control version, including its raw persisted snapshot.
+   */
+  async getVersion(
+    request:
+      operations.GetControlVersionApiV1ControlsControlIdVersionsVersionNumGetRequest,
+    options?: RequestOptions,
+  ): Promise<models.GetControlVersionResponse> {
+    return unwrapAsync(controlsGetVersion(
+      this,
+      request,
+      options,
+    ));
+  }
+}
