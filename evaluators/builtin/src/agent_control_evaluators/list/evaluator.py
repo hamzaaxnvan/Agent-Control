@@ -33,3 +33,108 @@ class ListEvaluator(Evaluator[ListEvaluatorConfig]):
     )
     config_model = ListEvaluatorConfig
 
+    def __init__(self, config: ListEvaluatorConfig) -> None:
+        super().__init__(config)
+        # Defensive filtering keeps legacy invalid configs from compiling into pathological regexes.
+        normalized_values = [str(v) for v in config.values]
+        self._values = [value for value in normalized_values if value.strip() != ""]
+        self._regex: Any = self._build_regex()
+
+    def _build_regex(self) -> Any:
+        """Build regex pattern for matching."""
+        if not self._values:
+            return None
+
+        escaped = [re.escape(v) for v in self._values]
+
+        if self.config.match_mode == "contains":
+            # Word boundary matching for substring/keyword detection
+            pattern = f"\\b({'|'.join(escaped)})\\b"
+        elif self.config.match_mode == "starts_with":
+            # Prefix matching using anchors
+            pattern = f"^({'|'.join(escaped)})"
+        elif self.config.match_mode == "ends_with":
+            # Suffix matching using anchors
+            pattern = f"({'|'.join(escaped)})$"
+        else:
+            # Exact match using anchors
+            pattern = f"^({'|'.join(escaped)})$"
+
+        if not self.config.case_sensitive:
+            pattern = f"(?i){pattern}"
+
+        return re2.compile(pattern)
+
+    async def evaluate(self, data: Any) -> EvaluatorResult:
+        """Evaluate data against the value list.
+
+        Args:
+            data: Data to check (string or list of strings)
+
+        Returns:
+            EvaluatorResult based on matching logic
+        """
+        # Normalize input
+        if data is None:
+            input_values: list[str] = []
+        elif isinstance(data, list):
+            input_values = [str(item) for item in data]
+        else:
+            input_values = [str(data)]
+
+        # Short-circuit if input is empty
+        if not input_values:
+            return EvaluatorResult(
+                matched=False,
+                confidence=1.0,
+                message="Empty input - control ignored",
+                metadata={"input_count": 0},
+            )
+
+        # Short-circuit if control values are empty
+        if self._regex is None:
+            return EvaluatorResult(
+                matched=False,
+                confidence=1.0,
+                message="Empty control values - control ignored",
+                metadata={"input_count": len(input_values)},
+            )
+
+        # Perform matching
+        matches = [val for val in input_values if self._regex.search(val)]
+        match_count = len(matches)
+        total_count = len(input_values)
+
+        # Determine if logic condition is met
+        if self.config.logic == "any":
+            condition_met = match_count > 0
+        else:  # all
+            condition_met = match_count == total_count
+
+        # Apply match_on inversion
+        is_match = condition_met
+        if self.config.match_on == "no_match":
+            is_match = not condition_met
+
+        # Build message
+        if is_match:
+            msg = "Control triggered."
+        else:
+            msg = "Control not triggered."
+        msg += f" Logic: {self.config.logic}, MatchOn: {self.config.match_on}."
+        if matches:
+            msg += f" Matched: {', '.join(matches[:5])}"  # Limit to 5
+            if len(matches) > 5:
+                msg += f" (+{len(matches) - 5} more)"
+
+        return EvaluatorResult(
+            matched=is_match,
+            confidence=1.0,
+            message=msg,
+            metadata={
+                "logic": self.config.logic,
+                "match_on": self.config.match_on,
+                "matches": matches,
+                "input_count": total_count,
+            },
+        )
