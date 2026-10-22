@@ -14,3 +14,37 @@ import { SDKValidationError } from "./errors/sdk-validation-error.js";
  */
 export type SetPolicyResponse = {
   /**
+   * Previously associated policy ID, if any
+   */
+  oldPolicyId?: number | null | undefined;
+  /**
+   * Whether the request succeeded
+   */
+  success: boolean;
+};
+
+/** @internal */
+export const SetPolicyResponse$inboundSchema: z.ZodMiniType<
+  SetPolicyResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    old_policy_id: z.optional(z.nullable(types.number())),
+    success: types.boolean(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "old_policy_id": "oldPolicyId",
+    });
+  }),
+);
+
+export function setPolicyResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<SetPolicyResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => SetPolicyResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'SetPolicyResponse' from JSON`,
+  );
+}
