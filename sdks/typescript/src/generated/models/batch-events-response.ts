@@ -24,3 +24,56 @@ export const Status = {
 export type Status = OpenEnum<typeof Status>;
 
 /**
+ * Response model for batch event ingestion.
+ *
+ * @remarks
+ *
+ * Attributes:
+ *     received: Number of events received
+ *     enqueued: Number of events successfully enqueued
+ *     dropped: Number of events dropped (queue full)
+ *     status: Overall status ('queued', 'partial', 'failed')
+ */
+export type BatchEventsResponse = {
+  /**
+   * Number of events dropped
+   */
+  dropped: number;
+  /**
+   * Number of events enqueued
+   */
+  enqueued: number;
+  /**
+   * Number of events received
+   */
+  received: number;
+  /**
+   * Overall ingestion status
+   */
+  status: Status;
+};
+
+/** @internal */
+export const Status$inboundSchema: z.ZodMiniType<Status, unknown> = openEnums
+  .inboundSchema(Status);
+
+/** @internal */
+export const BatchEventsResponse$inboundSchema: z.ZodMiniType<
+  BatchEventsResponse,
+  unknown
+> = z.object({
+  dropped: types.number(),
+  enqueued: types.number(),
+  received: types.number(),
+  status: Status$inboundSchema,
+});
+
+export function batchEventsResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<BatchEventsResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => BatchEventsResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'BatchEventsResponse' from JSON`,
+  );
+}
