@@ -118,3 +118,123 @@ def mint_runtime_token(
         # ``None`` from ``utcoffset()``, leaving comparisons broken.
         raise RuntimeTokenError(
             "upstream_expires_at must be timezone-aware "
+            "(e.g., tz=UTC); naive datetimes are not supported."
+        )
+
+    if extensions is not None:
+        try:
+            extensions = _JSON_OBJECT_ADAPTER.validate_python(extensions)
+        except ValidationError as exc:
+            raise RuntimeTokenError("Runtime token extensions must be a JSON object.") from exc
+
+    issued_at = now or datetime.now(UTC)
+    if upstream_expires_at is not None and upstream_expires_at <= issued_at:
+        # Minting with an already-expired ``exp`` would return a 200 with
+        # an unusable token; surface the timing problem here instead.
+        raise UpstreamGrantExpiredError(
+            "Upstream grant has already expired; cannot mint a runtime token."
+        )
+    candidate_expiry = issued_at + timedelta(seconds=ttl_seconds)
+    if upstream_expires_at is not None and upstream_expires_at < candidate_expiry:
+        expires_at = upstream_expires_at
+    else:
+        expires_at = candidate_expiry
+
+    jti = secrets.token_urlsafe(16)
+    payload: dict[str, Any] = {
+        "iss": _ISSUER,
+        "domain": _DOMAIN,
+        "namespace_key": namespace_key,
+        "actor_id": actor_id,
+        "target_type": target_type,
+        "target_id": target_id,
+        "scopes": list(scopes),
+        "iat": int(issued_at.timestamp()),
+        "exp": int(expires_at.timestamp()),
+        "jti": jti,
+    }
+    if extensions:
+        payload["extensions"] = extensions
+    token = jwt.encode(payload, secret, algorithm=_ALGORITHM)
+    claims = RuntimeTokenClaims(
+        namespace_key=namespace_key,
+        actor_id=actor_id,
+        target_type=target_type,
+        target_id=target_id,
+        scopes=scopes,
+        expires_at=expires_at,
+        issued_at=issued_at,
+        jti=jti,
+        extensions=extensions or None,
+    )
+    return token, claims
+
+
+def verify_runtime_token(token: str, secret: str) -> RuntimeTokenClaims:
+    """Decode and verify a runtime token.
+
+    Raises :class:`RuntimeTokenError` when the signature is invalid,
+    the token is expired, the issuer is wrong, the domain marker is
+    missing, or required claims are missing or malformed.
+    """
+    if not secret:
+        raise RuntimeTokenError("Runtime token secret is not configured.")
+    try:
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=[_ALGORITHM],
+            issuer=_ISSUER,
+            options={"require": ["exp", "iat", "iss", "domain"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise RuntimeTokenError("Runtime token has expired.") from exc
+    except jwt.InvalidIssuerError as exc:
+        raise RuntimeTokenError("Runtime token has the wrong issuer.") from exc
+    except jwt.InvalidTokenError as exc:
+        raise RuntimeTokenError(f"Runtime token is invalid: {exc}") from exc
+
+    if payload.get("domain") != _DOMAIN:
+        raise RuntimeTokenError("Token is not a runtime token; refusing to use it here.")
+
+    namespace_key = payload.get("namespace_key")
+    actor_id = payload.get("actor_id")
+    target_type = payload.get("target_type")
+    target_id = payload.get("target_id")
+    raw_extensions = payload.get("extensions")
+    if not isinstance(namespace_key, str) or not namespace_key:
+        raise RuntimeTokenError("Runtime token missing namespace_key.")
+    if not isinstance(actor_id, str) or not actor_id:
+        raise RuntimeTokenError("Runtime token missing actor_id.")
+    if not isinstance(target_type, str) or not target_type:
+        raise RuntimeTokenError("Runtime token missing target_type.")
+    if not isinstance(target_id, str) or not target_id:
+        raise RuntimeTokenError("Runtime token missing target_id.")
+
+    extensions: JSONObject | None = None
+    if raw_extensions is not None:
+        try:
+            extensions = _JSON_OBJECT_ADAPTER.validate_python(raw_extensions)
+        except ValidationError as exc:
+            raise RuntimeTokenError("Runtime token has malformed extensions.") from exc
+
+    raw_scopes = payload.get("scopes", [])
+    if not isinstance(raw_scopes, list) or not all(isinstance(s, str) for s in raw_scopes):
+        raise RuntimeTokenError("Runtime token has malformed scopes.")
+    scopes = tuple(raw_scopes)
+
+    jti = payload.get("jti")
+    if not isinstance(jti, str):
+        jti = ""
+
+    return RuntimeTokenClaims(
+        namespace_key=namespace_key,
+        actor_id=actor_id,
+        target_type=target_type,
+        target_id=target_id,
+        scopes=scopes,
+        expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC),
+        issued_at=datetime.fromtimestamp(payload["iat"], tz=UTC),
+        jti=jti,
+        extensions=extensions,
+    )
