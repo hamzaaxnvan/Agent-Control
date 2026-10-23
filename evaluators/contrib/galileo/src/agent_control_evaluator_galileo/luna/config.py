@@ -24,3 +24,108 @@ def scorer_invoke_runtime_enabled() -> bool:
 class ScorerInvokeConfig(BaseModel):
     """Orbit-supported overrides for a synchronous scorer invocation.
 
+    Orbit owns the Galileo scorer-invoke wire contract. Keeping this model
+    strict makes an unsupported option fail locally instead of producing a
+    less actionable HTTP 422 response from Runners.
+
+    Attributes:
+        threshold: Legacy threshold accepted by Orbit. Agent Control still
+            applies its evaluator threshold locally.
+        score_threshold: Legacy score threshold accepted by Orbit.
+        request_timeout_seconds: Optional upper bound for scorer execution in
+            Orbit. The Agent Control HTTP and evaluator deadlines must remain
+            longer than this value.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    threshold: float | None = None
+    score_threshold: float | None = None
+    request_timeout_seconds: float | None = Field(default=None, gt=0)
+
+
+def coerce_number(value: JSONValue) -> float | None:
+    """Return a numeric value for JSON scalars that can be compared numerically."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+class LunaEvaluatorConfig(EvaluatorConfig):
+    """Configuration for direct Luna scorer evaluation.
+
+    Attributes:
+        scorer_id: Required scorer identifier for Luna scorer invocation.
+        scorer_version_id: Optional for legacy requests; required when the
+            contextual evaluator sends a structured record.
+        scorer_label: Optional display/metadata label.
+        threshold: Local threshold used by the evaluator for comparison.
+        operator: Local comparison operator. Numeric operators use threshold as a number.
+        scorer_config: Optional Orbit-supported scorer invocation config sent
+            as ``config``.
+        payload_field: Explicit scorer input side for scalar selected data.
+        timeout_ms: Request timeout in milliseconds.
+    """
+
+    scorer_id: str = Field(
+        min_length=1,
+        description="Required scorer identifier for Luna scorer invocation.",
+    )
+    scorer_version_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional for legacy requests and required when contextual evaluation "
+            "sends a structured record."
+        ),
+    )
+    scorer_label: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional display/metadata label.",
+    )
+    threshold: JSONValue = Field(
+        default=0.5,
+        description="Local threshold used to decide whether the control matches.",
+    )
+    operator: LunaOperator = Field(
+        default="gte",
+        description="Local comparison operator applied to the raw Luna score.",
+    )
+    scorer_config: ScorerInvokeConfig | None = Field(
+        default=None,
+        alias="config",
+        serialization_alias="config",
+        description=(
+            "Optional Orbit-supported configuration sent to the Luna scorer invoke endpoint."
+        ),
+    )
+    payload_field: LunaPayloadField = Field(
+        default="input",
+        description=(
+            "Which scorer input side to use when selector output is a scalar value. "
+            "Structured selected data with input/output keys overrides this setting."
+        ),
+    )
+    timeout_ms: int = Field(
+        default=10000,
+        ge=1000,
+        le=60000,
+        description="Request timeout in milliseconds (1-60 seconds)",
+    )
+
+    @model_validator(mode="after")
+    def validate_threshold(self) -> LunaEvaluatorConfig:
+        """Validate threshold compatibility with the configured operator."""
+        if self.operator in _NUMERIC_OPERATORS and coerce_number(self.threshold) is None:
+            raise ValueError(f"operator '{self.operator}' requires a numeric threshold")
+        if self.operator != "any" and self.threshold is None:
+            raise ValueError("threshold is required unless operator is 'any'")
+        return self

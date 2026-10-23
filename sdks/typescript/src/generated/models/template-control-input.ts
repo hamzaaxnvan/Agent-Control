@@ -27,3 +27,33 @@ export type TemplateControlInput = {
 };
 
 /** @internal */
+export type TemplateControlInput$Outbound = {
+  template: TemplateDefinitionInput$Outbound;
+  template_values?: { [k: string]: TemplateValue$Outbound } | undefined;
+};
+
+/** @internal */
+export const TemplateControlInput$outboundSchema: z.ZodMiniType<
+  TemplateControlInput$Outbound,
+  TemplateControlInput
+> = z.pipe(
+  z.object({
+    template: TemplateDefinitionInput$outboundSchema,
+    templateValues: z.optional(
+      z.record(z.string(), TemplateValue$outboundSchema),
+    ),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      templateValues: "template_values",
+    });
+  }),
+);
+
+export function templateControlInputToJSON(
+  templateControlInput: TemplateControlInput,
+): string {
+  return JSON.stringify(
+    TemplateControlInput$outboundSchema.parse(templateControlInput),
+  );
+}
