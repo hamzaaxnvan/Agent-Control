@@ -31,3 +31,37 @@ export type GetControlVersionResponse = {
   snapshot: { [k: string]: any };
   /**
    * Monotonic version number for the control
+   */
+  versionNum: number;
+};
+
+/** @internal */
+export const GetControlVersionResponse$inboundSchema: z.ZodMiniType<
+  GetControlVersionResponse,
+  unknown
+> = z.pipe(
+  z.object({
+    created_at: types.string(),
+    event_type: types.string(),
+    note: z.optional(z.nullable(types.string())),
+    snapshot: z.record(z.string(), z.any()),
+    version_num: types.number(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "created_at": "createdAt",
+      "event_type": "eventType",
+      "version_num": "versionNum",
+    });
+  }),
+);
+
+export function getControlVersionResponseFromJSON(
+  jsonString: string,
+): SafeParseResult<GetControlVersionResponse, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => GetControlVersionResponse$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'GetControlVersionResponse' from JSON`,
+  );
+}

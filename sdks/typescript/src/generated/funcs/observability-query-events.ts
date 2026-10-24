@@ -93,3 +93,99 @@ async function $do(
       | RequestAbortedError
       | RequestTimeoutError
       | InvalidRequestError
+      | UnexpectedClientError
+      | SDKValidationError
+    >,
+    APICall,
+  ]
+> {
+  const parsed = safeParse(
+    request,
+    (value) => z.parse(models.EventQueryRequest$outboundSchema, value),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = encodeJSON("body", payload, { explode: true });
+
+  const path = pathToFunc("/api/v1/observability/events/query")();
+
+  const headers = new Headers(compactMap({
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID: "query_events_api_v1_observability_events_query_post",
+    oAuth2Scopes: null,
+
+    resolvedSecurity: requestSecurity,
+
+    securitySource: client._options.apiKeyHeader,
+    retryConfig: options?.retries
+      || client._options.retryConfig
+      || { strategy: "none" },
+    retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
+  };
+
+  const requestRes = client._createRequest(context, {
+    security: requestSecurity,
+    method: "POST",
+    baseURL: options?.serverURL,
+    path: path,
+    headers: headers,
+    body: body,
+    userAgent: client._options.userAgent,
+    timeoutMs: options?.timeoutMs || client._options.timeoutMs || -1,
+  }, options);
+  if (!requestRes.ok) {
+    return [requestRes, { status: "invalid" }];
+  }
+  const req = requestRes.value;
+
+  const doResult = await client._do(req, {
+    context,
+    errorCodes: ["422", "4XX", "5XX"],
+    retryConfig: context.retryConfig,
+    retryCodes: context.retryCodes,
+  });
+  if (!doResult.ok) {
+    return [doResult, { status: "request-error", request: req }];
+  }
+  const response = doResult.value;
+
+  const responseFields = {
+    HttpMeta: { Response: response, Request: req },
+  };
+
+  const [result] = await M.match<
+    models.EventQueryResponse,
+    | errors.HTTPValidationError
+    | AgentControlSDKError
+    | ResponseValidationError
+    | ConnectionError
+    | RequestAbortedError
+    | RequestTimeoutError
+    | InvalidRequestError
+    | UnexpectedClientError
+    | SDKValidationError
+  >(
+    M.json(200, models.EventQueryResponse$inboundSchema),
+    M.jsonErr(422, errors.HTTPValidationError$inboundSchema),
+    M.fail("4XX"),
+    M.fail("5XX"),
+  )(response, req, { extraFields: responseFields });
+  if (!result.ok) {
+    return [result, { status: "complete", request: req, response }];
+  }
+
+  return [result, { status: "complete", request: req, response }];
+}
