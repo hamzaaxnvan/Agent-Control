@@ -16,3 +16,21 @@ def _make_conflict_error() -> httpx.HTTPStatusError:
         request=request,
         response=response,
     )
+
+
+def test_init_surfaces_conflict_response() -> None:
+    conflict = _make_conflict_error()
+
+    with patch(
+        "agent_control.__init__.AgentControlClient.health_check",
+        new=AsyncMock(return_value={"status": "healthy"}),
+    ), patch(
+        "agent_control.__init__.agents.register_agent",
+        new=AsyncMock(side_effect=conflict),
+    ):
+        with pytest.raises(httpx.HTTPStatusError):
+            agent_control.init(
+                agent_name=f"agent-{uuid4().hex[:12]}",
+                agent_description="Testing init conflict handling",
+                policy_refresh_interval_seconds=0,
+            )
