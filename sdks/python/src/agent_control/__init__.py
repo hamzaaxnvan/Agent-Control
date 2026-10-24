@@ -416,3 +416,1258 @@ def refresh_controls() -> list[dict[str, Any]] | None:
         List of control dicts or None if fetch failed.
 
     Example:
+        # After updating a control in the UI
+        controls = agent_control.refresh_controls()
+        print(f"Refreshed {len(controls)} controls")
+    """
+    try:
+        asyncio.get_running_loop()
+        # We're in an async context - run in thread
+        result_container: list[list[dict[str, Any]] | None] = [None]
+        exception_container: list[Exception | None] = [None]
+
+        def run_in_thread() -> None:
+            try:
+                result_container[0] = _run_coro_in_new_loop(refresh_controls_async())
+            except Exception as e:
+                exception_container[0] = e
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        thread.start()
+        thread.join(timeout=10)
+
+        if exception_container[0]:
+            raise exception_container[0]
+        return result_container[0]
+
+    except RuntimeError:
+        # No running event loop - we're in a sync context
+        return _run_coro_in_new_loop(refresh_controls_async())
+
+
+# ============================================================================
+# Public API Functions
+# ============================================================================
+
+def init(
+    agent_name: str,
+    agent_description: str | None = None,
+    agent_version: str | None = None,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+    controls_file: str | None = None,
+    steps: list[StepSchemaDict] | None = None,
+    conflict_mode: Literal["strict", "overwrite"] = "overwrite",
+    observability_enabled: bool | None = None,
+    observability_sink_name: str | None = None,
+    observability_sink_config: JSONObject | None = None,
+    log_config: dict[str, Any] | None = None,
+    policy_refresh_interval_seconds: int = 60,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    runtime_token_header: str | None = None,
+    otel_tracer_provider: TracerProvider | None = None,
+    **kwargs: object
+) -> Agent:
+    """
+    Initialize Agent Control with your agent's information.
+
+    This function should be called once at the base of your agent file.
+    It will:
+    1. Create an Agent instance with your metadata
+    2. Register with the Agent Control server via /initAgent endpoint
+    3. Fetch controls from the server
+    4. Auto-discover and load local controls.yaml as fallback
+    5. Enable the @control decorator
+
+    Target context (``target_type`` and ``target_id``) is fixed for the
+    lifetime of the SDK session: it is sent on the registration call and
+    on every subsequent refresh of ``GET /agents/{name}/controls``. The
+    server returns the merged effective set (direct attachments,
+    policy-derived controls, and bindings for the supplied target). The
+    SDK does not support switching target context per-request; re-init to
+    change it.
+
+    Args:
+        agent_name: Unique identifier for your agent (will be normalized to lowercase)
+        agent_description: Optional description of what your agent does
+        agent_version: Optional version string (e.g., "1.0.0")
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var
+                   or http://localhost:8000)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+        api_key_header: Optional HTTP header name for API key authentication
+            (defaults to AGENT_CONTROL_API_KEY_HEADER env var or X-API-Key)
+        controls_file: Optional explicit path to controls.yaml (auto-discovered if not provided)
+        steps: Optional list of step schemas for registration:
+               [{"type": "tool", "name": "search", "input_schema": {...}, "output_schema": {...}}]
+        conflict_mode: Conflict handling mode for initAgent registration.
+            Defaults to "overwrite" in SDK flows.
+        observability_enabled: Optional bool to enable/disable observability (defaults to env var)
+        observability_sink_name: Optional sink selection name. Use "default" to preserve
+            SDK -> server delivery or "registered" / a named sink factory for custom sinks.
+        observability_sink_config: Optional JSON config payload for the selected sink.
+        log_config: Optional logging configuration dict:
+               {"enabled": True, "span_start": True, "span_end": True, "control_eval": True}
+        policy_refresh_interval_seconds: Interval for background policy refresh loop.
+            Defaults to 60 seconds. Set to 0 to disable background refresh.
+        target_type: Optional opaque target kind. Required iff target_id is
+            also supplied. The server merges target-bound controls into the
+            returned set when both are present.
+        target_id: Optional opaque target identifier. Required iff target_type
+            is also supplied.
+        runtime_token_header: Optional HTTP header the runtime token is sent on
+            for evaluation requests (defaults to AGENT_CONTROL_RUNTIME_TOKEN_HEADER
+            env var or Authorization). Point this at a dedicated header (e.g.
+            X-Agent-Control-Runtime-Token) when the server runs behind a gateway
+            that reserves Authorization for its own identity JWT. The server must
+            be configured to read the same header.
+        otel_tracer_provider: Optional application-owned OpenTelemetry SDK provider.
+            Used only when observability_sink_name is ``"otel"``. If omitted,
+            the OTEL sink reuses a globally registered SDK provider when available,
+            otherwise it creates and owns a provider as before.
+        **kwargs: Additional metadata to store with the agent
+
+    Returns:
+        Agent instance with all metadata
+
+    Example:
+        import agent_control
+
+        agent_control.init(
+            agent_name="customer-service-bot",
+            agent_description="Handles customer inquiries and support tickets",
+            agent_version="2.1.0",
+            steps=[
+                {
+                    "type": "tool",
+                    "name": "search_knowledge_base",
+                    "input_schema": {"query": {"type": "string"}},
+                    "output_schema": {"results": {"type": "array"}}
+                }
+            ]
+        )
+
+        # Now use @control decorator to apply the agent's policy
+        from agent_control import control
+
+        @control()  # Applies agent's assigned policy
+        async def handle(message: str):
+            return message
+
+    Environment Variables:
+        AGENT_CONTROL_URL: Server URL (default: http://localhost:8000)
+    """
+    if not agent_name:
+        raise ValueError(
+            "The 'agent_name' argument is required for initialization.\n"
+            "Please provide a valid agent identifier, e.g.:\n"
+            '    agent_control.init(agent_name="customer-service-bot")'
+        )
+
+    # Validate and normalize agent_name
+    _agent_name = ensure_agent_name(agent_name)
+
+    if policy_refresh_interval_seconds < 0:
+        raise ValueError("policy_refresh_interval_seconds must be >= 0")
+
+    if (target_type is None) != (target_id is None):
+        raise ValueError(
+            "target_type and target_id must be supplied together."
+        )
+    # Validate the runtime-token header up front, before stopping the refresh
+    # loop or mutating shared session state. An explicit blank or a
+    # syntactically-invalid header must fail here rather than on the first
+    # later evaluation. (A None/unset value is fine; AgentControlClient resolves
+    # the env-var fallback and default when the eval client is built.)
+    if runtime_token_header is not None:
+        if not runtime_token_header.strip():
+            raise ValueError("runtime_token_header must not be blank.")
+        validate_http_field_name(runtime_token_header.strip())
+
+    resolved_api_key_header = (
+        api_key_header
+        or os.getenv(AgentControlClient.API_KEY_HEADER_ENV_VAR)
+        or AgentControlClient.DEFAULT_API_KEY_HEADER
+    )
+
+    # Re-init behavior: always stop the existing refresh loop before mutating
+    # shared agent/session globals.
+    _stop_policy_refresh_loop()
+
+    # Configure logging if provided (do this early before any logging happens)
+    if log_config:
+        configure_logging(log_config)
+
+    # Create agent instance with metadata and store in state
+    next_agent = Agent(
+        agent_name=_agent_name,
+        agent_description=agent_description,
+        agent_created_at=datetime.now(UTC).isoformat(),
+        agent_updated_at=None,
+        agent_version=agent_version,
+        agent_metadata=kwargs
+    )
+
+    # Bump the session generation before mutating connection state so any
+    # in-flight manual refresh from a previous session is discarded on return.
+    global _session_generation
+    with _session_lock:
+        _session_generation += 1
+        state.current_agent = next_agent
+        state.server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+        state.api_key = api_key
+        state.api_key_header = resolved_api_key_header
+        # Stored raw (may be None); AgentControlClient resolves the env-var
+        # fallback and blank-handling so the rule stays in one place.
+        state.runtime_token_header = runtime_token_header
+        state.runtime_token_cache.clear()
+        state.target_type = target_type
+        state.target_id = target_id
+
+    # Merge auto-discovered steps from @control() decorators with explicit steps.
+    # Explicit steps take precedence when (type, name) collides.
+    auto_steps = get_registered_steps()
+    merge_result = merge_explicit_and_auto_steps(steps, auto_steps)
+    registration_steps: list[dict[str, Any]] = [dict(step) for step in merge_result.steps]
+
+    if auto_steps:
+        if merge_result.overridden_keys:
+            formatted = ", ".join(
+                f"{step_type}:{step_name}" for step_type, step_name in merge_result.overridden_keys
+            )
+            logger.warning(
+                "Skipping %d auto-discovered step(s) overridden by explicit steps: %s",
+                len(merge_result.overridden_keys),
+                formatted,
+            )
+
+        logger.debug(
+            "Auto-discovered %d step(s) from @control() decorators (%d after merge)",
+            len(auto_steps),
+            len(registration_steps),
+        )
+
+    # Register with server and fetch controls
+    server_controls = None
+    try:
+        async def register() -> list[dict[str, Any]] | None:
+            # Type assertions for mypy - these values are guaranteed to be set above
+            assert state.server_url is not None
+            assert state.current_agent is not None
+
+            async with AgentControlClient(
+                base_url=state.server_url,
+                api_key=state.api_key,
+                api_key_header=state.api_key_header,
+            ) as client:
+                # Check server health first
+                try:
+                    health = await client.health_check()
+                    logger.info("Connected to Agent Control server: %s", state.server_url)
+                    logger.debug("Server status: %s", health.get('status', 'unknown'))
+                except Exception as e:
+                    logger.error("Server not available: %s", e, exc_info=True)
+                    return None
+
+                # Register agent with steps
+                try:
+                    response = await agents.register_agent(
+                        client,
+                        state.current_agent,
+                        steps=registration_steps,
+                        conflict_mode=conflict_mode,
+                        target_type=state.target_type,
+                        target_id=state.target_id,
+                    )
+                    created = response.get('created', False)
+                    controls: list[dict[str, Any]] = response.get('controls', [])
+
+                    if created:
+                        logger.info("Agent registered: %s", _agent_name)
+                    else:
+                        logger.info("Agent updated: %s", _agent_name)
+
+                    if registration_steps:
+                        logger.debug("Registered %d step(s)", len(registration_steps))
+
+                    return controls
+                except httpx.HTTPStatusError:
+                    # Surface API errors like name conflicts
+                    raise
+                except Exception as e:
+                    logger.error("Failed to register agent: %s", e, exc_info=True)
+                    return None
+
+        # Run registration - handle both sync and async contexts
+        try:
+            # Check if we're already in an event loop
+            asyncio.get_running_loop()
+            # We're in an async context - schedule the coroutine
+            result_container: list[list[dict[str, Any]] | None] = [None]
+            exception_container: list[Exception | None] = [None]
+
+            def run_in_thread() -> None:
+                try:
+                    result_container[0] = _run_coro_in_new_loop(register())
+                except Exception as e:
+                    exception_container[0] = e
+
+            thread = threading.Thread(target=run_in_thread, daemon=True)
+            thread.start()
+            thread.join(timeout=10)  # 10 second timeout
+
+            if exception_container[0]:
+                raise exception_container[0]
+            server_controls = result_container[0]
+
+        except RuntimeError:
+            # No running event loop - we're in a sync context
+            server_controls = _run_coro_in_new_loop(register())
+
+    except httpx.HTTPStatusError:
+        # Surface server-side errors (e.g., 409 conflicts)
+        raise
+    except Exception as e:
+        logger.error("Could not connect to server: %s", e, exc_info=True)
+        logger.info("Will use local controls if available")
+
+    # Store server controls globally for later use by @control decorator.
+    published_controls = _publish_server_controls(server_controls)
+    if published_controls:
+        logger.info("Loaded %d control(s) from server", len(published_controls))
+    else:
+        logger.debug(
+            "No controls returned from server "
+            "(use local controls.yaml or @control decorator)"
+        )
+
+    # Initialize observability if enabled
+    batcher = init_observability(
+        server_url=state.server_url,
+        api_key=state.api_key,
+        api_key_header=state.api_key_header,
+        enabled=observability_enabled,
+        sink_name=observability_sink_name,
+        sink_config=observability_sink_config,
+        otel_tracer_provider=otel_tracer_provider,
+    )
+    if batcher:
+        logger.info("Observability enabled")
+
+    if policy_refresh_interval_seconds > 0:
+        _start_policy_refresh_loop(policy_refresh_interval_seconds)
+    else:
+        logger.debug("Policy refresh loop disabled (policy_refresh_interval_seconds=0)")
+
+    return state.current_agent
+
+
+# ============================================================================
+# Shutdown
+# ============================================================================
+
+
+def _reset_state() -> None:
+    """Clear all global SDK state."""
+    global _session_generation
+
+    with _session_lock:
+        _session_generation += 1
+        state.current_agent = None
+        state.control_engine = None
+        state.server_controls = None
+        state.server_url = None
+        state.api_key = None
+        state.api_key_header = None
+        state.runtime_token_header = None
+        state.runtime_token_cache.clear()
+        state.target_type = None
+        state.target_id = None
+
+
+async def ashutdown() -> None:
+    """Shut down the SDK and release all background resources.
+
+    Flushes pending observability events, stops the policy refresh loop,
+    and resets global state.  Idempotent - safe to call multiple times.
+
+    Use this from async code.  For sync code use :func:`shutdown`.
+    """
+    await asyncio.to_thread(_stop_policy_refresh_loop)
+    await shutdown_observability()
+    _reset_state()
+    logger.info("Agent Control SDK shut down")
+
+
+def shutdown() -> None:
+    """Shut down the SDK and release all background resources.
+
+    Flushes pending observability events, stops the policy refresh loop,
+    and resets global state.  Idempotent - safe to call multiple times.
+
+    Use this from sync code.  For async code use :func:`ashutdown`.
+    """
+    _stop_policy_refresh_loop()
+    sync_shutdown_observability()
+    _reset_state()
+    logger.info("Agent Control SDK shut down")
+
+
+async def get_agent(
+    agent_name: str,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Get agent details from the server by name.
+
+    Args:
+        agent_name: Agent identifier
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - agent: Agent metadata
+            - steps: List of steps registered with the agent
+
+    Raises:
+        httpx.HTTPError: If request fails or agent not found
+
+    Example:
+        import asyncio
+        import agent_control
+
+        # Fetch agent from server
+        async def main():
+            agent_data = await agent_control.get_agent(
+                "customer-service-bot"
+            )
+            print(f"Agent: {agent_data['agent']['agent_name']}")
+            print(f"Steps: {len(agent_data['steps'])}")
+
+        asyncio.run(main())
+
+        # Or using the client directly
+        async with agent_control.AgentControlClient() as client:
+            agent_data = await agent_control.agents.get_agent(
+                client, "customer-service-bot"
+            )
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.get_agent(client, agent_name)
+
+
+def current_agent() -> Agent | None:
+    """
+    Get the currently initialized agent (from init()).
+
+    Returns:
+        Current Agent instance or None if not initialized
+
+    Example:
+        agent_control.init(
+            agent_name="My Bot",
+        )
+        agent = agent_control.current_agent()
+        print(agent.agent_name)  # "My Bot"
+    """
+    return state.current_agent
+
+
+async def list_agents(
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+    cursor: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """
+    List all registered agents from the server.
+
+    Args:
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+        cursor: Optional cursor for pagination (agent name of last item from previous page)
+        limit: Number of results per page (default 20, max 100)
+
+    Returns:
+        Dictionary containing:
+            - agents: List of agent summaries with agent_name,
+                      policy_id, created_at, step_count, evaluator_count
+            - pagination: Object with limit, total, next_cursor, has_more
+
+    Raises:
+        httpx.HTTPError: If request fails
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            result = await agent_control.list_agents()
+            print(f"Total agents: {result['pagination']['total']}")
+            for agent in result['agents']:
+                print(f"  - {agent['agent_name']}")
+            # Fetch next page
+            if result['pagination']['has_more']:
+                next_page = await agent_control.list_agents(
+                    cursor=result['pagination']['next_cursor']
+                )
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.list_agents(client, cursor=cursor, limit=limit)
+
+
+# ============================================================================
+# Agent Policy/Control Convenience Functions
+# ============================================================================
+
+
+async def add_agent_policy(
+    agent_name: str,
+    policy_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """Associate a policy with an agent (idempotent)."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.add_agent_policy(client, agent_name, policy_id)
+
+
+async def get_agent_policies(
+    agent_name: str,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """List policy IDs associated with an agent."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.get_agent_policies(client, agent_name)
+
+
+async def remove_agent_policy_association(
+    agent_name: str,
+    policy_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """Remove one policy association from an agent (idempotent)."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.remove_agent_policy_association(client, agent_name, policy_id)
+
+
+async def remove_all_agent_policies(
+    agent_name: str,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """Remove all policy associations from an agent."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.remove_all_agent_policies(client, agent_name)
+
+
+async def add_agent_control(
+    agent_name: str,
+    control_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """Associate a control with an agent (idempotent)."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.add_agent_control(client, agent_name, control_id)
+
+
+async def remove_agent_control(
+    agent_name: str,
+    control_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """Remove a direct control association from an agent (idempotent)."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await agents.remove_agent_control(client, agent_name, control_id)
+
+
+# ============================================================================
+# Control Management Convenience Functions
+# ============================================================================
+
+
+async def list_controls(
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+    cursor: int | None = None,
+    limit: int = 20,
+    name: str | None = None,
+    enabled: bool | None = None,
+    template_backed: bool | None = None,
+    cloned: bool | None = None,
+    step_type: str | None = None,
+    stage: Literal["pre", "post"] | None = None,
+    execution: Literal["server", "sdk"] | None = None,
+    tag: str | None = None,
+    include_attachments: bool = False,
+    attachment_target_type: str | None = None,
+    attachment_target_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    List all controls from the server with optional filtering.
+
+    Args:
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+        cursor: Control ID to start after (for pagination)
+        limit: Number of results per page (default 20, max 100)
+        name: Optional filter by name (partial, case-insensitive)
+        enabled: Optional filter by enabled status
+        template_backed: Optional filter by whether the control is template-backed
+        cloned: Optional filter by whether the control was cloned from another control
+        step_type: Optional filter by step type (built-ins: 'tool', 'llm')
+        stage: Optional filter by stage ('pre' or 'post')
+        execution: Optional filter by execution ('server' or 'sdk')
+        tag: Optional filter by tag
+        include_attachments: Whether to include attachment details
+        attachment_target_type: Optional target binding type filter for attachments
+        attachment_target_id: Optional target binding ID filter for attachments
+
+    Returns:
+        Dictionary containing:
+            - controls: List of control summaries
+            - pagination: Object with limit, total, next_cursor, has_more
+
+    Raises:
+        httpx.HTTPError: If request fails
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            # List all controls
+            result = await agent_control.list_controls()
+            print(f"Total controls: {result['pagination']['total']}")
+
+            # Filter enabled LLM controls
+            llm_controls = await agent_control.list_controls(
+                enabled=True,
+                step_type="llm"
+            )
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.list_controls(
+            client,
+            cursor=cursor,
+            limit=limit,
+            name=name,
+            enabled=enabled,
+            template_backed=template_backed,
+            cloned=cloned,
+            step_type=step_type,
+            stage=stage,
+            execution=execution,
+            tag=tag,
+            include_attachments=include_attachments,
+            attachment_target_type=attachment_target_type,
+            attachment_target_id=attachment_target_id,
+        )
+
+
+async def create_control(
+    name: str,
+    data: dict[str, Any] | ControlDefinition | TemplateControlInput,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Create a new control with configuration.
+
+    Args:
+        name: Unique name for the control
+        data: Raw control definition or template-backed control input
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - control_id: ID of the created control
+            - configured: Always True because create requires data
+
+    Raises:
+        httpx.HTTPError: If request fails
+        HTTPException 409: Control with this name already exists
+        HTTPException 422: If data doesn't match schema
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            # Create and configure in one call
+            result = await agent_control.create_control(
+                name="ssn-blocker",
+                data={
+                    "execution": "server",
+                    "scope": {"step_types": ["llm"], "stages": ["post"]},
+                    "condition": {
+                        "selector": {"path": "output"},
+                        "evaluator": {
+                            "name": "regex",
+                            "config": {"pattern": r"\\d{3}-\\d{2}-\\d{4}"}
+                        }
+                    },
+                    "action": {"decision": "deny"}
+                }
+            )
+            print(f"Created control {result['control_id']}")
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.create_control(client, name, data=data)
+
+
+async def clone_and_bind_control(
+    control_id: int,
+    *,
+    target_type: str,
+    target_id: str,
+    name: str | None = None,
+    enabled: bool = True,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Clone an existing control and bind the clone to a target.
+
+    Args:
+        control_id: Source control ID to clone
+        target_type: Opaque attachment kind
+        target_id: Opaque external target identifier
+        name: Optional unique name for the cloned control
+        enabled: Whether the created binding is active
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing id, name, cloned_from_control_id, and binding_id.
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.clone_and_bind_control(
+            client,
+            control_id,
+            target_type=target_type,
+            target_id=target_id,
+            name=name,
+            enabled=enabled,
+        )
+
+
+async def validate_control_data(
+    data: dict[str, Any] | ControlDefinition | TemplateControlInput,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """Validate raw or template-backed control data without saving it."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.validate_control_data(client, data=data)
+
+
+async def render_control_template(
+    template: dict[str, Any] | TemplateDefinition,
+    template_values: dict[str, TemplateValue],
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """Render a template-backed control preview without persisting it."""
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.render_control_template(
+            client,
+            template=template,
+            template_values=template_values,
+        )
+
+
+async def get_control(
+    control_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Get a control by ID from the server.
+
+    Args:
+        control_id: ID of the control
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - id: Control ID
+            - name: Control name
+            - data: Control definition or unrendered template control data
+
+    Raises:
+        httpx.HTTPError: If request fails or control not found
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            control = await agent_control.get_control(5)
+            print(f"Control: {control['name']}")
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.get_control(client, control_id)
+
+
+async def delete_control(
+    control_id: int,
+    force: bool = False,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Delete a control from the server.
+
+    By default, deletion fails if the control is associated with any policy.
+    Use force=True to automatically dissociate and delete.
+
+    Args:
+        control_id: ID of the control to delete
+        force: If True, remove associations before deleting
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - success: True if control was deleted
+            - dissociated_from: List of policy IDs the control was removed from
+
+    Raises:
+        httpx.HTTPError: If request fails
+        HTTPException 404: Control not found
+        HTTPException 409: Control is in use (and force=False)
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            # Force delete
+            result = await agent_control.delete_control(5, force=True)
+            print(f"Deleted, removed from {len(result['dissociated_from'])} policies")
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.delete_control(client, control_id, force=force)
+
+
+async def update_control(
+    control_id: int,
+    name: str | None = None,
+    enabled: bool | None = None,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Update control metadata (name and/or enabled status).
+
+    Args:
+        control_id: ID of the control to update
+        name: New name for the control (optional)
+        enabled: Enable or disable the control (optional)
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - success: True if update succeeded
+            - name: Current control name
+            - enabled: Current enabled status (if control has data)
+
+    Raises:
+        httpx.HTTPError: If request fails
+        HTTPException 404: Control not found
+        HTTPException 409: Name conflict
+        HTTPException 422: Cannot update enabled (no data configured)
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            # Rename and disable
+            result = await agent_control.update_control(
+                5,
+                name="pii-protection-v2",
+                enabled=False
+            )
+            print(f"Updated: {result['name']}, enabled={result['enabled']}")
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await controls.update_control(client, control_id, name=name, enabled=enabled)
+
+
+# ============================================================================
+# Policy-Control Management Convenience Functions
+# ============================================================================
+
+
+async def add_control_to_policy(
+    policy_id: int,
+    control_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Add a control to a policy.
+
+    This operation is idempotent - adding the same control multiple times has no effect.
+    Agents with this policy will immediately see the added control.
+
+    Args:
+        policy_id: ID of the policy
+        control_id: ID of the control to add
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - success: True if operation succeeded
+
+    Raises:
+        httpx.HTTPError: If request fails
+        HTTPException 404: Policy or control not found
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            await agent_control.add_control_to_policy(policy_id=1, control_id=5)
+            print("Control added to policy")
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await policies.add_control_to_policy(client, policy_id, control_id)
+
+
+async def remove_control_from_policy(
+    policy_id: int,
+    control_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    Remove a control from a policy.
+
+    This operation is idempotent - removing a non-associated control has no effect.
+    Agents with this policy will immediately lose the removed control.
+
+    Args:
+        policy_id: ID of the policy
+        control_id: ID of the control to remove
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - success: True if operation succeeded
+
+    Raises:
+        httpx.HTTPError: If request fails
+        HTTPException 404: Policy or control not found
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            await agent_control.remove_control_from_policy(policy_id=1, control_id=5)
+            print("Control removed from policy")
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await policies.remove_control_from_policy(client, policy_id, control_id)
+
+
+async def list_policy_controls(
+    policy_id: int,
+    server_url: str | None = None,
+    api_key: str | None = None,
+    api_key_header: str | None = None,
+) -> dict[str, Any]:
+    """
+    List all controls associated with a policy.
+
+    Args:
+        policy_id: ID of the policy
+        server_url: Optional server URL (defaults to AGENT_CONTROL_URL env var)
+        api_key: Optional API key for authentication (defaults to AGENT_CONTROL_API_KEY env var)
+
+    Returns:
+        Dictionary containing:
+            - control_ids: List of control IDs associated with the policy
+
+    Raises:
+        httpx.HTTPError: If request fails
+        HTTPException 404: Policy not found
+
+    Example:
+        import asyncio
+        import agent_control
+
+        async def main():
+            result = await agent_control.list_policy_controls(policy_id=1)
+            print(f"Policy has {len(result['control_ids'])} controls")
+
+        asyncio.run(main())
+    """
+    _final_server_url = server_url or os.getenv('AGENT_CONTROL_URL') or 'http://localhost:8000'
+
+    async with _ad_hoc_client(
+        server_url=_final_server_url,
+        api_key=api_key,
+        api_key_header=api_key_header,
+    ) as client:
+        return await policies.list_policy_controls(client, policy_id)
+
+
+__all__ = [
+    # Initialization & lifecycle
+    "init",
+    "shutdown",
+    "ashutdown",
+    "current_agent",
+
+    # Control sync
+    "get_server_controls",
+    "refresh_controls",
+    "refresh_controls_async",
+    # Step registry (auto-discovered from @control decorators)
+    "get_registered_steps",
+    "clear_step_registry",
+
+    # SDK Logging
+    "get_logger",
+    # Agent management
+    "get_agent",
+    "list_agents",
+    "add_agent_policy",
+    "get_agent_policies",
+    "remove_agent_policy_association",
+    "remove_all_agent_policies",
+    "add_agent_control",
+    "remove_agent_control",
+    # Control management
+    "clone_and_bind_control",
+    "create_control",
+    "list_controls",
+    "get_control",
+    "delete_control",
+    "update_control",
+    "validate_control_data",
+    "render_control_template",
+    "to_template_control_input",
+    # Decorator
+    "control",
+    "ControlViolationError",
+    "ControlSteerError",
+    # Client
+    "AgentControlClient",
+    # Operation modules
+    "agents",
+    "policies",
+    "controls",
+    "control_bindings",
+    "evaluation",
+    "evaluators",
+    # Policy-Control management
+    "add_control_to_policy",
+    "remove_control_from_policy",
+    "list_policy_controls",
+    # Local evaluation
+    "check_evaluation_with_local",
+    "evaluate_controls",
+    "evaluate_step",
+    # Step recorder (incremental trace/session Step tree builder)
+    "record_step",
+    "StepRecorder",
+    # Tracing
+    "get_trace_and_span_ids",
+    "get_current_trace_id",
+    "get_current_span_id",
+    "with_trace",
+    "is_otel_available",
+    "set_trace_context_provider",
+    "get_trace_context_from_provider",
+    "clear_trace_context_provider",
+    # Observability
+    "init_observability",
+    "add_event",
+    "write_events",
+    "shutdown_observability",
+    "is_observability_enabled",
+    "control_event_to_otel_span",
+    "get_event_batcher",
+    "get_event_sink",
+    "get_registered_control_event_sink_factory_names",
+    "get_registered_control_event_sinks",
+    "register_control_event_sink",
+    "register_control_event_sink_factory",
+    "unregister_control_event_sink",
+    "unregister_control_event_sink_factory",
+    "configure_logging",
+    "get_log_config",
+    "log_control_evaluation",
+    "LogConfig",
+    # Models (re-exported when available)
+    "Agent",
+    "Step",
+    "JSONObject",
+    "StepSchema",
+    "EvaluationRequest",
+    "EvaluationResult",
+    "ControlDefinition",
+    "TemplateControlInput",
+    "TemplateDefinition",
+    "UnrenderedTemplateControl",
+    "ControlSelector",
+    "ControlScope",
+    "ControlAction",
+    "ControlMatch",
+    "EvaluatorSpec",
+    "EvaluatorResult",
+    "TemplateValue",
+]

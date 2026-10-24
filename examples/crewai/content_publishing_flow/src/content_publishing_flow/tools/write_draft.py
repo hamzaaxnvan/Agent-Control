@@ -25,3 +25,30 @@ async def _write_draft(topic: str, audience: str, content_type: str, research: s
         return (
             f"FOR IMMEDIATE RELEASE\n\n"
             f"{topic}\n\n"
+            f"Company announces major developments in {topic}, "
+            f"targeting {audience}.\n\n"
+            f"Key highlights:\n"
+            f"- New initiatives launched to address industry needs\n"
+            f"- Strategic partnerships formed with leading organizations\n"
+            f"- Measurable impact expected within the first quarter\n\n"
+            f"About the Company:\n"
+            f"We are committed to innovation and excellence in our field.\n"
+        )
+    else:  # internal_memo
+        return (
+            f"INTERNAL MEMO\n\n"
+            f"Subject: {topic}\n"
+            f"Audience: {audience}\n\n"
+            f"Team,\n\n"
+            f"This memo outlines our strategy regarding {topic}. "
+            f"Based on recent research, we recommend the following actions:\n\n"
+            f"1. Allocate resources for pilot program\n"
+            f"2. Form cross-functional task force\n"
+            f"3. Establish KPIs and reporting cadence\n\n"
+            f"Please review and provide feedback by end of week.\n"
+        )
+
+
+_write_draft.name = "write_draft"                      # type: ignore[attr-defined]
+_write_draft.tool_name = "write_draft"                  # type: ignore[attr-defined]
+controlled_write_draft = control()(_write_draft)
