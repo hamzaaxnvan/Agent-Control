@@ -50,3 +50,56 @@ def _config_hash(config: dict[str, Any]) -> str:
 def get_evaluator_instance(evaluator_spec: EvaluatorSpec) -> Evaluator[Any]:
     """Get or create a cached evaluator instance from specification.
 
+    Uses LRU caching to reuse evaluator instances with the same config.
+    Cache key is: {evaluator_name}:{config_hash}
+
+    WARNING: Evaluator instances are cached and reused across requests!
+    Evaluator implementations MUST be stateless - do not store mutable
+    request-scoped state on the evaluator instance. See Evaluator
+    docstring for details on safe patterns.
+
+    Args:
+        evaluator_spec: The evaluator specification with name and config
+
+    Returns:
+        Evaluator instance (cached or new)
+
+    Raises:
+        ValueError: If evaluator not found
+    """
+    # Build cache key
+    cache_key = f"{evaluator_spec.name}:{_config_hash(evaluator_spec.config)}"
+
+    # Check cache
+    if cache_key in _EVALUATOR_CACHE:
+        # Move to end (most recently used)
+        _EVALUATOR_CACHE.move_to_end(cache_key)
+        logger.debug(f"Cache hit for evaluator: {evaluator_spec.name}")
+        return _EVALUATOR_CACHE[cache_key]
+
+    # Cache miss - create new instance
+    evaluators = list_evaluators()
+    evaluator_cls = evaluators.get(evaluator_spec.name)
+
+    if evaluator_cls is None:
+        raise ValueError(
+            f"Evaluator '{evaluator_spec.name}' not found. "
+            f"Available evaluators: {', '.join(evaluators.keys())}"
+        )
+
+    logger.debug(f"Cache miss, creating evaluator: {evaluator_spec.name}")
+    instance = evaluator_cls.from_dict(evaluator_spec.config)
+
+    # Evict oldest if cache is full
+    while len(_EVALUATOR_CACHE) >= EVALUATOR_CACHE_SIZE:
+        evicted_key, _ = _EVALUATOR_CACHE.popitem(last=False)
+        logger.debug(f"Evicted evaluator from cache: {evicted_key}")
+
+    # Cache the instance
+    _EVALUATOR_CACHE[cache_key] = instance
+    return instance
+
+
+def clear_evaluator_cache() -> None:
+    """Clear all cached evaluator instances. Useful for testing."""
+    _EVALUATOR_CACHE.clear()
