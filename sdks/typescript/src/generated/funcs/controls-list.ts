@@ -107,3 +107,113 @@ async function $do(
 > {
   const parsed = safeParse(
     request,
+    (value) =>
+      z.parse(
+        z.optional(
+          operations.ListControlsApiV1ControlsGetRequest$outboundSchema,
+        ),
+        value,
+      ),
+    "Input validation failed",
+  );
+  if (!parsed.ok) {
+    return [parsed, { status: "invalid" }];
+  }
+  const payload = parsed.value;
+  const body = null;
+
+  const path = pathToFunc("/api/v1/controls")();
+
+  const query = encodeFormQuery({
+    "attachment_target_id": payload?.attachment_target_id,
+    "attachment_target_type": payload?.attachment_target_type,
+    "cloned": payload?.cloned,
+    "cursor": payload?.cursor,
+    "enabled": payload?.enabled,
+    "execution": payload?.execution,
+    "include_attachments": payload?.include_attachments,
+    "limit": payload?.limit,
+    "name": payload?.name,
+    "stage": payload?.stage,
+    "step_type": payload?.step_type,
+    "tag": payload?.tag,
+    "template_backed": payload?.template_backed,
+  });
+
+  const headers = new Headers(compactMap({
+    Accept: "application/json",
+  }));
+
+  const secConfig = await extractSecurity(client._options.apiKeyHeader);
+  const securityInput = secConfig == null ? {} : { apiKeyHeader: secConfig };
+  const requestSecurity = resolveGlobalSecurity(securityInput);
+
+  const context = {
+    options: client._options,
+    baseURL: options?.serverURL ?? client._baseURL ?? "",
+    operationID: "list_controls_api_v1_controls_get",
+    oAuth2Scopes: null,
+
+    resolvedSecurity: requestSecurity,
+
+    securitySource: client._options.apiKeyHeader,
+    retryConfig: options?.retries
+      || client._options.retryConfig
+      || { strategy: "none" },
+    retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
+  };
+
+  const requestRes = client._createRequest(context, {
+    security: requestSecurity,
+    method: "GET",
+    baseURL: options?.serverURL,
+    path: path,
+    headers: headers,
+    query: query,
+    body: body,
+    userAgent: client._options.userAgent,
+    timeoutMs: options?.timeoutMs || client._options.timeoutMs || -1,
+  }, options);
+  if (!requestRes.ok) {
+    return [requestRes, { status: "invalid" }];
+  }
+  const req = requestRes.value;
+
+  const doResult = await client._do(req, {
+    context,
+    errorCodes: ["422", "4XX", "5XX"],
+    retryConfig: context.retryConfig,
+    retryCodes: context.retryCodes,
+  });
+  if (!doResult.ok) {
+    return [doResult, { status: "request-error", request: req }];
+  }
+  const response = doResult.value;
+
+  const responseFields = {
+    HttpMeta: { Response: response, Request: req },
+  };
+
+  const [result] = await M.match<
+    models.ListControlsResponse,
+    | errors.HTTPValidationError
+    | AgentControlSDKError
+    | ResponseValidationError
+    | ConnectionError
+    | RequestAbortedError
+    | RequestTimeoutError
+    | InvalidRequestError
+    | UnexpectedClientError
+    | SDKValidationError
+  >(
+    M.json(200, models.ListControlsResponse$inboundSchema),
+    M.jsonErr(422, errors.HTTPValidationError$inboundSchema),
+    M.fail("4XX"),
+    M.fail("5XX"),
+  )(response, req, { extraFields: responseFields });
+  if (!result.ok) {
+    return [result, { status: "complete", request: req, response }];
+  }
+
+  return [result, { status: "complete", request: req, response }];
+}
