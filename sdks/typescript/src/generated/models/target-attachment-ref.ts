@@ -29,3 +29,34 @@ export type TargetAttachmentRef = {
    * Opaque target kind
    */
   targetType: string;
+};
+
+/** @internal */
+export const TargetAttachmentRef$inboundSchema: z.ZodMiniType<
+  TargetAttachmentRef,
+  unknown
+> = z.pipe(
+  z.object({
+    binding_id: types.number(),
+    enabled: types.boolean(),
+    target_id: types.string(),
+    target_type: types.string(),
+  }),
+  z.transform((v) => {
+    return remap$(v, {
+      "binding_id": "bindingId",
+      "target_id": "targetId",
+      "target_type": "targetType",
+    });
+  }),
+);
+
+export function targetAttachmentRefFromJSON(
+  jsonString: string,
+): SafeParseResult<TargetAttachmentRef, SDKValidationError> {
+  return safeParse(
+    jsonString,
+    (x) => TargetAttachmentRef$inboundSchema.parse(JSON.parse(x)),
+    `Failed to parse 'TargetAttachmentRef' from JSON`,
+  );
+}
