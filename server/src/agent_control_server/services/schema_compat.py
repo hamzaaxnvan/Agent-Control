@@ -65,3 +65,70 @@ def check_schema_compatibility(
         prop_path = _prop_path(prop_name)
 
         old_type = _get_type(old_prop)
+        new_type = _get_type(new_prop)
+
+        if old_type != new_type:
+            errors.append(
+                f"Property '{prop_path}' type changed from '{old_type}' to '{new_type}'"
+            )
+        elif old_type == "object":
+            # Recursively check nested object compatibility
+            _, nested_errors = check_schema_compatibility(old_prop, new_prop, prop_path)
+            errors.extend(nested_errors)
+        elif old_type.startswith("array<object>"):
+            # Check array item schema compatibility
+            old_items = old_prop.get("items", {})
+            new_items = new_prop.get("items", {})
+            _, nested_errors = check_schema_compatibility(
+                old_items, new_items, f"{prop_path}[]"
+            )
+            errors.extend(nested_errors)
+
+    # Check for new required properties (breaking)
+    new_required_props = new_required - old_required
+    for prop in new_required_props:
+        prop_path = _prop_path(prop)
+        if prop not in old_props:
+            errors.append(f"Added required property: '{prop_path}'")
+        else:
+            errors.append(f"Property '{prop_path}' changed from optional to required")
+
+    is_compatible = len(errors) == 0
+    return is_compatible, errors
+
+
+def _get_type(prop_schema: dict[str, Any]) -> str:
+    """Extract type from a property schema."""
+    if "type" in prop_schema:
+        t = prop_schema["type"]
+        if t == "array" and "items" in prop_schema:
+            items_type = _get_type(prop_schema["items"])
+            return f"array<{items_type}>"
+        return str(t)
+    if "enum" in prop_schema:
+        return f"enum({len(prop_schema['enum'])})"
+    if "$ref" in prop_schema:
+        return f"$ref:{prop_schema['$ref']}"
+    if "anyOf" in prop_schema:
+        return "anyOf"
+    if "oneOf" in prop_schema:
+        return "oneOf"
+    return "unknown"
+
+
+def format_compatibility_error(evaluator_name: str, errors: list[str]) -> str:
+    """Format a user-friendly error message for incompatible schema change.
+
+    Args:
+        evaluator_name: Name of the evaluator with incompatible change
+        errors: List of specific compatibility errors
+
+    Returns:
+        Formatted error message
+    """
+    error_list = "; ".join(errors)
+    return (
+        f"Evaluator '{evaluator_name}' schema change is not backward compatible. "
+        f"Changes detected: {error_list}. "
+        "To make breaking changes, create a new agent with a different name."
+    )
