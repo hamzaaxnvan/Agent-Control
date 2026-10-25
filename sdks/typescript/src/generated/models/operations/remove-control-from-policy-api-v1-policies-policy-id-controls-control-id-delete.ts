@@ -7,3 +7,43 @@ import { remap as remap$ } from "../../lib/primitives.js";
 
 export type RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest =
   {
+    policyId: number;
+    controlId: number;
+  };
+
+/** @internal */
+export type RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest$Outbound =
+  {
+    policy_id: number;
+    control_id: number;
+  };
+
+/** @internal */
+export const RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest$outboundSchema:
+  z.ZodMiniType<
+    RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest$Outbound,
+    RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest
+  > = z.pipe(
+    z.object({
+      policyId: z.int(),
+      controlId: z.int(),
+    }),
+    z.transform((v) => {
+      return remap$(v, {
+        policyId: "policy_id",
+        controlId: "control_id",
+      });
+    }),
+  );
+
+export function removeControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequestToJSON(
+  removeControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest:
+    RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest,
+): string {
+  return JSON.stringify(
+    RemoveControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest$outboundSchema
+      .parse(
+        removeControlFromPolicyApiV1PoliciesPolicyIdControlsControlIdDeleteRequest,
+      ),
+  );
+}
