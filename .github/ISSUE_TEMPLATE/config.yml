@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a usage question
+    url: https://github.com/hamzaaxnvan/Agent-Control/discussions
+    about: Use discussions for setup and usage questions.
+  - name: Report a vulnerability privately
+    url: https://github.com/hamzaaxnvan/Agent-Control/security/advisories/new
+    about: Security reports are handled privately.
